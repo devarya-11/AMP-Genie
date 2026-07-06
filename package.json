@@ -11,7 +11,7 @@
     "aesthetic": "node tests/aesthetic-fidelity.js",
     "realassets": "node tests/realassets-probe.js",
     "verify": "node tests/single-source.js",
-    "test": "node --test tests/encoding.test.js tests/validator.test.js tests/no-lifecycle.test.js tests/reference.test.js tests/guard.test.js tests/preview-parity.test.js tests/upi.test.js tests/fallback.test.js",
+    "test": "node --test tests/encoding.test.js tests/validator.test.js tests/no-lifecycle.test.js tests/reference.test.js tests/guard.test.js tests/preview-parity.test.js tests/upi.test.js tests/fallback.test.js tests/no-crossbuild-bleed.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {

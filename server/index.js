@@ -17,6 +17,11 @@ const build = require('./build');
 // so server/build.js itself stays reference-agnostic (it takes opts.form +
 // opts.aesthetic and nothing else). reference/ knows server/; not the reverse.
 const { generateWithForm } = require('../reference/integrate');
+// Phase 0 finding (PHASE0_FINDINGS.md): the backward guard was wired into
+// /build-vertical only. /build — the route the web UI actually calls — ran
+// with zero assertion coverage. Wired in below so the UI's real path is
+// covered too, not just the alternate route.
+const { assertNoReferenceLeak, ReferenceLeakError } = require('../reference/assert');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -111,6 +116,12 @@ app.post('/build', async (req, res) => {
     let moduleId = b.moduleId;
     if (!moduleId || moduleId === 'auto') moduleId = build.chooseModule(resolved.brand.vertical, (resolved.brand.name || '') + (b.reroll || 0));
     const built = build.buildProduction({ moduleId, resolved, currency: b.currency, copy: b.copy, reroll: b.reroll, endpoint: b.endpoint, fulfillmentPath: b.fulfillmentPath });
+    // BACKWARD GUARD (previously missing on this route — see PHASE0_FINDINGS.md):
+    // fails loudly if any reference-corpus value survived into this output,
+    // except a value the client's own GenerationContext independently owns.
+    // If no corpus is present locally, loadForbiddenSet's forbidden set is
+    // empty and this is a safe no-op — it does not mask a real leak.
+    await assertNoReferenceLeak(built.ampHtml, { context: built.context });
     const validation = await validate(built.ampHtml);
     res.json({
       ampHtml: built.ampHtml,
