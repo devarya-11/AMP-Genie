@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-06-30T10:51:55.484Z",
+  "total": 6,
+  "counts": {
+    "fashion_apparel": 1,
+    "beauty_cosmetics": 1,
+    "food_bev": 1,
+    "fintech": 1,
+    "travel_hospitality": 1,
+    "luxury": 1
+  },
+  "strength": {
+    "fashion_apparel": "thin",
+    "beauty_cosmetics": "thin",
+    "food_bev": "thin",
+    "fintech": "thin",
+    "travel_hospitality": "thin",
+    "luxury": "thin"
+  }
+}

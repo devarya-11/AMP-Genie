@@ -1,0 +1,259 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Part A — exact same-SKU products across real brands</title>
+<style>
+  :root{--ink:#1c2230;--mut:#6b7280;--line:#e6e8ee}
+  *{box-sizing:border-box} body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:#f4f6f9;padding:28px}
+  h1{font-size:21px;margin:0 0 4px} .sub{color:var(--mut);margin:0 0 16px;max-width:960px}
+  .badges{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px}
+  .badge{font-size:12px;font-weight:700;padding:6px 12px;border-radius:20px}
+  .badge.pass{background:#e8f5e9;color:#1f7a37} .badge.fail{background:#fdecea;color:#b3261e} .badge.note{background:#fff8e1;color:#a16207}
+  section{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 18px 22px;margin:0 0 20px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .brandhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:0 0 10px}
+  .bh-left{display:flex;align-items:center;gap:12px}
+  .brandlogo{height:30px;width:auto;max-width:140px;object-fit:contain;display:block}
+  h2{font-size:16px;margin:0;font-weight:700} h2 small{color:var(--mut);font-weight:500}
+  .how{color:var(--mut);font-size:11.5px;margin-top:2px}
+  .bh-right .sw{display:inline-block;width:18px;height:18px;border-radius:5px;border:1px solid rgba(0,0,0,.08);margin-left:5px;vertical-align:middle}
+  .hdr-badges{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+  .hdr-badge{font-size:11px;font-weight:700;padding:5px 10px;border-radius:18px}
+  .hdr-badge.pass{background:#e8f5e9;color:#1f7a37} .hdr-badge.fail{background:#fdecea;color:#b3261e} .hdr-badge.note{background:#fff8e1;color:#a16207}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:820px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  .card{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;display:flex;flex-direction:column}
+  .imgwrap{aspect-ratio:3/2;background:#eef0f3;overflow:hidden;display:block} .imgwrap img{width:100%;height:100%;object-fit:cover;display:block}
+  figcaption{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px}
+  .pname{font-weight:600;font-size:13px;line-height:1.3} .pprice{color:var(--ink);font-weight:700;font-size:13px} .noprice{color:#9aa0a6;font-weight:500;font-style:italic}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+  .badge.real{background:#e8f5e9;color:#1f7a37} .badge.repr{background:#fff3e0;color:#e65100}
+  .badge{font-size:10px;font-weight:700;letter-spacing:.3px;padding:3px 7px;border-radius:20px;text-transform:uppercase}
+  .tier-brand-site{background:#e3f2fd;color:#1565c0}.tier-web{background:#e8f5e9;color:#2e7d32}.tier-generated{background:#fff3e0;color:#e65100}.tier-user{background:#f3e5f5;color:#6a1b9a}
+  .rights-clear{background:#e8f5e9;color:#2e7d32}.rights-review{background:#fff8e1;color:#a16207}
+  .sku{font-size:10px;color:var(--mut);letter-spacing:.3px}
+  .pdp{font-size:12px;font-weight:600;color:#1565c0;text-decoration:none;margin-top:2px} .nopdp{font-size:11px;color:#9aa0a6;font-style:italic;margin-top:2px}
+  .lic{font-size:10.5px;color:var(--mut);line-height:1.35;margin-top:4px}
+</style></head><body>
+<h1>Part A — every product is the brand's exact SKU (or honestly labelled)</h1>
+<p class="sub">Real pipeline: <b>resolveAssets</b> pulls complete same-SKU records (name + price + official CDN image + product-page link, all from the SAME page); <b>buildProduction</b> renders the email; the <b>real amphtml-validator</b> gates it. Click any image or <b>“View on …”</b> to open the brand's live product page beside the card. Where a brand exposes nothing crawlable (Zomato), the items are <b>category-correct representatives</b>, labelled as such — never passed off as the real SKU.</p>
+<div class="badges"><span class="badge pass">4/4 emails AMP4EMAIL valid · 0 errors</span><span class="badge pass">3/3 brands fully real same-SKU</span><span class="badge note">Zomato: honest fallback — exposes nothing crawlable, labelled representative</span></div>
+
+    <section>
+      <div class="brandhead">
+        <div class="bh-left"><img class="brandlogo" src="https://us.burberry.com/nrws/common/favicon/1024x1024.png" alt="Burberry"><div><h2>Burberry <small>· Fashion · USD · Tap to Reveal Offer</small></h2>
+          <div class="how">homepage → sitemap → PDP JSON-LD</div></div></div>
+        <div class="bh-right"><span class="sw" style="background:#000000" title="primary #000000"></span><span class="sw" style="background:#d5c4a1" title="accent #d5c4a1"></span></div>
+      </div>
+      <div class="hdr-badges"><span class="hdr-badge pass">AMP4EMAIL VALID · 0 errors</span><span class="hdr-badge pass">Part A · 3/3 real same-SKU</span></div>
+      <div class="grid">
+    <figure class="card">
+      <a class="imgwrap" href="https://us.burberry.com/reversible-check-newport-hooded-jacket-p81310011" target="_blank" rel="noopener"><img src="https://assets.burberry.com/is/image/Burberryltd/D85C8EA1-AB7A-430D-A98A-DD16B7B8D7AB?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon</div>
+        <div class="pprice">$1,695</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        <div class="sku">SKU 81310011001</div>
+        <a class="pdp" href="https://us.burberry.com/reversible-check-newport-hooded-jacket-p81310011" target="_blank" rel="noopener">View on us.burberry.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <a class="imgwrap" href="https://us.burberry.com/check-knight-stamp-cotton-t-shirt-p81316081" target="_blank" rel="noopener"><img src="https://assets.burberry.com/is/image/Burberryltd/2A7349A9-5934-4A17-A6E0-1D8DA2159700?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Check Knight Stamp Cotton T-shirt in Black" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">Check Knight Stamp Cotton T-shirt in Black</div>
+        <div class="pprice">$230</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        <div class="sku">SKU 81316081001</div>
+        <a class="pdp" href="https://us.burberry.com/check-knight-stamp-cotton-t-shirt-p81316081" target="_blank" rel="noopener">View on us.burberry.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <a class="imgwrap" href="https://us.burberry.com/check-knight-stamp-cotton-t-shirt-p81316011" target="_blank" rel="noopener"><img src="https://assets.burberry.com/is/image/Burberryltd/EA4C21BD-2E3C-457E-A253-A4E4C852FFDA?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Check Knight Stamp Cotton T-shirt in Bouquet pink" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">Check Knight Stamp Cotton T-shirt in Bouquet pink</div>
+        <div class="pprice">$230</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        <div class="sku">SKU 81316011001</div>
+        <a class="pdp" href="https://us.burberry.com/check-knight-stamp-cotton-t-shirt-p81316011" target="_blank" rel="noopener">View on us.burberry.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure></div>
+    </section>
+
+    <section>
+      <div class="brandhead">
+        <div class="bh-left"><img class="brandlogo" src="https://www.allbirds.com/cdn/shop/files/favicon.png?v=1719584207" alt="Allbirds"><div><h2>Allbirds <small>· Fashion · USD · Wishlist</small></h2>
+          <div class="how">Shopify /products.json</div></div></div>
+        <div class="bh-right"><span class="sw" style="background:#d8c3a5" title="primary #d8c3a5"></span><span class="sw" style="background:#2e2a25" title="accent #2e2a25"></span></div>
+      </div>
+      <div class="hdr-badges"><span class="hdr-badge pass">AMP4EMAIL VALID · 0 errors</span><span class="hdr-badge pass">Part A · 3/3 real same-SKU</span></div>
+      <div class="grid">
+    <figure class="card">
+      <a class="imgwrap" href="https://www.allbirds.com/products/womens-tree-dasher-relay-natural-black-twilight-teal" target="_blank" rel="noopener"><img src="https://cdn.shopify.com/s/files/1/1104/4168/files/A11468_25Q2_Tree_Dasher_Relay_Natural_Black_Twilight_Teal_PDP_LEFT-1000x1000_26727af4-e9fd-4cf0-82b2-771d1bfac1ec.png?v=1781891775&amp;width=600" alt="Women's Tree Dasher Relay - Natural Black (Twilight Teal Sole)" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">Women's Tree Dasher Relay - Natural Black (Twilight Teal Sole)</div>
+        <div class="pprice">$67</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        
+        <a class="pdp" href="https://www.allbirds.com/products/womens-tree-dasher-relay-natural-black-twilight-teal" target="_blank" rel="noopener">View on allbirds.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <a class="imgwrap" href="https://www.allbirds.com/products/womens-wool-runner-up-mizzles-hazy-lime" target="_blank" rel="noopener"><img src="https://cdn.shopify.com/s/files/1/1104/4168/files/AB0075M_SHOE_ANGLE_GLOBAL_MENS_WOOL_RUNNER-UP_MIZZLE2_HAZY_LIME_NATURAL_WHITE_1c239f14-5585-49f7-b202-5533f84e684a.png?v=1781830865&amp;width=600" alt="Women's Wool Runner-up Mizzles - Hazy Lime (Natural White Sole)" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">Women's Wool Runner-up Mizzles - Hazy Lime (Natural White Sole)</div>
+        <div class="pprice">$60</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        
+        <a class="pdp" href="https://www.allbirds.com/products/womens-wool-runner-up-mizzles-hazy-lime" target="_blank" rel="noopener">View on allbirds.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <a class="imgwrap" href="https://www.allbirds.com/products/womens-wool-runner-up-mizzles-hazy-indigo" target="_blank" rel="noopener"><img src="https://cdn.shopify.com/s/files/1/1104/4168/files/AB0074M_SHOE_LEFT_GLOBAL_MENS_WOOL_RUNNER-UP_MIZZLE2_HAZY_INDIGO_RUGGED_KHAKI_9542e175-df7f-4dca-9092-29289041b8cc.png?v=1781829612&amp;width=600" alt="Women's Wool Runner-up Mizzle - Hazy Indigo (Hazy Indigo Sole)" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">Women's Wool Runner-up Mizzle - Hazy Indigo (Hazy Indigo Sole)</div>
+        <div class="pprice">$60</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        
+        <a class="pdp" href="https://www.allbirds.com/products/womens-wool-runner-up-mizzles-hazy-indigo" target="_blank" rel="noopener">View on allbirds.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure></div>
+    </section>
+
+    <section>
+      <div class="brandhead">
+        <div class="bh-left"><img class="brandlogo" src="https://www.glossier.com/cdn/shop/files/favicon-light_180x180.webp?v=1681821719" alt="Glossier"><div><h2>Glossier <small>· Beauty · USD · Wishlist</small></h2>
+          <div class="how">Shopify /products.json</div></div></div>
+        <div class="bh-right"><span class="sw" style="background:#5eb234" title="primary #5eb234"></span><span class="sw" style="background:#23c338" title="accent #23c338"></span></div>
+      </div>
+      <div class="hdr-badges"><span class="hdr-badge pass">AMP4EMAIL VALID · 0 errors</span><span class="hdr-badge pass">Part A · 3/3 real same-SKU</span></div>
+      <div class="grid">
+    <figure class="card">
+      <a class="imgwrap" href="https://www.glossier.com/products/boy-brow-duo" target="_blank" rel="noopener"><img src="https://cdn.shopify.com/s/files/1/0627/9164/7477/files/glossier-boy-brow-duo-set-carousel-01.png?v=1782217779&amp;width=600" alt="Boy Brow Duo" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">Boy Brow Duo</div>
+        <div class="pprice">$37</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        
+        <a class="pdp" href="https://www.glossier.com/products/boy-brow-duo" target="_blank" rel="noopener">View on glossier.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <a class="imgwrap" href="https://www.glossier.com/products/the-no-makeup-makeup-kit" target="_blank" rel="noopener"><img src="https://cdn.shopify.com/s/files/1/0627/9164/7477/files/glossier-nomakeupmakeup-carousel-01.png?v=1782223725&amp;width=600" alt="The No-Makeup Makeup Kit" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">The No-Makeup Makeup Kit</div>
+        <div class="pprice">$54</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        
+        <a class="pdp" href="https://www.glossier.com/products/the-no-makeup-makeup-kit" target="_blank" rel="noopener">View on glossier.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <a class="imgwrap" href="https://www.glossier.com/products/the-face-kit" target="_blank" rel="noopener"><img src="https://cdn.shopify.com/s/files/1/0627/9164/7477/files/glossier-pst-concealer-carousel-01_0dba3ecc-7ff7-4fbe-8bca-35014f8ab94b.png?v=1762200597&amp;width=600" alt="The Face Kit" loading="lazy"></a>
+      <figcaption>
+        <div class="pname">The Face Kit</div>
+        <div class="pprice">$47</div>
+        <div class="badges">
+          <span class="badge real">real same-SKU</span>
+          <span class="badge tier tier-brand-site">brand-site</span>
+          <span class="badge rights rights-clear">clear</span>
+        </div>
+        
+        <a class="pdp" href="https://www.glossier.com/products/the-face-kit" target="_blank" rel="noopener">View on glossier.com &rarr;</a>
+        <div class="lic">First-party</div>
+      </figcaption>
+    </figure></div>
+    </section>
+
+    <section>
+      <div class="brandhead">
+        <div class="bh-left"><img class="brandlogo" src="https://b.zmtcdn.com/images/square_zomato_logo_new.svg" alt="Zomato"><div><h2>Zomato <small>· Food · INR · Spin the Wheel</small></h2>
+          <div class="how">JS-gated — no JSON-LD / no products.json</div></div></div>
+        <div class="bh-right"><span class="sw" style="background:#e23744" title="primary #e23744"></span><span class="sw" style="background:#1c1c1c" title="accent #1c1c1c"></span></div>
+      </div>
+      <div class="hdr-badges"><span class="hdr-badge pass">AMP4EMAIL VALID · 0 errors</span><span class="hdr-badge note">honest fallback · 0/3 real (JS-gated — no JSON-LD / no products.json)</span></div>
+      <div class="grid">
+    <figure class="card">
+      <div class="imgwrap"><img src="https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=600&amp;h=400&amp;fit=crop&amp;crop=entropy&amp;q=72" alt="Wood-Fired Margherita" loading="lazy"></div>
+      <figcaption>
+        <div class="pname">Wood-Fired Margherita</div>
+        <div class="pprice">&#8377;329</div>
+        <div class="badges">
+          <span class="badge repr">representative</span>
+          <span class="badge tier tier-web">web</span>
+          <span class="badge rights rights-review">review</span>
+        </div>
+        
+        <span class="nopdp">no public product page</span>
+        <div class="lic">Open-web stock</div>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <div class="imgwrap"><img src="https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=600&amp;h=400&amp;fit=crop&amp;crop=entropy&amp;q=72" alt="Butter Chicken &amp; Naan" loading="lazy"></div>
+      <figcaption>
+        <div class="pname">Butter Chicken &amp; Naan</div>
+        <div class="pprice">&#8377;349</div>
+        <div class="badges">
+          <span class="badge repr">representative</span>
+          <span class="badge tier tier-web">web</span>
+          <span class="badge rights rights-review">review</span>
+        </div>
+        
+        <span class="nopdp">no public product page</span>
+        <div class="lic">Open-web stock</div>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <div class="imgwrap"><img src="https://images.unsplash.com/photo-1626645738196-c2a7c87a8f58?w=600&amp;h=400&amp;fit=crop&amp;crop=entropy&amp;q=72" alt="Korean Fried Chicken" loading="lazy"></div>
+      <figcaption>
+        <div class="pname">Korean Fried Chicken</div>
+        <div class="pprice">&#8377;399</div>
+        <div class="badges">
+          <span class="badge repr">representative</span>
+          <span class="badge tier tier-web">web</span>
+          <span class="badge rights rights-review">review</span>
+        </div>
+        
+        <span class="nopdp">no public product page</span>
+        <div class="lic">Open-web stock</div>
+      </figcaption>
+    </figure></div>
+    </section>
+</body></html>

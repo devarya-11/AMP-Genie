@@ -1,0 +1,292 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Part A + C — real Burberry product in a complete wishlist flow</title>
+<style>
+  :root{--ink:#1d1d2b;--mut:#6b7280;--line:#e6e8ee;--brand:#000000;--accent:#d5c4a1;--tint:#e6e6e6}
+  *{box-sizing:border-box} body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:#f4f6f9;padding:28px}
+  h1{font-size:21px;margin:0 0 4px} .sub{color:var(--mut);margin:0 0 16px;max-width:880px}
+  .badges{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px}
+  .badge{font-size:12px;font-weight:700;padding:6px 12px;border-radius:20px}
+  .badge.pass{background:#e8f5e9;color:#1f7a37} .badge.fail{background:#fdecea;color:#b3261e}
+  section{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 18px 22px;margin:0 0 20px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  h2{font-size:15px;margin:0 0 4px} h2 small{color:var(--mut);font-weight:400}
+  .secsub{color:var(--mut);margin:2px 0 16px;font-size:13px}
+  /* provenance table */
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--mut)}
+  td.pn a{color:var(--brand);font-weight:600;text-decoration:none} td.img a{color:var(--mut);text-decoration:none;font-size:11px}
+  .muted{color:#9aa0a6} .ok{color:#1f7a37;font-weight:700}
+  .tier,.rights{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;text-transform:uppercase}
+  .tier-brand-site{background:#e3f2fd;color:#1565c0}.tier-web{background:#e8f5e9;color:#2e7d32}.tier-generated{background:#fff3e0;color:#e65100}.tier-user{background:#f3e5f5;color:#6a1b9a}
+  .rights-clear{background:#e8f5e9;color:#2e7d32}.rights-review{background:#fff8e1;color:#a16207}
+  /* live email */
+  .ampframe{width:100%;max-width:620px;height:1180px;border:1px solid var(--line);border-radius:12px;background:#fff;display:block}
+  /* storyboard */
+  .flow{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+  @media(max-width:1180px){.flow{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:640px){.flow{grid-template-columns:1fr}}
+  .panel{margin:0}
+  figcaption{display:flex;align-items:baseline;gap:7px;margin:0 0 8px;flex-wrap:wrap}
+  .step{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--brand);color:#ffffff;font-size:11px;font-weight:700;flex:none}
+  .plabel{font-weight:700;font-size:13px} .pcap{color:var(--mut);font-size:11px;flex-basis:100%;margin-left:27px;line-height:1.4}
+  .device{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff;display:flex;flex-direction:column;min-height:430px}
+  .ehead{padding:12px 14px 6px;border-bottom:3px solid var(--brand)} .elogo{height:22px;width:auto;display:block;object-fit:contain}
+  .etitle{font-family:Georgia,'Times New Roman',serif;font-size:14px;letter-spacing:.04em;color:var(--brand);padding:12px 14px 4px;font-weight:600}
+  .ebody{padding:6px 12px 12px;flex:1}
+  .efoot{padding:10px 14px;background:#000000;color:#ffffff;font-size:10.5px;text-align:center}
+  .wl-item{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:8px;margin:0 0 8px}
+  .wl-item.dim{opacity:.5}
+  .thumb{width:54px;height:54px;border-radius:7px;overflow:hidden;background:#eef0f3;flex:none}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .meta{flex:1;min-width:0} .pname{font-weight:600;font-size:12px;line-height:1.3}
+  .pprice{font-weight:700;font-size:12px;color:var(--brand);margin-top:2px}
+  .ponsite{color:var(--brand);font-weight:600;font-size:11px;text-decoration:none;margin-top:2px;display:inline-block}
+  .prov{font-size:9.5px;color:var(--mut);margin-top:3px;text-transform:uppercase;letter-spacing:.3px}
+  .act{flex:none} .wbtn{display:inline-block;padding:6px 11px;border:1px solid var(--accent);color:var(--accent);border-radius:20px;font-weight:700;font-size:11px;white-space:nowrap}
+  .wbtn.on{background:var(--accent);color:#1a1a1a}
+  .wl-summary{text-align:center;font-size:12px;color:var(--mut);margin:8px 0 0}
+  .hint{font-size:11.5px;color:var(--mut);text-align:center;margin:8px 0 0}
+  .btnrow{text-align:center;margin-top:12px}
+  .interest-btn{border:0;background:var(--brand);color:#ffffff;border-radius:6px;padding:11px 20px;font-size:13px;font-weight:700;letter-spacing:.3px;cursor:pointer}
+  .loader{display:flex;align-items:center;justify-content:center;gap:9px;padding:24px 0;color:var(--mut);font-size:12.5px}
+  .spin{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;display:inline-block;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .wl-success{text-align:center;padding:18px 12px;border:1px solid var(--line);border-radius:12px;background:var(--tint)}
+  .wl-tick{font-size:30px;color:var(--brand);line-height:1} .thanks{font-weight:700;font-size:14px;margin:6px 0 0;color:var(--ink)}
+  .subnote{font-size:11px;color:var(--mut);margin:6px 0 0;line-height:1.4}
+  .wl-cta{display:inline-block;margin-top:12px;padding:10px 20px;border-radius:6px;background:var(--brand);color:#ffffff;font-weight:700;font-size:12px;text-decoration:none}
+  .errbox{margin-top:10px;text-align:center} .errmsg{color:#d23b3b;font-weight:600;font-size:12px;margin:0}
+</style></head><body>
+<h1>Part A + Part C — a real Burberry product in a complete wishlist flow</h1>
+<p class="sub">Real pipeline: <b>resolveAssets</b> crawled Burberry's sitemap → product-detail pages and pulled <b>exact same-SKU</b> records (name + official Scene7 image + product-page link from the SAME page); <b>buildProduction</b> rendered the wishlist; the <b>real amphtml-validator</b> gated it. The wishlist is no longer a dead toggle — it is a full <b>select → submit → submitting → thank-you → error+retry</b> amp-form cycle that posts the selected SKUs with tracking inputs and merge tokens.</p>
+<div class="badges"><span class="badge pass">AMP4EMAIL VALID · 0 errors</span><span class="badge pass">Part A · 3/3 real same-SKU products</span></div>
+
+<section>
+  <h2>Part A — exact products from Burberry <small>· every row is one real SKU; name, price, image and link all belong to it</small></h2>
+  <p class="secsub">Where Burberry's product page exposes no price (some PDPs list only availability), we show an honest <b>“on site”</b> link instead of inventing one — we never pass a fabricated price off as the real SKU.</p>
+  <table>
+    <tr><th>#</th><th>Product (→ real PDP)</th><th>Price</th><th>Source</th><th>Tier</th><th>Rights</th><th>Official image</th></tr>
+    
+    <tr>
+      <td>0</td>
+      <td class="pn"><a href="https://us.burberry.com/reversible-check-newport-hooded-jacket-p81310011" target="_blank" rel="noopener">Reversible Check Newport Hooded Jacket in Sand beig…</a></td>
+      <td>$1,695</td>
+      <td><span class="ok">real</span></td>
+      <td><span class="tier tier-brand-site">brand-site</span></td>
+      <td><span class="rights rights-clear">clear</span></td>
+      <td class="img"><a href="https://assets.burberry.com/is/image/Burberryltd/D85C8EA1-AB7A-430D-A98A-DD16B7B8D7AB?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" target="_blank" rel="noopener">assets.burberry.com/is/image/Burberry…</a></td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td class="pn"><a href="https://us.burberry.com/mini-check-barrel-bag-p81317361" target="_blank" rel="noopener">Mini Check Barrel Bag in Archive beige - Women</a></td>
+      <td>$995</td>
+      <td><span class="ok">real</span></td>
+      <td><span class="tier tier-brand-site">brand-site</span></td>
+      <td><span class="rights rights-clear">clear</span></td>
+      <td class="img"><a href="https://assets.burberry.com/is/image/Burberryltd/1A5CCBD0-461C-4E5A-9445-5767D07F606D?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" target="_blank" rel="noopener">assets.burberry.com/is/image/Burberry…</a></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td class="pn"><a href="https://us.burberry.com/check-quilted-cotton-twill-jacket-p81223271" target="_blank" rel="noopener">Check Quilted Cotton Twill Jacket in Flax beige - W…</a></td>
+      <td>$975</td>
+      <td><span class="ok">real</span></td>
+      <td><span class="tier tier-brand-site">brand-site</span></td>
+      <td><span class="rights rights-clear">clear</span></td>
+      <td class="img"><a href="https://assets.burberry.com/is/image/Burberryltd/CCAE4C88-97FE-4652-87A7-753CC0692D43?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" target="_blank" rel="noopener">assets.burberry.com/is/image/Burberry…</a></td>
+    </tr>
+  </table>
+</section>
+
+<section>
+  <h2>The complete flow <small>· five states, the same real products throughout</small></h2>
+  <p class="secsub">Faithful static renders of the live amp-bind / amp-form states the email ships.</p>
+  <div class="flow">
+    <figure class="panel">
+      <figcaption><span class="step">1</span><span class="plabel">Initial state</span><span class="pcap">Real products, every Save button live.</span></figcaption>
+      <div class="device">
+        <div class="ehead"><img class="elogo" src="https://us.burberry.com/nrws/common/favicon/1024x1024.png" alt="Burberry"></div>
+        <div class="etitle">Save your favourites for later</div>
+        <div class="ebody">
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/D85C8EA1-AB7A-430D-A98A-DD16B7B8D7AB?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Reversible Check Newport Hooded Jacket in San…</div>
+        <div class="pprice">$1,695</div>
+        <div class="prov">real SKU · brand-site · 81310011001</div>
+      </div>
+      <div class="act"><span class="wbtn">+ Save</span></div>
+    </div>
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/1A5CCBD0-461C-4E5A-9445-5767D07F606D?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Mini Check Barrel Bag in Archive beige - Women" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Mini Check Barrel Bag in Archive beige - Women</div>
+        <div class="pprice">$995</div>
+        <div class="prov">real SKU · brand-site · 81317361</div>
+      </div>
+      <div class="act"><span class="wbtn">+ Save</span></div>
+    </div>
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/CCAE4C88-97FE-4652-87A7-753CC0692D43?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Check Quilted Cotton Twill Jacket in Flax beige - Women" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Check Quilted Cotton Twill Jacket in Flax bei…</div>
+        <div class="pprice">$975</div>
+        <div class="prov">real SKU · brand-site · 81223271001</div>
+      </div>
+      <div class="act"><span class="wbtn">+ Save</span></div>
+    </div><p class="wl-summary">0 item(s) selected</p><p class="hint">Tap <b>+ Save</b> on an item to add it to your wishlist.</p></div>
+        <div class="efoot">Your wishlist syncs to your Burberry account.</div>
+      </div>
+    </figure>
+    <figure class="panel">
+      <figcaption><span class="step">2</span><span class="plabel">Selected</span><span class="pcap">amp-bind [class]/[text] toggle the chip + count; submit appears.</span></figcaption>
+      <div class="device">
+        <div class="ehead"><img class="elogo" src="https://us.burberry.com/nrws/common/favicon/1024x1024.png" alt="Burberry"></div>
+        <div class="etitle">Save your favourites for later</div>
+        <div class="ebody">
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/D85C8EA1-AB7A-430D-A98A-DD16B7B8D7AB?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Reversible Check Newport Hooded Jacket in San…</div>
+        <div class="pprice">$1,695</div>
+        <div class="prov">real SKU · brand-site · 81310011001</div>
+      </div>
+      <div class="act"><span class="wbtn on">✓ Saved</span></div>
+    </div>
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/1A5CCBD0-461C-4E5A-9445-5767D07F606D?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Mini Check Barrel Bag in Archive beige - Women" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Mini Check Barrel Bag in Archive beige - Women</div>
+        <div class="pprice">$995</div>
+        <div class="prov">real SKU · brand-site · 81317361</div>
+      </div>
+      <div class="act"><span class="wbtn on">✓ Saved</span></div>
+    </div>
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/CCAE4C88-97FE-4652-87A7-753CC0692D43?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Check Quilted Cotton Twill Jacket in Flax beige - Women" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Check Quilted Cotton Twill Jacket in Flax bei…</div>
+        <div class="pprice">$975</div>
+        <div class="prov">real SKU · brand-site · 81223271001</div>
+      </div>
+      <div class="act"><span class="wbtn">+ Save</span></div>
+    </div><p class="wl-summary">2 item(s) selected</p><div class="btnrow"><button class="interest-btn" type="button">Save 2 to my wishlist</button></div></div>
+        <div class="efoot">Your wishlist syncs to your Burberry account.</div>
+      </div>
+    </figure>
+    <figure class="panel">
+      <figcaption><span class="step">3</span><span class="plabel">Submitting</span><span class="pcap">amp-form action-xhr posts the selected SKUs + tracking inputs.</span></figcaption>
+      <div class="device">
+        <div class="ehead"><img class="elogo" src="https://us.burberry.com/nrws/common/favicon/1024x1024.png" alt="Burberry"></div>
+        <div class="etitle">Save your favourites for later</div>
+        <div class="ebody">
+    <div class="wl-item dim">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/D85C8EA1-AB7A-430D-A98A-DD16B7B8D7AB?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Reversible Check Newport Hooded Jacket in San…</div>
+        <div class="pprice">$1,695</div>
+        <div class="prov">real SKU · brand-site · 81310011001</div>
+      </div>
+      <div class="act"><span class="wbtn on">✓ Saved</span></div>
+    </div>
+    <div class="wl-item dim">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/1A5CCBD0-461C-4E5A-9445-5767D07F606D?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Mini Check Barrel Bag in Archive beige - Women" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Mini Check Barrel Bag in Archive beige - Women</div>
+        <div class="pprice">$995</div>
+        <div class="prov">real SKU · brand-site · 81317361</div>
+      </div>
+      <div class="act"><span class="wbtn on">✓ Saved</span></div>
+    </div>
+    <div class="wl-item dim">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/CCAE4C88-97FE-4652-87A7-753CC0692D43?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Check Quilted Cotton Twill Jacket in Flax beige - Women" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Check Quilted Cotton Twill Jacket in Flax bei…</div>
+        <div class="pprice">$975</div>
+        <div class="prov">real SKU · brand-site · 81223271001</div>
+      </div>
+      <div class="act"><span class="wbtn">+ Save</span></div>
+    </div><div class="loader"><span class="spin"></span><span>Saving your wishlist&hellip;</span></div></div>
+        <div class="efoot">Your wishlist syncs to your Burberry account.</div>
+      </div>
+    </figure>
+    <figure class="panel">
+      <figcaption><span class="step">4</span><span class="plabel">Success / thank-you</span><span class="pcap">submit-success → confirmation, count + deep-linked CTA.</span></figcaption>
+      <div class="device">
+        <div class="ehead"><img class="elogo" src="https://us.burberry.com/nrws/common/favicon/1024x1024.png" alt="Burberry"></div>
+        <div class="etitle">Save your favourites for later</div>
+        <div class="ebody"><div class="wl-success">
+       <div class="wl-tick">&#10003;</div>
+       <p class="thanks">Saved! <b>2</b> item(s) added to your wishlist.</p>
+       <p class="subnote">We&rsquo;ll email you if anything you saved drops in price or is running low.</p>
+       <a class="wl-cta" href="https://us.burberry.com/wishlist" target="_blank" rel="noopener">View my wishlist</a>
+     </div></div>
+        <div class="efoot">Your wishlist syncs to your Burberry account.</div>
+      </div>
+    </figure>
+    <figure class="panel">
+      <figcaption><span class="step">5</span><span class="plabel">Error + retry</span><span class="pcap">submit-error → message; selection preserved so the user can retry.</span></figcaption>
+      <div class="device">
+        <div class="ehead"><img class="elogo" src="https://us.burberry.com/nrws/common/favicon/1024x1024.png" alt="Burberry"></div>
+        <div class="etitle">Save your favourites for later</div>
+        <div class="ebody">
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/D85C8EA1-AB7A-430D-A98A-DD16B7B8D7AB?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Reversible Check Newport Hooded Jacket in San…</div>
+        <div class="pprice">$1,695</div>
+        <div class="prov">real SKU · brand-site · 81310011001</div>
+      </div>
+      <div class="act"><span class="wbtn on">✓ Saved</span></div>
+    </div>
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/1A5CCBD0-461C-4E5A-9445-5767D07F606D?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Mini Check Barrel Bag in Archive beige - Women" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Mini Check Barrel Bag in Archive beige - Women</div>
+        <div class="pprice">$995</div>
+        <div class="prov">real SKU · brand-site · 81317361</div>
+      </div>
+      <div class="act"><span class="wbtn on">✓ Saved</span></div>
+    </div>
+    <div class="wl-item">
+      <div class="thumb"><img src="https://assets.burberry.com/is/image/Burberryltd/CCAE4C88-97FE-4652-87A7-753CC0692D43?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85" alt="Check Quilted Cotton Twill Jacket in Flax beige - Women" loading="lazy"></div>
+      <div class="meta">
+        <div class="pname">Check Quilted Cotton Twill Jacket in Flax bei…</div>
+        <div class="pprice">$975</div>
+        <div class="prov">real SKU · brand-site · 81223271001</div>
+      </div>
+      <div class="act"><span class="wbtn">+ Save</span></div>
+    </div><p class="wl-summary">2 item(s) selected</p><div class="errbox"><p class="errmsg">We couldn&rsquo;t save your wishlist. Please try again.</p>
+       <p class="hint">Your selection is still here &mdash; tap the button to retry.</p></div><div class="btnrow"><button class="interest-btn" type="button">Save 2 to my wishlist</button></div></div>
+        <div class="efoot">Your wishlist syncs to your Burberry account.</div>
+      </div>
+    </figure></div>
+</section>
+
+<section>
+  <h2>Live interactive email <small>· this is the validated AMP, running</small></h2>
+  <p class="secsub">Click <b>+ Save</b> on a product — the chip flips to “✓ Saved”, the count updates and the <b>Save N to my wishlist</b> button appears (real amp-bind). Submitting posts to the configured <code>action-xhr</code> endpoint; with no backend wired it surfaces the error state, exactly as designed.</p>
+  <iframe class="ampframe" srcdoc="&lt;!doctype html&gt;
+&lt;html ⚡4email data-css-strict&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;script async src=&quot;https://cdn.ampproject.org/v0.js&quot;&gt;&lt;/script&gt;
+&lt;meta content=&quot;default-src * data: blob:; script-src blob: https://cdn.ampproject.org/v0.js https://cdn.ampproject.org/v0/ https://cdn.ampproject.org/viewer/ https://cdn.ampproject.org/rtv/; object-src 'none'; style-src 'unsafe-inline' https://cdn.ampproject.org/rtv/ https://cdn.materialdesignicons.com https://cloud.typography.com https://fonts.gstatic.com https://fonts.googleapis.com/css2?family=Playfair Display:wght@400;500;600;700&amp;display=swap&quot;&gt;
+&lt;script async custom-element=&quot;amp-bind&quot; src=&quot;https://cdn.ampproject.org/v0/amp-bind-0.1.js&quot;&gt;&lt;/script&gt;
+&lt;script async custom-element=&quot;amp-form&quot; src=&quot;https://cdn.ampproject.org/v0/amp-form-0.1.js&quot;&gt;&lt;/script&gt;
+&lt;script async custom-element=&quot;amp-list&quot; src=&quot;https://cdn.ampproject.org/v0/amp-list-0.1.js&quot;&gt;&lt;/script&gt;
+&lt;script async custom-template=&quot;amp-mustache&quot; src=&quot;https://cdn.ampproject.org/v0/amp-mustache-0.2.js&quot;&gt;&lt;/script&gt;
+&lt;style amp4email-boilerplate&gt;body{visibility:hidden}&lt;/style&gt;
+&lt;style amp-custom&gt;body{margin:0;padding:0;background:#eef0f3;}table{border-collapse:collapse;}img{border:0;display:block;}.outer{background:#eef0f3;}.outercell{padding:18px 12px;}.w600{width:100%;max-width:600px;background:#ffffff;font-family:Georgia, &quot;Times New Roman&quot;, serif;color:#1d1d2b;}.head{background:#000000;padding:28px 24px;text-align:center;}.h1{margin:0;font-size:18px;line-height:1.35;color:#ffffff;font-weight:normal;letter-spacing:0.2em;text-transform:uppercase;font-family:Georgia, &quot;Times New Roman&quot;, serif;}.pad{padding:36px 30px;}.center{text-align:center;}.foot{padding:28px 30px;border-top:1px solid #e6e6ec;color:#9aa0a6;font-size:11px;line-height:1.7;text-align:center;}.btn{display:inline-block;background:#000000;color:#ffffff;border:0;text-decoration:none;padding:15px 34px;border-radius:0;font-weight:normal;font-size:14px;letter-spacing:0.18em;text-transform:uppercase;cursor:pointer;font-family:Georgia, &quot;Times New Roman&quot;, serif;}.btnA{background:#d5c4a1;color:#1a1a1a;border:0;}.code{display:inline-block;border:1px solid #e6e6ec;color:#1d1d2b;letter-spacing:5px;border-radius:0;font-weight:bold;padding:9px 18px;font-size:18px;}.db{display:block;}.dn{display:none;}.rel{position:relative;}.lead{font-size:26px;font-weight:normal;color:#000000;margin:0 0 6px;letter-spacing:0.06em;}.logobox{display:inline-block;background:#ffffff;border-radius:6px;padding:7px 12px;margin:0 0 14px;line-height:0;}.logobox img{object-fit:contain;}.sub{color:#6b6b7b;font-size:13px;margin:0;line-height:1.6;}.pcell{padding:6px;}.pname{font-size:13px;font-weight:bold;margin:8px 0 2px;color:#1d1d2b;}.pprice{font-size:14px;font-weight:bold;color:#000000;}.soc{color:#9aa0a6;text-decoration:none;font-weight:bold;}.dot{color:#c4c4cc;margin:0 7px;}.socrow{margin:0 0 9px;}.fmsg{margin:0 0 7px;}.fcopy{margin:0 0 4px;color:#b6b6c0;}.funsub{margin:2px 0 0;}body{margin:0;padding:0;background:#eef0f3;}table{border-collapse:collapse;}td{padding:0;}img{border:0;outline:none;text-decoration:none;display:block;}a{text-decoration:none;}body,table,td,p,div,span,a{font-family:'Playfair Display', Georgia, 'Times New Roman', serif;}.outer{background:#eef0f3;}.outercell{padding:18px 12px;}.w600{width:600px;background:#ffffff;color:#1d1d2b;}.deviceWidth{width:100%;}.displayNone{display:none;}.displayBlock{display:block;}.center{text-align:center;}.top-line{height:4px;line-height:4px;font-size:0;background:#000000;}.greet{padding:16px 24px 0;font-size:14px;color:#1d1d2b;font-weight:500;}.heading{margin:0;padding:6px 24px 2px;font-size:18px;line-height:1.3;font-weight:normal;color:#000000;letter-spacing:0.2em;text-transform:uppercase;}.sub-heading{margin:0;padding:4px 24px 0;font-size:14px;line-height:1.6;color:#5a5a5a;}.min-pad{padding:14px 24px;}.sec-pad{padding:18px 24px;}.icon-cell{padding:10px 6px;text-align:center;vertical-align:top;}.icon-text{margin:8px 0 0;font-size:12px;line-height:1.45;color:#5a5a5a;}.cta-wrap{padding:18px 24px;text-align:center;}.cta-img{display:block;width:100%;height:auto;cursor:pointer;}.form-wrap{padding:6px 24px 22px;}.form-title{margin:0 0 10px;font-size:18px;font-weight:600;color:#000000;text-align:center;}label{display:block;font-size:13px;font-weight:600;color:#5a5a5a;margin:8px 0 4px;}.form-control{box-sizing:border-box;width:100%;height:42px;padding:8px 12px;border:0;border-radius:6px;background:#e6e6e6;font-size:14px;color:#1d1d2b;}.field-half{width:50%;vertical-align:top;}.err{font-size:12px;color:#d23b3b;margin:4px 0 0;}.interest-btn{display:inline-block;border:0;background:#000000;color:#ffffff;border-radius:6px;padding:12px 30px;font-size:15px;font-weight:600;letter-spacing:.4px;cursor:pointer;}.thanks{padding:22px;text-align:center;font-size:16px;font-weight:600;color:#000000;}.loader{text-align:center;padding:10px 0;}.pcell{padding:8px;vertical-align:top;}.pname{margin:8px 0 2px;font-size:13px;font-weight:600;color:#1d1d2b;line-height:1.35;}.pprice{margin:0;font-size:14px;font-weight:700;color:#000000;}.promo{padding:16px 24px;background:#e6e6e6;text-align:center;}.promo-h{margin:0 0 4px;font-size:16px;font-weight:700;color:#000000;}.promo-s{margin:0;font-size:13px;color:#5a5a5a;}.foot{padding:20px 24px;background:#000000;color:#ffffff;text-align:center;}.foot a{color:#ffffff;}.foot-site{font-size:13px;font-weight:600;margin:0 0 8px;}.foot-follow{font-size:12px;margin:0 0 8px;}.soc-cell{padding:0 5px;}.foot-legal{font-size:11px;line-height:1.6;color:rgba(255,255,255,.78);margin:10px 0 0;}.foot-unsub{font-size:11px;color:rgba(255,255,255,.78);margin:6px 0 0;}.db{display:block;}.dn{display:none;}.rel{position:relative;}@media all and (max-width:500px){.w600{width:100%;}.heading{font-size:5vw;padding:6px 5vw 2px;}.sub-heading{padding:4px 5vw 0;}.greet{padding:14px 5vw 0;}.min-pad{padding:14px 5vw;}.sec-pad{padding:16px 5vw;}.cta-wrap{padding:16px 5vw;}.form-wrap{padding:6px 5vw 20px;}.field-half{display:block;width:100%;}}.wl-item{border:1px solid #e6e6ec;border-radius:12px;padding:10px;margin:0 0 10px;}amp-img img{object-fit:cover;}.wbtn{display:inline-block;padding:8px 15px;border:1px solid #d5c4a1;color:#d5c4a1;border-radius:22px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;}.wbtn.on{background:#d5c4a1;color:#1a1a1a;}.ponsite{color:#000000;font-weight:600;font-size:12px;text-decoration:none;}.wl-summary{font-size:13px;color:#5a5a5a;margin:8px 0 0;}.wl-success{padding:20px;border:1px solid #e6e6ec;border-radius:14px;background:#e6e6e6;}.wl-tick{font-size:32px;line-height:1;margin:0 0 6px;color:#000000;}.wl-cta{display:inline-block;margin-top:12px;padding:11px 24px;border-radius:8px;background:#000000;color:#ffffff;font-weight:700;font-size:14px;}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;amp-state id=&quot;g&quot;&gt;&lt;script type=&quot;application/json&quot;&gt;{&quot;wa&quot;:false,&quot;wb&quot;:false,&quot;wc&quot;:false}&lt;/script&gt;&lt;/amp-state&gt;
+&lt;div class=&quot;displayBlock&quot; style=&quot;opacity:0;height:1px;width:1px;overflow:hidden;line-height:0;font-size:0;&quot;&gt;&lt;amp-img src=&quot;https://us.burberry.com/nrws/common/favicon/1024x1024.png&quot; width=&quot;1&quot; height=&quot;1&quot; layout=&quot;fixed&quot; alt=&quot;&quot;&gt;&lt;/amp-img&gt;&lt;amp-img src=&quot;https://assets.burberry.com/is/image/Burberryltd/D85C8EA1-AB7A-430D-A98A-DD16B7B8D7AB?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85&quot; width=&quot;1&quot; height=&quot;1&quot; layout=&quot;fixed&quot; alt=&quot;&quot;&gt;&lt;/amp-img&gt;&lt;amp-img src=&quot;https://assets.burberry.com/is/image/Burberryltd/1A5CCBD0-461C-4E5A-9445-5767D07F606D?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85&quot; width=&quot;1&quot; height=&quot;1&quot; layout=&quot;fixed&quot; alt=&quot;&quot;&gt;&lt;/amp-img&gt;&lt;amp-img src=&quot;https://assets.burberry.com/is/image/Burberryltd/CCAE4C88-97FE-4652-87A7-753CC0692D43?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85&quot; width=&quot;1&quot; height=&quot;1&quot; layout=&quot;fixed&quot; alt=&quot;&quot;&gt;&lt;/amp-img&gt;&lt;amp-img src=&quot;https://placehold.co/360x64/d5c4a1/000000?text=Discover+the+collection&quot; width=&quot;1&quot; height=&quot;1&quot; layout=&quot;fixed&quot; alt=&quot;&quot;&gt;&lt;/amp-img&gt;&lt;/div&gt;
+&lt;amp-list width=&quot;1&quot; height=&quot;1&quot; layout=&quot;fixed&quot; src=&quot;https://amp.example.com/api/open?email=[EMAIL]&amp;smt_mid=[SMT_MID]&amp;client_name=burberry_wishlist&amp;request_form_type=AMP&quot;&gt;&lt;template type=&quot;amp-mustache&quot;&gt;&lt;amp-img src=&quot;https://cdn.ampproject.org/i/p.gif&quot; width=&quot;1&quot; height=&quot;1&quot; layout=&quot;fixed&quot; alt=&quot;&quot;&gt;&lt;/amp-img&gt;&lt;/template&gt;&lt;/amp-list&gt;
+&lt;table role=&quot;presentation&quot; width=&quot;100%&quot; class=&quot;outer&quot;&gt;&lt;tr&gt;&lt;td align=&quot;center&quot; class=&quot;outercell&quot;&gt;
+&lt;table role=&quot;presentation&quot; width=&quot;600&quot; class=&quot;w600&quot;&gt;&lt;tr&gt;&lt;td class=&quot;top-line&quot;&gt;&amp;nbsp;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td class=&quot;sec-pad center&quot;&gt;&lt;a href=&quot;https://www.burberry.com?utm_source=amp_email&amp;utm_medium=logo&amp;em=[EMAIL]&quot; on=&quot;tap:AMP.setState({event_type:'click',button_name:'logo',action_desc:'Brand logo'}),click_form.submit&quot;&gt;&lt;amp-img src=&quot;https://us.burberry.com/nrws/common/favicon/1024x1024.png&quot; width=&quot;180&quot; height=&quot;54&quot; layout=&quot;fixed&quot; alt=&quot;Burberry logo&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td class=&quot;greet&quot;&gt;Hi ##User name##,&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;amp-img src=&quot;https://us.burberry.com/nrws/common/favicon/1024x1024.png&quot; width=&quot;600&quot; height=&quot;300&quot; layout=&quot;responsive&quot; alt=&quot;Save your favourites for later&quot;&gt;&lt;/amp-img&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;h1 class=&quot;heading&quot;&gt;Save your favourites for later&lt;/h1&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td class=&quot;cta-wrap&quot;&gt;&lt;div role=&quot;button&quot; tabindex=&quot;0&quot; on=&quot;tap:AMP.setState({event_type:'click',button_name:'Discover the collection',action_desc:'Hero CTA'}),click_form.submit&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/360x64/d5c4a1/000000?text=Discover+the+collection&quot; width=&quot;360&quot; height=&quot;64&quot; layout=&quot;fixed&quot; alt=&quot;Discover the collection&quot; class=&quot;cta-img&quot;&gt;&lt;/amp-img&gt;&lt;/div&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td class=&quot;sec-pad&quot;&gt;&lt;table role=&quot;presentation&quot; width=&quot;100%&quot;&gt;&lt;tr&gt;&lt;td class=&quot;icon-cell&quot; width=&quot;33%&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/96x96/d5c4a1/000000?text=Ship&quot; width=&quot;64&quot; height=&quot;64&quot; layout=&quot;fixed&quot; alt=&quot;Free shipping&quot;&gt;&lt;/amp-img&gt;&lt;p class=&quot;icon-text&quot;&gt;Free shipping&lt;/p&gt;&lt;/td&gt;&lt;td class=&quot;icon-cell&quot; width=&quot;33%&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/96x96/d5c4a1/000000?text=Return&quot; width=&quot;64&quot; height=&quot;64&quot; layout=&quot;fixed&quot; alt=&quot;Easy 15-day returns&quot;&gt;&lt;/amp-img&gt;&lt;p class=&quot;icon-text&quot;&gt;Easy 15-day returns&lt;/p&gt;&lt;/td&gt;&lt;td class=&quot;icon-cell&quot; width=&quot;33%&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/96x96/d5c4a1/000000?text=Secure&quot; width=&quot;64&quot; height=&quot;64&quot; layout=&quot;fixed&quot; alt=&quot;Secure checkout&quot;&gt;&lt;/amp-img&gt;&lt;p class=&quot;icon-text&quot;&gt;Secure checkout&lt;/p&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td class=&quot;pad&quot;&gt;&lt;form id=&quot;wishlist_form&quot; method=&quot;post&quot; action-xhr=&quot;https://api.acme.in/wishlist&quot; on=&quot;submit-success:AMP.setState({wlres:{status:event.response.status,message:event.response.message,count:(g.wa ? 1 : 0) + (g.wb ? 1 : 0) + (g.wc ? 1 : 0)}});submit-error:AMP.setState({wlres:{status:'error',message:'We couldn’t save your wishlist. Please try again.'}})&quot;&gt;&lt;div class=&quot;displayBlock&quot; [class]=&quot;wlres.status == 'success' ? 'displayNone' : 'displayBlock'&quot;&gt;&lt;table role=&quot;presentation&quot; width=&quot;100%&quot; class=&quot;wl-item&quot;&gt;&lt;tr&gt;&lt;td width=&quot;72&quot; valign=&quot;top&quot;&gt;&lt;a href=&quot;https://us.burberry.com/reversible-check-newport-hooded-jacket-p81310011?utm_source=amp_email&amp;utm_medium=wishlist_item&quot;&gt;&lt;amp-img src=&quot;https://assets.burberry.com/is/image/Burberryltd/D85C8EA1-AB7A-430D-A98A-DD16B7B8D7AB?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85&quot; width=&quot;72&quot; height=&quot;72&quot; layout=&quot;fixed&quot; alt=&quot;Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;td valign=&quot;top&quot; style=&quot;padding:0 10px&quot;&gt;&lt;a href=&quot;https://us.burberry.com/reversible-check-newport-hooded-jacket-p81310011?utm_source=amp_email&amp;utm_medium=wishlist_item&quot; style=&quot;text-decoration:none&quot;&gt;&lt;div class=&quot;pname&quot;&gt;Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon&lt;/div&gt;&lt;/a&gt;&lt;div class=&quot;pprice&quot;&gt;$1,695&lt;/div&gt;&lt;/td&gt;&lt;td align=&quot;right&quot; valign=&quot;top&quot;&gt;&lt;span class=&quot;wbtn&quot; role=&quot;button&quot; tabindex=&quot;0&quot; [class]=&quot;g.wa ? 'wbtn on' : 'wbtn'&quot; [text]=&quot;g.wa ? '✓ Saved' : '+ Save'&quot; on=&quot;tap:AMP.setState({g:{wa: !g.wa}})&quot;&gt;+ Save&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;table role=&quot;presentation&quot; width=&quot;100%&quot; class=&quot;wl-item&quot;&gt;&lt;tr&gt;&lt;td width=&quot;72&quot; valign=&quot;top&quot;&gt;&lt;a href=&quot;https://us.burberry.com/mini-check-barrel-bag-p81317361?utm_source=amp_email&amp;utm_medium=wishlist_item&quot;&gt;&lt;amp-img src=&quot;https://assets.burberry.com/is/image/Burberryltd/1A5CCBD0-461C-4E5A-9445-5767D07F606D?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85&quot; width=&quot;72&quot; height=&quot;72&quot; layout=&quot;fixed&quot; alt=&quot;Mini Check Barrel Bag in Archive beige - Women&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;td valign=&quot;top&quot; style=&quot;padding:0 10px&quot;&gt;&lt;a href=&quot;https://us.burberry.com/mini-check-barrel-bag-p81317361?utm_source=amp_email&amp;utm_medium=wishlist_item&quot; style=&quot;text-decoration:none&quot;&gt;&lt;div class=&quot;pname&quot;&gt;Mini Check Barrel Bag in Archive beige - Women&lt;/div&gt;&lt;/a&gt;&lt;div class=&quot;pprice&quot;&gt;$995&lt;/div&gt;&lt;/td&gt;&lt;td align=&quot;right&quot; valign=&quot;top&quot;&gt;&lt;span class=&quot;wbtn&quot; role=&quot;button&quot; tabindex=&quot;0&quot; [class]=&quot;g.wb ? 'wbtn on' : 'wbtn'&quot; [text]=&quot;g.wb ? '✓ Saved' : '+ Save'&quot; on=&quot;tap:AMP.setState({g:{wb: !g.wb}})&quot;&gt;+ Save&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;table role=&quot;presentation&quot; width=&quot;100%&quot; class=&quot;wl-item&quot;&gt;&lt;tr&gt;&lt;td width=&quot;72&quot; valign=&quot;top&quot;&gt;&lt;a href=&quot;https://us.burberry.com/check-quilted-cotton-twill-jacket-p81223271?utm_source=amp_email&amp;utm_medium=wishlist_item&quot;&gt;&lt;amp-img src=&quot;https://assets.burberry.com/is/image/Burberryltd/CCAE4C88-97FE-4652-87A7-753CC0692D43?wid=600&amp;hei=600&amp;fit=crop&amp;qlt=85&quot; width=&quot;72&quot; height=&quot;72&quot; layout=&quot;fixed&quot; alt=&quot;Check Quilted Cotton Twill Jacket in Flax beige - Women&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;td valign=&quot;top&quot; style=&quot;padding:0 10px&quot;&gt;&lt;a href=&quot;https://us.burberry.com/check-quilted-cotton-twill-jacket-p81223271?utm_source=amp_email&amp;utm_medium=wishlist_item&quot; style=&quot;text-decoration:none&quot;&gt;&lt;div class=&quot;pname&quot;&gt;Check Quilted Cotton Twill Jacket in Flax beige - Women&lt;/div&gt;&lt;/a&gt;&lt;div class=&quot;pprice&quot;&gt;$975&lt;/div&gt;&lt;/td&gt;&lt;td align=&quot;right&quot; valign=&quot;top&quot;&gt;&lt;span class=&quot;wbtn&quot; role=&quot;button&quot; tabindex=&quot;0&quot; [class]=&quot;g.wc ? 'wbtn on' : 'wbtn'&quot; [text]=&quot;g.wc ? '✓ Saved' : '+ Save'&quot; on=&quot;tap:AMP.setState({g:{wc: !g.wc}})&quot;&gt;+ Save&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;p class=&quot;wl-summary center&quot;&gt;&lt;span [text]=&quot;(g.wa ? 1 : 0) + (g.wb ? 1 : 0) + (g.wc ? 1 : 0)&quot;&gt;0&lt;/span&gt; item(s) selected&lt;/p&gt;&lt;div class=&quot;displayNone center&quot; [class]=&quot;(g.wa ? 1 : 0) + (g.wb ? 1 : 0) + (g.wc ? 1 : 0) &amp;gt; 0 ? 'displayBlock center' : 'displayNone'&quot; style=&quot;margin-top:14px&quot;&gt;&lt;button type=&quot;submit&quot; class=&quot;interest-btn&quot;&gt;&lt;span [text]=&quot;'Save ' + ((g.wa ? 1 : 0) + (g.wb ? 1 : 0) + (g.wc ? 1 : 0)) + ' to my wishlist'&quot;&gt;Save to my wishlist&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;&lt;div class=&quot;displayBlock center&quot; [class]=&quot;(g.wa ? 1 : 0) + (g.wb ? 1 : 0) + (g.wc ? 1 : 0) &amp;gt; 0 ? 'displayNone' : 'displayBlock center'&quot; style=&quot;margin-top:12px&quot;&gt;&lt;p class=&quot;sub&quot;&gt;Tap &lt;b&gt;+ Save&lt;/b&gt; on an item to add it to your wishlist.&lt;/p&gt;&lt;/div&gt;&lt;div class=&quot;displayNone center&quot; [class]=&quot;wlres.status == 'error' ? 'displayBlock center' : 'displayNone'&quot; style=&quot;margin-top:12px&quot;&gt;&lt;p class=&quot;err&quot; [text]=&quot;wlres.message&quot;&gt;We couldn’t save your wishlist. Please try again.&lt;/p&gt;&lt;p class=&quot;sub&quot;&gt;Your selection is still here &amp;mdash; tap the button to retry.&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;&lt;div submitting class=&quot;loader&quot;&gt;&lt;p class=&quot;sub center&quot;&gt;Saving your wishlist&amp;hellip;&lt;/p&gt;&lt;/div&gt;&lt;div class=&quot;displayNone&quot; [class]=&quot;wlres.status == 'success' ? 'displayBlock' : 'displayNone'&quot;&gt;&lt;div class=&quot;wl-success center&quot;&gt;&lt;p class=&quot;wl-tick&quot;&gt;✓&lt;/p&gt;&lt;p class=&quot;thanks&quot; style=&quot;padding:0&quot;&gt;Saved! &lt;span [text]=&quot;wlres.count&quot;&gt;0&lt;/span&gt; item(s) added to your wishlist.&lt;/p&gt;&lt;p class=&quot;sub center&quot; style=&quot;margin:6px 0 0&quot;&gt;We&amp;rsquo;ll email you if anything you saved drops in price or is running low.&lt;/p&gt;&lt;a class=&quot;wl-cta&quot; href=&quot;https://us.burberry.com/wishlist?utm_source=amp_email&amp;utm_medium=wishlist_cta&amp;em=[EMAIL]&quot;&gt;View my wishlist&lt;/a&gt;&lt;/div&gt;&lt;/div&gt;&lt;input type=&quot;hidden&quot; name=&quot;wishlist_count&quot; value=&quot;0&quot; [value]=&quot;(g.wa ? 1 : 0) + (g.wb ? 1 : 0) + (g.wc ? 1 : 0)&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;wishlist_skus&quot; value=&quot;&quot; [value]=&quot;(g.wa ? '81310011001,' : '') + (g.wb ? '81317361,' : '') + (g.wc ? '81223271001,' : '')&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;wishlist_items&quot; value=&quot;&quot; [value]=&quot;(g.wa ? 'Reversible Check Newport Hooded Jacket in Sand beige - Men, Nylon;' : '') + (g.wb ? 'Mini Check Barrel Bag in Archive beige - Women;' : '') + (g.wc ? 'Check Quilted Cotton Twill Jacket in Flax beige - Women;' : '')&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;subscriber_email&quot; value=&quot;[EMAIL]&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;campaign_id&quot; value=&quot;[CAMPAIGN_ID]&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;customer_id&quot; value=&quot;[CUSTOMER_ID]&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;smt_mid&quot; value=&quot;[SMT_MID]&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;client_name&quot; value=&quot;burberry&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;request_form_type&quot; value=&quot;AMP&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;x_utm_source&quot; value=&quot;EMAIL&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;x_utm_medium&quot; value=&quot;EMAIL_AMP&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;x_utm_campaign&quot; value=&quot;EMAIL_AMP_WISHLIST&quot;&gt;&lt;/form&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td class=&quot;foot&quot;&gt;&lt;p class=&quot;foot-site&quot;&gt;&lt;a href=&quot;https://www.burberry.com&quot;&gt;www.burberry.com&lt;/a&gt;&lt;/p&gt;&lt;p class=&quot;foot-follow&quot;&gt;Follow us on:&lt;/p&gt;&lt;table role=&quot;presentation&quot; align=&quot;center&quot;&gt;&lt;tr&gt;&lt;td class=&quot;soc-cell&quot;&gt;&lt;a href=&quot;https://www.burberry.com?utm_source=amp_email&amp;utm_medium=social_LinkedIn&quot; on=&quot;tap:AMP.setState({event_type:'click',button_name:'social-LinkedIn',action_desc:'Footer LinkedIn'}),click_form.submit&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/64x64/d5c4a1/000000?text=in&quot; width=&quot;28&quot; height=&quot;28&quot; layout=&quot;fixed&quot; alt=&quot;LinkedIn&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;td class=&quot;soc-cell&quot;&gt;&lt;a href=&quot;https://www.burberry.com?utm_source=amp_email&amp;utm_medium=social_Facebook&quot; on=&quot;tap:AMP.setState({event_type:'click',button_name:'social-Facebook',action_desc:'Footer Facebook'}),click_form.submit&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/64x64/d5c4a1/000000?text=f&quot; width=&quot;28&quot; height=&quot;28&quot; layout=&quot;fixed&quot; alt=&quot;Facebook&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;td class=&quot;soc-cell&quot;&gt;&lt;a href=&quot;https://www.burberry.com?utm_source=amp_email&amp;utm_medium=social_Instagram&quot; on=&quot;tap:AMP.setState({event_type:'click',button_name:'social-Instagram',action_desc:'Footer Instagram'}),click_form.submit&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/64x64/d5c4a1/000000?text=IG&quot; width=&quot;28&quot; height=&quot;28&quot; layout=&quot;fixed&quot; alt=&quot;Instagram&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;td class=&quot;soc-cell&quot;&gt;&lt;a href=&quot;https://www.burberry.com?utm_source=amp_email&amp;utm_medium=social_YouTube&quot; on=&quot;tap:AMP.setState({event_type:'click',button_name:'social-YouTube',action_desc:'Footer YouTube'}),click_form.submit&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/64x64/d5c4a1/000000?text=YT&quot; width=&quot;28&quot; height=&quot;28&quot; layout=&quot;fixed&quot; alt=&quot;YouTube&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;td class=&quot;soc-cell&quot;&gt;&lt;a href=&quot;https://www.burberry.com?utm_source=amp_email&amp;utm_medium=social_X&quot; on=&quot;tap:AMP.setState({event_type:'click',button_name:'social-X',action_desc:'Footer X'}),click_form.submit&quot;&gt;&lt;amp-img src=&quot;https://placehold.co/64x64/d5c4a1/000000?text=X&quot; width=&quot;28&quot; height=&quot;28&quot; layout=&quot;fixed&quot; alt=&quot;X&quot;&gt;&lt;/amp-img&gt;&lt;/a&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;p class=&quot;foot-legal&quot;&gt;Your wishlist syncs to your Burberry account.&lt;/p&gt;&lt;p class=&quot;foot-legal&quot;&gt;&amp;copy; 2026 Burberry. All rights reserved.&lt;/p&gt;&lt;p class=&quot;foot-unsub&quot;&gt;This email was sent to $(EMAIL_ADDRESS_). &lt;a href=&quot;https://www.burberry.com/unsubscribe?em=[EMAIL]&amp;mid=[SMT_MID]&quot;&gt;Unsubscribe&lt;/a&gt; &amp;middot; &lt;a href=&quot;https://www.burberry.com/preferences?em=[EMAIL]&quot;&gt;Manage preferences&lt;/a&gt;&lt;/p&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;
+&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;
+&lt;form id=&quot;click_form&quot; method=&quot;post&quot; action-xhr=&quot;https://amp.example.com/api/event&quot; on=&quot;submit-success:AMP.setState({clickAck:event.response.status})&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;event_type&quot; [value]=&quot;event_type&quot; value=&quot;&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;button_name&quot; [value]=&quot;button_name&quot; value=&quot;&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;action_desc&quot; [value]=&quot;action_desc&quot; value=&quot;&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;subscriber_email&quot; value=&quot;[EMAIL]&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;campaign_id&quot; value=&quot;[CAMPAIGN_ID]&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;smt_mid&quot; value=&quot;[SMT_MID]&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;client_name&quot; value=&quot;burberry_wishlist&quot;&gt;&lt;input type=&quot;hidden&quot; name=&quot;request_form_type&quot; value=&quot;AMP&quot;&gt;&lt;/form&gt;
+&lt;/body&gt;
+&lt;/html&gt;" sandbox="allow-scripts allow-same-origin allow-popups"></iframe>
+</section>
+</body></html>

@@ -1,0 +1,13 @@
+node_modules/
+test-results/
+playwright-report/
+.history.json
+.claude/
+npm-debug.log*
+.DS_Store
+*.log
+
+# Reference-corpus source emails are never committed to any public artifact
+# (see corpus/README.md — "never redistributed" is a non-negotiable project rule).
+# Only the distilled, brand-agnostic patterns/ outputs persist into the repo.
+corpus/

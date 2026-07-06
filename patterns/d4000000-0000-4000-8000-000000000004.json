@@ -1,0 +1,60 @@
+{
+  "schema": "amp-genie/pattern@1",
+  "vertical": "fintech",
+  "layout": {
+    "width_constrained": true,
+    "section_count": 5,
+    "sections": [
+      "header",
+      "hero",
+      "editorial",
+      "social_proof",
+      "footer"
+    ],
+    "product_cells": 0,
+    "grid_cols_max": 0
+  },
+  "components": {
+    "image": 1,
+    "button": 1,
+    "heading": 2,
+    "paragraph": 9,
+    "table": 2,
+    "link": 1,
+    "divider": 0,
+    "list": 0,
+    "anim": 0,
+    "video": 0
+  },
+  "palette_roles": {
+    "distinct_colors": 9,
+    "bg_is_light": true,
+    "has_dark_section": false,
+    "dark_section_count": 0,
+    "cta_contrast": "medium",
+    "accent_count": 6
+  },
+  "typography_roles": {
+    "families": 1,
+    "serif_display": false,
+    "weight_levels": 2,
+    "hierarchy_depth": 2,
+    "all_caps_headings": false,
+    "letterspaced_headings": false
+  },
+  "copy": {
+    "subject_len": 27,
+    "subject_emoji": false,
+    "cta_intent": "browse",
+    "offer_framing": "percentage_off",
+    "image_count": 1,
+    "image_to_text": 0.08,
+    "image_density": "sparse",
+    "word_count": 71
+  },
+  "provenance": {
+    "uuid": "d4000000-0000-4000-8000-000000000004",
+    "source": "synthetic-placeholder",
+    "schema": "amp-genie/pattern@1"
+  }
+}

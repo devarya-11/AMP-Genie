@@ -1,0 +1,63 @@
+{
+  "schema": "amp-genie/pattern@1",
+  "vertical": "beauty_cosmetics",
+  "layout": {
+    "width_constrained": true,
+    "section_count": 8,
+    "sections": [
+      "header",
+      "hero",
+      "value_props",
+      "product_strip",
+      "editorial",
+      "social_proof",
+      "cta_banner",
+      "footer"
+    ],
+    "product_cells": 2,
+    "grid_cols_max": 3
+  },
+  "components": {
+    "image": 7,
+    "button": 3,
+    "heading": 4,
+    "paragraph": 11,
+    "table": 3,
+    "link": 1,
+    "divider": 0,
+    "list": 0,
+    "anim": 0,
+    "video": 0
+  },
+  "palette_roles": {
+    "distinct_colors": 10,
+    "bg_is_light": true,
+    "has_dark_section": false,
+    "dark_section_count": 0,
+    "cta_contrast": "low",
+    "accent_count": 7
+  },
+  "typography_roles": {
+    "families": 2,
+    "serif_display": true,
+    "weight_levels": 1,
+    "hierarchy_depth": 3,
+    "all_caps_headings": false,
+    "letterspaced_headings": false
+  },
+  "copy": {
+    "subject_len": 26,
+    "subject_emoji": true,
+    "cta_intent": "purchase",
+    "offer_framing": "none",
+    "image_count": 7,
+    "image_to_text": 0.32,
+    "image_density": "balanced",
+    "word_count": 88
+  },
+  "provenance": {
+    "uuid": "b2000000-0000-4000-8000-000000000002",
+    "source": "synthetic-placeholder",
+    "schema": "amp-genie/pattern@1"
+  }
+}

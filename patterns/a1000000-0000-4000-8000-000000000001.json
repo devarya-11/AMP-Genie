@@ -1,0 +1,60 @@
+{
+  "schema": "amp-genie/pattern@1",
+  "vertical": "fashion_apparel",
+  "layout": {
+    "width_constrained": true,
+    "section_count": 5,
+    "sections": [
+      "header",
+      "hero",
+      "product_grid",
+      "cta_banner",
+      "footer"
+    ],
+    "product_cells": 2,
+    "grid_cols_max": 2
+  },
+  "components": {
+    "image": 6,
+    "button": 5,
+    "heading": 6,
+    "paragraph": 7,
+    "table": 2,
+    "link": 1,
+    "divider": 0,
+    "list": 0,
+    "anim": 0,
+    "video": 0
+  },
+  "palette_roles": {
+    "distinct_colors": 7,
+    "bg_is_light": true,
+    "has_dark_section": true,
+    "dark_section_count": 1,
+    "cta_contrast": "high",
+    "accent_count": 4
+  },
+  "typography_roles": {
+    "families": 1,
+    "serif_display": false,
+    "weight_levels": 2,
+    "hierarchy_depth": 3,
+    "all_caps_headings": true,
+    "letterspaced_headings": true
+  },
+  "copy": {
+    "subject_len": 25,
+    "subject_emoji": true,
+    "cta_intent": "browse",
+    "offer_framing": "percentage_off",
+    "image_count": 6,
+    "image_to_text": 0.32,
+    "image_density": "balanced",
+    "word_count": 49
+  },
+  "provenance": {
+    "uuid": "a1000000-0000-4000-8000-000000000001",
+    "source": "synthetic-placeholder",
+    "schema": "amp-genie/pattern@1"
+  }
+}

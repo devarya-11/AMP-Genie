@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>creative preview</title>
+<style>
+  html,body{margin:0;padding:0;background:#e9ebf0;font-family:Arial,Helvetica,sans-serif;}
+  #stage{padding:0;display:flex;justify-content:center;}
+  #frame{background:#ffffff;box-shadow:0 8px 34px rgba(20,20,45,.18);overflow:hidden;}
+  .amp-preview-root{display:block;}
+</style>
+</head><body>
+<div id="stage"><div id="frame"></div></div>
+<script src="/preview.js"></script>
+<script>
+  var q=new URLSearchParams(location.search);
+  var b=q.get('b')||'ajio'; var w=+(q.get('w')||600);
+  var frame=document.getElementById('frame');
+  frame.style.width=w+'px';
+  window.__ready=false;
+  fetch('/_demo/'+b+'.json').then(function(r){return r.json();}).then(function(d){
+    GeniePreview.renderAmp(d.ampHtml, frame);
+    document.title=d.brand+' \u00b7 '+d.moduleName+' \u00b7 '+w+'px';
+    var imgs=Array.prototype.slice.call(frame.querySelectorAll('img'));
+    var pending=imgs.filter(function(i){return !i.complete;}).length;
+    function done(){ if(--pending<=0) window.__ready=true; }
+    if(!pending){ window.__ready=true; }
+    else imgs.forEach(function(i){ if(!i.complete){ i.addEventListener('load',done); i.addEventListener('error',done); } });
+    setTimeout(function(){ window.__ready=true; }, 5000);
+  });
+</script>
+</body></html>
