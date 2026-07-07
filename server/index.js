@@ -1,5 +1,12 @@
 'use strict';
 
+// Loads .env (gitignored, local-only) into process.env if present — this is
+// how GEMINI_API_KEY / GROQ_API_KEY / OLLAMA_BASE_URL etc. reach
+// server/brief-content.js's provider auto-detection without needing to be
+// exported in the shell every time. A no-op (never throws) when .env is
+// absent, so nothing breaks for anyone who sets real env vars another way.
+require('dotenv').config();
+
 const path = require('path');
 const express = require('express');
 

@@ -69,19 +69,18 @@ result. It **never changes which module, vertical, or tone gets picked** —
 those still come entirely from the structured fields. What it *can* do is
 drive a handful of short copy fragments — see the next section.
 
-### Brief-driven content generation (`server/brief-content.js`)
+### Brief-driven content generation (`server/brief-content.js`, `server/llm-providers.js`)
 
-When a brief is given, `composeContent()` makes one call to the real Claude
-API (`@anthropic-ai/sdk`, model `claude-haiku-4-5` — small and fast, since
-this sits on the `/generate` request's critical path) asking it to write a
-handful of short plain-text copy fragments for whichever module got picked —
-never markup, never the module/vertical/tone choice itself. The response is
-constrained twice: once by the API call's own `output_config.format`
-JSON-schema, and again locally by `validatePlan()` (`server/brief-content.js`)
-as defense in depth — any unrecognised field, non-string value, empty/over-long
-string, or stray `<`/`>` character rejects the **entire** plan back to `null`.
-The allowed fields per module (mirroring each module's own `copy.*` support in
-`generate.js`):
+When a brief is given, `composeContent()` fans the brief out to **every
+configured LLM provider in parallel** — Claude, Google Gemini, Groq, and a
+local Ollama install — each asked to write a handful of short plain-text copy
+fragments for whichever module got picked, never markup, never the
+module/vertical/tone choice itself. Every provider's response is constrained
+twice: once by that provider's own JSON-schema/structured-output feature, and
+again locally by `validatePlan()` as defense in depth — any unrecognised
+field, non-string value, empty/over-long string, or stray `<`/`>` character
+rejects that **entire** plan back to `null`. The allowed fields per module
+(mirroring each module's own `copy.*` support in `generate.js`):
 
 | Module | Overridable fields |
 |---|---|
@@ -92,20 +91,42 @@ The allowed fields per module (mirroring each module's own `copy.*` support in
 | spin | `head`, `teaserText`, `footerText` |
 | poll | `head`, `question`, `optionA`, `optionB`, `footerText` |
 
+**Best of N, not first-past-the-post.** Once every provider has answered (or
+failed/timed out), each validated plan is scored by a small deterministic
+heuristic in `scorePlan()` — rewarding fuller field coverage and natural
+sentence length, penalising spammy filler ("act now", "amazing offer"),
+excess `!`, and SHOUTING — and only the **highest-scoring** plan is used. This
+is a cheap proxy for quality, not a semantic judge (that would mean yet
+another paid LLM call just to rank outputs), but it reliably filters out the
+worst outputs when several providers respond.
+
 A validated plan is merged into `copy` and passed straight into `generate()` —
 the exact same override channel a caller can hit manually via `POST /generate`'s
-own `copy` field, which always wins field-by-field over the LLM's plan.
-**Every failure mode degrades silently to `null`** (missing `ANTHROPIC_API_KEY`,
-network/API error, the ~8s timeout budget elapsing, a malformed or
-schema-invalid response) — a brief, or a flaky/slow LLM call, can never break
-or block a build; `/generate` always succeeds using the template's own
-built-in defaults. Set `ANTHROPIC_API_KEY` to enable it:
+own `copy` field, which always wins field-by-field over any LLM's plan.
+**Every failure mode degrades silently** — a provider with no key configured
+is skipped entirely; a network/API error, a malformed/schema-invalid
+response, or the timeout budget elapsing all degrade that one provider to
+`null` without affecting the others; if every configured provider fails (or
+none are configured at all), `composeContent()` returns `null` and
+`/generate` falls back to the template's own built-in copy. A brief, or a
+flaky/slow/exhausted LLM, can never break or block a build.
+
+**Providers and cost model** — configure any subset via env vars; only
+configured providers are called:
+
+| Provider | Env var(s) | Cost | Free-tier behaviour |
+|---|---|---|---|
+| Claude | `ANTHROPIC_API_KEY` | Pay-per-use, no free tier | Always called while configured |
+| Google Gemini | `GEMINI_API_KEY` (model via `GEMINI_MODEL`, default `gemini-2.5-flash`) | Free tier, rate-limited | On a `429`/quota `403`, that provider cools down for ~10 minutes (`server/llm-providers.js`) so an exhausted free tier is skipped, not hammered or silently billed |
+| Groq | `GROQ_API_KEY` (model via `GROQ_MODEL`, default `llama-3.1-8b-instant`) | Free tier, rate-limited | Same 10-minute cooldown behaviour on quota/rate-limit errors |
+| Ollama (local) | `OLLAMA_BASE_URL` (e.g. `http://localhost:11434`; model via `OLLAMA_MODEL`, default `llama3.2`) | Permanently free — runs on your machine | No quota, so no cooldown; only attempted when `OLLAMA_BASE_URL` is set, so a bare checkout never probes an arbitrary local port |
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... npm start
+# Any combination — only the ones you set get called:
+ANTHROPIC_API_KEY=sk-ant-... GEMINI_API_KEY=... GROQ_API_KEY=... OLLAMA_BASE_URL=http://localhost:11434 npm start
 ```
 
-Without that env var, briefs are still captured/stored/shown exactly as
+With none of these set, briefs are still captured/stored/shown exactly as
 before — generation just falls back to the library's default copy.
 
 ### Header & footer: brand logo, link, and attribution (`generate.js`)
@@ -208,7 +229,7 @@ configurable (₹ default; $, €, £ available), all via entities.
 ## Testing
 
 ```bash
-npm test              # unit tests: encoding + validator + brief-content -> 24/24
+npm test              # unit tests: encoding + validator + llm-providers + brief-content -> 46/46
 npm run test:e2e      # Playwright UI e2e against the real server        -> 25/25
 ```
 
@@ -220,15 +241,30 @@ npm run test:e2e      # Playwright UI e2e against the real server        -> 25/2
   Prints the full pass/fail matrix and asserts **42/42 PASS, zero errors**.
   Also covers deterministic reroll (same seed ⇒ identical bytes, a reroll ⇒
   different) and the structural rules above.
+- **`tests/llm-providers.test.js`** — each provider caller (`callClaude`,
+  `callGemini`, `callGroq`, `callOllama`) is exercised with an injected fake
+  client/`fetchImpl`, never a real network call: happy-path parsing of each
+  provider's distinct response shape, never-throws behaviour on a client
+  error/malformed JSON/refused connection, the shared `withTimeout()` helper
+  resolving to `null` (not hanging) once its budget elapses, and the
+  Gemini/Groq quota-cooldown mechanism (`looksLikeQuotaExhausted()`,
+  `cooldown()`/`isCoolingDown()`) tripping on a `429` and suppressing the next
+  call until it expires.
 - **`tests/brief-content.test.js`** — `validatePlan()`'s allowlist rejects
-  unknown fields, non-strings, empty/over-long strings, and any `<`/`>`; a
-  dependency-injected fake Anthropic client exercises `composeContent()`'s
-  happy path, its schema-invalid-response fallback, a thrown client error, and
-  the timeout-budget race (all resolving to `null`, never throwing/hanging);
-  plus an end-to-end check that a validated plan's fields show up verbatim in
-  `generate()`'s AMP output and still pass the real validator, and that an
-  empty/omitted `copy` is a byte-for-byte no-op against the pre-feature
-  baseline.
+  unknown fields, non-strings, empty/over-long strings, and any `<`/`>`;
+  `scorePlan()`'s heuristic rewards fuller field coverage and clean copy over
+  spammy filler; and a set of dependency-injected fake `opts.providers`
+  arrays exercise `composeContent()`'s multi-provider fan-out — a single
+  provider's happy path (plus a `opts.client`-only backward-compat case), the
+  **best-of-N selection** picking the higher-scoring plan when several
+  providers succeed, falling back to whichever provider survives when others
+  error/fail validation, returning `null` when every provider fails or none
+  are configured, a thrown (sync or async) provider never crashing the whole
+  call, and the shared timeout budget resolving to `null` rather than hanging
+  even when a provider never resolves. Also covers an end-to-end check that a
+  validated plan's fields show up verbatim in `generate()`'s AMP output and
+  still pass the real validator, and that an empty/omitted `copy` is a
+  byte-for-byte no-op against the pre-feature baseline.
 - **`tests/e2e.test.js`** (Playwright, `npx playwright install chromium` once
   first) drives the real UI against the real running server end to end:
   zero-input generation, brand/vertical/tone flowing into chips and code,
@@ -289,7 +325,16 @@ AMP part. Three things gate that, and they're external to this app:
 | `SMTP_PASS` | yes | SMTP password / app password |
 | `SMTP_FROM` | no | `From:` address (defaults to `SMTP_USER`); must match your allow-listed sender |
 | `PORT` | no (4000) | HTTP port; CORS is locked to `http://localhost:$PORT` |
-| `ANTHROPIC_API_KEY` | no | Enables brief-driven content generation (see above); without it, briefs are still captured/stored, generation just falls back to default copy |
+| `ANTHROPIC_API_KEY` | no | Enables the Claude provider for brief-driven content generation (see above) |
+| `GEMINI_API_KEY` | no | Enables the Google Gemini provider (free tier; self-cools down on quota errors) |
+| `GEMINI_MODEL` | no (`gemini-2.5-flash`) | Overrides the Gemini model used |
+| `GROQ_API_KEY` | no | Enables the Groq provider (free tier; self-cools down on quota errors) |
+| `GROQ_MODEL` | no (`llama-3.1-8b-instant`) | Overrides the Groq model used |
+| `OLLAMA_BASE_URL` | no | Enables the local Ollama provider (e.g. `http://localhost:11434`); unset means never probed |
+| `OLLAMA_MODEL` | no (`llama3.2`) | Overrides the local Ollama model used |
+
+None of the above are required — with none set, briefs are still
+captured/stored, and generation just falls back to default copy.
 
 ```bash
 SMTP_HOST=smtp.gmail.com SMTP_PORT=587 \
@@ -313,7 +358,8 @@ amp-genie/
     content.js        per-vertical product/quiz/poll/rating copy + tone headlines
     validator.js      thin wrapper around amphtml-validator, AMP4EMAIL mode
     brand.js          4-tier brand colour resolver (override/library/fetch/hash)
-    brief-content.js  brief -> schema-validated copy.* plan via the Claude API (graceful null on any failure)
+    brief-content.js  brief -> best-of-N schema-validated copy.* plan across all configured LLM providers (graceful null on any/all failures)
+    llm-providers.js  fetch-based callers for Claude/Gemini/Groq/Ollama + shared timeout + free-tier cooldown helpers
     dispatch.js       nodemailer AMP send (text/x-amp-html MIME part)
     history.js        minimal file-based .history.json persistence (read/append/normalizeBrief)
     index.js          Express routes: /api/meta, /brand, /generate, /history, /validate, /dispatch
@@ -325,6 +371,7 @@ amp-genie/
   tests/
     encoding.test.js
     validator.test.js
+    llm-providers.test.js
     brief-content.test.js
     e2e.test.js
   playwright.config.js
