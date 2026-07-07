@@ -1,130 +1,194 @@
-/* Generic AMP4EMAIL preview interpreter.
-   Renders the *actual generated AMP* by interpreting a practical subset of
-   amp-bind in plain JS — so every module (present and future) previews with no
-   per-module mirror. Supported: <amp-state> init, [class]/[text]/[value]
-   bindings, on="tap:AMP.setState(...)", on="input(-throttle):AMP.setState(...)",
-   amp-img, amp-carousel (scroll strip), amp-accordion, amp-form (submit-success). */
-(function () {
-  function evalExpr(expr, scope) {
-    try { return new Function('g', 'event', 'return (' + expr + ');')(scope.g || {}, scope.event || {}); }
-    catch (e) { return undefined; }
-  }
-  function deepMerge(state, patch) {
-    for (const id in patch) {
-      if (patch[id] && typeof patch[id] === 'object') state[id] = Object.assign({}, state[id], patch[id]);
-      else state[id] = patch[id];
+'use strict';
+
+// Plain-JS mirror of the AMP module logic, for the phone-framed Live Preview
+// tab. This never touches the AMP runtime — it re-implements each module's
+// tap/input state machine directly against the DOM so it works everywhere,
+// while staying visually and behaviourally faithful to the amp-bind logic in
+// server/generate.js. The `data-testid` hooks below are used by the e2e tests.
+
+(function (global) {
+  function el(tag, attrs, children) {
+    const node = tag === 'svg'
+      ? document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      : document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k === 'text') node.textContent = v;
+      else if (k === 'html') node.innerHTML = v;
+      else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+      else node.setAttribute(k, v);
     }
+    (children || []).forEach((c) => c && node.appendChild(c));
+    return node;
   }
 
-  function copyDyn(from, to) {
-    from.getAttributeNames().forEach((n) => {
-      if (n[0] === '[' || n === 'on') to.setAttribute(n, from.getAttribute(n));
-    });
-  }
+  function renderReveal(root, m, p) {
+    let revealed = false;
+    const teaser = el('div', { class: 'pv-teaser', style: 'text-align:center;padding:20px' }, [
+      el('p', { style: `font-size:30px;font-weight:bold;color:${p.primary};margin:0 0 6px`, text: `${m.discount}% OFF` }),
+      el('p', { class: 'pv-muted', text: 'A hand-picked reward is waiting behind the curtain.' }),
+      el('button', {
+        class: 'pv-btn', style: `background:${p.primary}`, text: 'Reveal my offer', 'data-testid': 'reveal-btn',
+        onclick: () => { revealed = true; renderInner(); },
+      }),
+    ]);
+    const offerWrap = el('div', { class: 'pv-offer hidden', 'data-testid': 'reveal-offer' }, []);
+    root.appendChild(teaser);
+    root.appendChild(offerWrap);
 
-  function transform(container) {
-    container.querySelectorAll('amp-img').forEach((a) => {
-      const img = document.createElement('img');
-      img.src = a.getAttribute('src') || '';
-      img.alt = a.getAttribute('alt') || '';
-      const layout = a.getAttribute('layout');
-      img.style.display = 'block';
-      if (layout === 'fixed') { img.width = +a.getAttribute('width') || 64; img.height = +a.getAttribute('height') || 64; }
-      else { img.style.width = '100%'; img.style.height = 'auto'; }
-      copyDyn(a, img);
-      a.replaceWith(img);
-    });
-    container.querySelectorAll('amp-carousel').forEach((c) => {
-      const strip = document.createElement('div');
-      strip.style.cssText = 'display:flex;overflow-x:auto;gap:8px;scroll-snap-type:x mandatory';
-      Array.from(c.children).forEach((ch) => { ch.style.cssText = (ch.style.cssText || '') + ';flex:0 0 80%;scroll-snap-align:center'; strip.appendChild(ch); });
-      c.replaceWith(strip);
-    });
-    container.querySelectorAll('amp-accordion').forEach((ac) => {
-      ac.querySelectorAll('section').forEach((sec) => {
-        const kids = sec.children;
-        if (kids.length >= 2) {
-          const head = kids[0], body = kids[1];
-          body.style.display = 'none';
-          head.style.cursor = 'pointer';
-          head.addEventListener('click', () => { body.style.display = body.style.display === 'none' ? 'block' : 'none'; });
-        }
-      });
-    });
-    container.querySelectorAll('amp-state').forEach((s) => s.remove());
-  }
-
-  function harvestState(scope) {
-    const state = {};
-    scope.querySelectorAll('amp-state').forEach((s) => {
-      const id = s.getAttribute('id');
-      const sc = s.querySelector('script');
-      try { state[id] = JSON.parse(sc.textContent); } catch (e) { state[id] = {}; }
-    });
-    if (!state.g) state.g = {};
-    return state;
-  }
-
-  function wire(container, state) {
-    const binds = [];
-    function apply(objExpr, event) {
-      const patch = evalExpr(objExpr, { g: state.g, event });
-      if (patch && typeof patch === 'object') deepMerge(state, patch);
-      refresh();
+    function renderInner() {
+      teaser.classList.toggle('hidden', revealed);
+      offerWrap.classList.toggle('hidden', !revealed);
+      if (!revealed) return;
+      offerWrap.innerHTML = '';
+      offerWrap.appendChild(el('img', { src: m.image, style: 'width:100%;display:block' }));
+      const body = el('div', { style: 'padding:16px;text-align:center' }, [
+        el('p', { class: 'pv-muted', text: 'Use this code at checkout' }),
+        el('span', { class: 'pv-code', style: `border-color:${p.accent};color:${p.primaryDark}`, text: m.code }),
+        el('div', { class: 'pv-row' }, m.items.map((it) => el('div', { class: 'pv-card' }, [
+          el('div', { class: 'pv-card-name', text: it.name }),
+          el('div', { class: 'pv-card-price', style: `color:${p.primary}`, text: it.price }),
+        ]))),
+      ]);
+      offerWrap.appendChild(body);
     }
-    function refresh() {
-      binds.forEach((b) => {
-        const v = evalExpr(b.expr, { g: state.g, event: {} });
-        if (v === undefined) return;
-        if (b.kind === 'class') b.el.className = String(v);
-        else if (b.kind === 'text') b.el.textContent = String(v);
-        else if (b.kind === 'value') b.el.value = String(v);
+    renderInner();
+  }
+
+  function renderSearch(root, m, p) {
+    let q = '';
+    let cat = 'all';
+    const input = el('input', {
+      type: 'text', placeholder: 'Search products', class: 'pv-search', 'data-testid': 'search-input',
+      oninput: (e) => { q = e.target.value.toLowerCase(); renderGrid(); },
+    });
+    const pills = el('div', { class: 'pv-pills' }, m.cats.map((k, i) =>
+      el('span', { class: 'pv-pill', text: m.catLabels[i], 'data-testid': 'pill-' + k, onclick: () => { cat = k; renderGrid(); } })
+    ));
+    const grid = el('div', { class: 'pv-grid', 'data-testid': 'search-grid' });
+    root.appendChild(input);
+    root.appendChild(pills);
+    root.appendChild(grid);
+
+    function renderGrid() {
+      Array.from(pills.children).forEach((btn, i) => {
+        const on = m.cats[i] === cat;
+        btn.classList.toggle('on', on);
+        btn.style.background = on ? p.primary : '';
+      });
+      grid.innerHTML = '';
+      const visible = m.items.filter((it) => (cat === 'all' || it.cat === cat) && (q === '' || it.key.indexOf(q) !== -1));
+      if (!visible.length) { grid.appendChild(el('div', { class: 'pv-empty', text: 'No products match.' })); return; }
+      visible.forEach((it) => {
+        grid.appendChild(el('div', { class: 'pv-card' }, [
+          el('img', { src: it.image, style: 'width:100%;display:block' }),
+          el('div', { class: 'pv-card-name', text: it.name }),
+          el('div', { class: 'pv-card-price', style: `color:${p.primary}`, text: it.price }),
+        ]));
       });
     }
+    renderGrid();
+  }
 
-    container.querySelectorAll('*').forEach((el) => {
-      el.getAttributeNames().forEach((n) => {
-        if (n === '[class]') binds.push({ el, kind: 'class', expr: el.getAttribute(n) });
-        else if (n === '[text]') binds.push({ el, kind: 'text', expr: el.getAttribute(n) });
-        else if (n === '[value]') binds.push({ el, kind: 'value', expr: el.getAttribute(n) });
-      });
-      const on = el.getAttribute('on');
-      if (on) {
-        const tap = on.match(/tap:AMP\.setState\((\{[\s\S]*?\})\)/);
-        if (tap) el.addEventListener('click', () => apply(tap[1], {}));
-        const inp = on.match(/input(?:-throttle)?:AMP\.setState\((\{[\s\S]*?\})\)/);
-        if (inp) el.addEventListener('input', () => apply(inp[1], { value: el.value }));
+  function renderQuiz(root, m, p) {
+    let sel = '';
+    const q = el('p', { class: 'pv-qtitle', text: m.q });
+    const opts = el('div', {}, m.options.map((o) => el('span', {
+      class: 'pv-opt', 'data-testid': 'quiz-opt-' + o.key,
+      onclick: () => { sel = o.key; renderResult(); },
+      text: o.label,
+    })));
+    const resultBox = el('div', { class: 'pv-result hidden', 'data-testid': 'quiz-result' });
+    root.appendChild(q); root.appendChild(opts); root.appendChild(resultBox);
+
+    function renderResult() {
+      Array.from(opts.children).forEach((btn, i) => btn.classList.toggle('on', m.options[i].key === sel));
+      const picked = m.options.find((o) => o.key === sel);
+      resultBox.classList.toggle('hidden', !picked);
+      if (picked) { resultBox.style.background = p.tint; resultBox.textContent = picked.result; }
+    }
+    renderResult();
+  }
+
+  function renderRating(root, m, p) {
+    let score = 0;
+    const prompt = el('p', { class: 'pv-qtitle', text: m.prompt });
+    const stars = el('div', { class: 'pv-stars' }, [1, 2, 3, 4, 5].map((i) => el('svg', {
+      class: 'pv-star', viewBox: '0 0 24 24', 'data-testid': 'star-' + i,
+      onclick: () => { score = i; renderStars(); },
+      html: '<path fill="currentColor" d="M12 2l3 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.9 21l1.2-6.8-5-4.9 6.9-1z"/>',
+    })));
+    const conf = el('p', { class: 'pv-conf', style: `color:${p.primaryDark}`, 'data-testid': 'rating-confirm' });
+    root.appendChild(prompt); root.appendChild(stars); root.appendChild(conf);
+
+    function renderStars() {
+      Array.from(stars.children).forEach((s, i) => { s.style.color = (i + 1) <= score ? p.accent : '#d8d8e2'; });
+      conf.textContent = score === 0 ? '' : `You rated ${score} out of 5 — thank you!`;
+    }
+    renderStars();
+  }
+
+  function renderSpin(root, m, p) {
+    let spun = false;
+    const img = el('img', { src: m.image, style: 'width:200px;display:block;margin:0 auto 16px' });
+    const spinWrap = el('div', {}, [
+      el('p', { class: 'pv-muted', text: 'One spin, one reward. Ready?' }),
+      el('button', { class: 'pv-btn', style: `background:${p.accent};color:#1c1c1c`, text: 'Spin to win', 'data-testid': 'spin-btn', onclick: () => { spun = true; renderInner(); } }),
+    ]);
+    const rewardWrap = el('div', { class: 'pv-reward hidden', 'data-testid': 'spin-reward' });
+    root.appendChild(el('div', { style: 'text-align:center' }, [img, spinWrap, rewardWrap]));
+
+    function renderInner() {
+      spinWrap.classList.toggle('hidden', spun);
+      rewardWrap.classList.toggle('hidden', !spun);
+      if (!spun) return;
+      rewardWrap.style.background = p.tint;
+      rewardWrap.innerHTML = '';
+      rewardWrap.appendChild(el('p', { style: `font-size:22px;font-weight:bold;color:${p.primaryDark}`, text: `You won ${m.pct}% off!` }));
+      rewardWrap.appendChild(el('span', { class: 'pv-code', style: `border-color:${p.accent};color:${p.primaryDark}`, text: m.reward }));
+    }
+    renderInner();
+  }
+
+  function renderPoll(root, m, p) {
+    let vote = '';
+    const q = el('p', { class: 'pv-qtitle', text: m.q });
+    const row = el('div', { class: 'pv-row', style: 'text-align:center' }, [
+      el('span', { class: 'pv-vote', 'data-testid': 'poll-a', onclick: () => { vote = 'a'; renderResult(); }, text: m.a }),
+      el('span', { class: 'pv-vote', 'data-testid': 'poll-b', onclick: () => { vote = 'b'; renderResult(); }, text: m.b }),
+    ]);
+    const resultBox = el('div', { class: 'pv-result hidden', 'data-testid': 'poll-result' });
+    root.appendChild(q); root.appendChild(row); root.appendChild(resultBox);
+
+    function renderResult() {
+      row.children[0].classList.toggle('on', vote === 'a');
+      row.children[1].classList.toggle('on', vote === 'b');
+      row.children[0].style.background = vote === 'a' ? p.tint : '';
+      row.children[1].style.background = vote === 'b' ? p.tint : '';
+      resultBox.classList.toggle('hidden', !vote);
+      if (vote) {
+        resultBox.style.background = p.tint;
+        resultBox.textContent = vote === 'a' ? `You are with the 64% who chose ${m.a}. Great pick!` : `You joined the 36% backing ${m.b}. Bold!`;
       }
-    });
-    container.querySelectorAll('form').forEach((f) => {
-      const on = f.getAttribute('on') || '';
-      const ss = on.match(/submit-success:AMP\.setState\((\{[\s\S]*?\})\)/);
-      f.addEventListener('submit', (e) => { e.preventDefault(); if (ss) apply(ss[1], {}); });
-    });
-    refresh();
+    }
+    renderResult();
   }
 
-  function renderAmp(ampHtml, container) {
-    container.innerHTML = '';
-    const doc = new DOMParser().parseFromString(ampHtml, 'text/html');
-    const style = doc.querySelector('style[amp-custom]');
-    const wrap = document.createElement('div');
-    wrap.className = 'amp-preview-root';
-    if (style) { const st = document.createElement('style'); st.textContent = style.textContent; wrap.appendChild(st); }
-    const body = document.createElement('div');
-    body.innerHTML = doc.body ? doc.body.innerHTML : '';
-    const state = harvestState(body);
-    transform(body);
-    wrap.appendChild(body);
-    container.appendChild(wrap);
-    wire(body, state);
-  }
-
-  window.GeniePreview = {
-    renderAmp,
-    render(model, palette, container) {
-      if (typeof model === 'string') return renderAmp(model, container);
-      container.textContent = 'Preview unavailable for this item.';
-    },
+  const RENDERERS = {
+    reveal: renderReveal, search: renderSearch, quiz: renderQuiz,
+    rating: renderRating, spin: renderSpin, poll: renderPoll,
   };
-})();
+
+  function render(container, { moduleId, previewModel, palette }) {
+    container.innerHTML = '';
+    const header = el('div', { class: 'pv-hdr', style: `background:${palette.primary}` }, [
+      el('h1', { text: previewModel.head }),
+    ]);
+    container.appendChild(header);
+    const body = el('div', { class: 'pv-body', 'data-testid': 'preview-body' });
+    container.appendChild(body);
+    const fn = RENDERERS[moduleId];
+    if (fn) fn(body, previewModel, palette);
+  }
+
+  global.AmpGeniePreview = { render };
+})(window);

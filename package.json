@@ -5,21 +5,13 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server/index.js",
-    "matrix": "node tests/prod-matrix.js",
-    "matrix:stage1": "node tests/run-matrix.js",
-    "palette": "node tests/palette-matrix.js",
-    "aesthetic": "node tests/aesthetic-fidelity.js",
-    "realassets": "node tests/realassets-probe.js",
-    "verify": "node tests/single-source.js",
-    "test": "node --test tests/encoding.test.js tests/validator.test.js tests/no-lifecycle.test.js tests/reference.test.js tests/guard.test.js tests/preview-parity.test.js tests/upi.test.js tests/fallback.test.js tests/no-crossbuild-bleed.test.js",
+    "test": "node --test tests/encoding.test.js tests/validator.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "amphtml-validator": "^1.0.38",
     "express": "^4.22.2",
-    "jsdom": "^29.1.1",
-    "nodemailer": "^6.10.1",
-    "sharp": "^0.35.2"
+    "nodemailer": "^6.10.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.44.0"

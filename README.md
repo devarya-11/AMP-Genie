@@ -1,20 +1,20 @@
 # AMP Genie
 
-Paste a store URL — or nothing at all — and get back a **validated, interactive
-AMP email**. The genie reads a brand's voice, palette and products from the web,
-resolves every image to a working HTTPS asset, builds a production-grade
-AMP4EMAIL document, and proves it is valid against the **real
-`amphtml-validator`** before it ever reaches you.
+Type a brand name and get back a **validated, interactive AMP4EMAIL** — a
+production-grade document with a random interactive module, brand-appropriate
+colours, and copy that reads as real (never Lorem Ipsum). It's built to serve
+both developers (clean, editable AMP HTML) and non-technical folks (a working
+demo in one click).
 
 Two rules are absolute:
 
-1. **The Playground is the holy grail.** Every email is validated with the
-   official AMP4EMAIL validator and must report **zero errors** before it is
-   shown as done. The regex pre-check is only a fast first pass — the real
-   validator is the gate.
-2. **Always a complete email.** Whether you supply all your assets, a few, or
-   *none*, the genie fills the gaps and returns a complete, branded, interactive,
-   valid email. Zero input is a first-class, tested path.
+1. **The Playground is the holy grail.** Every email is checked against the
+   official **`amphtml-validator`** package (AMP4EMAIL format) and must report
+   **zero errors** before it's shown as done. There is no regex approximation —
+   the real validator is the only gate, in the server, on every generation.
+2. **The server is the single source of truth.** `server/generate.js` builds
+   the AMP; the web UI never re-derives it. The live preview, the downloadable
+   file, and the validated file are always byte-identical.
 
 ---
 
@@ -25,119 +25,204 @@ npm install
 npm start                 # serves the UI + API on http://localhost:4000
 ```
 
-Open <http://localhost:4000>, optionally paste a store URL or brand name, pick a
-use case (or leave it on **Auto**), and **Rub the lAMP**. You get:
+Open <http://localhost:4000>, type a brand name, optionally pick an industry,
+tone, and colour override, and **Rub the lAMP** — while the request is in
+flight, the button itself turns into a small brass genie lamp with blue smoke
+wisps rising off the spout (an inline animated SVG, `prefers-reduced-motion`
+gets a static non-animated lamp instead), then bursts into a quick flash on
+success so it never blocks the reveal. By default you get the core,
+non-technical experience — a **Live preview** (a phone-framed, plain-JS mirror
+of the exact `amp-bind` state machine baked into the AMP, so every tap/type
+interaction works in the browser without an AMP runtime), plus **Copy /
+Download / Send to inbox**, all acting on the generated AMP.
 
-- a **Live preview** (a generic AMP interpreter runs the actual `amp-bind`
-  state machine, so interactions work in the preview);
-- the **AMP code** (editable, with a one-click **Re-validate**);
-- a **Validation** tab showing the real validator verdict and any errors;
-- **Copy / Download / Send to inbox** — all operating on the code currently in
-  the editor (your edits included).
+Flip the **Developer view** toggle (top-right corner, off by default,
+in-memory only — it resets on reload) to reveal two more tabs for
+debugging:
+
+- the **AMP code** — editable, with a one-click **Re-validate** (runs the real
+  validator on your edited text) and **Reset**;
+- a **Validation** tab with the real validator's PASS/FAIL verdict and the
+  full per-error list (line, column, message).
+
+Copy/Download/Send always act on the code currently in the editor, your edits
+included, whether or not Developer view is on.
+
+Click **Surprise me again** to reroll: brand, industry, and tone stay put, but
+a reroll counter advances the seed, so you get a different (but reproducible)
+module/content pick each time.
+
+### Campaign brief — captured, not interpreted
+
+Below the structured fields sits an optional **"Tell us about this
+campaign"** textarea — one free-text box for the use case, desired flow, and
+any integrations ("needs to hit our loyalty API on redeem," "should match
+our Diwali sale email from last year," "skip the OTP step for returning
+users") instead of forcing that into extra dropdowns. It has a soft
+`0/2000` character counter: past the limit, **Rub the lAMP** disables and a
+warning appears, but **nothing you've typed is ever truncated** — there is
+deliberately no `maxlength` on the field.
+
+This is intentionally a one-way capture, today: the brief is trimmed
+server-side (whitespace-only → no brief, not an empty string), stored
+alongside the build, and echoed back next to the current result — it is
+**never parsed and never changes which module, vertical, or tone gets
+picked**; those still come entirely from the structured fields. Wiring an
+LLM step that actually reads the brief and suggests/overrides those choices
+is a bigger, separate feature, deliberately not built here.
+
+### Recent builds — a read-only history
+
+Every generation is appended to a small **`.history.json`** file on disk
+(server/history.js — newest-first, capped at 200 entries, best-effort: a
+failed write never fails the request that triggered it) and shown in a
+**Recent builds** panel underneath the result — brand, module, vertical,
+tone, timestamp, a pass/fail chip, and the campaign brief (or "No campaign
+brief given") for each past build, all HTML-escaped the same way the rest of
+the UI escapes free text. It's a review aid, not a system of record: nothing
+here feeds back into generation.
 
 ---
 
 ## How it works
 
-### Asset resolution (the waterfall)
+### Brand colour resolution (`server/brand.js`)
 
-For every asset slot an email needs (logo, product images, hero), the genie
-resolves in strict priority order and **always ends on a working HTTPS asset**:
+Given a brand name, colours resolve in strict priority order, and the winning
+tier is reported back and shown as a chip in the UI:
 
 | Tier | Source | Notes |
 |---|---|---|
-| 1. **user** | what you upload / paste | uploads & non-HTTPS refs are rehosted to HTTPS |
-| 2. **brand-site** | logo / products from the brand's own pages | only if reachable over HTTPS |
-| 3. **open web** | favicon service (logos), permissively-licensed stock (products) | recorded as the source |
-| 4. **generated** | branded, palette-aware placeholder | never a grey box; always reachable |
+| 1. `override` | your hex input | wins unconditionally when valid |
+| 2. `library` | a curated list of real brand colours (AJIO, Zomato, Groww, Nykaa, Myntra, Zerodha, Apple, …) | keyed by a normalised brand name, with a few aliases |
+| 3. `fetched` | a live, server-side fetch of `https://www.<brand>.com` (and the bare domain) | parses `<meta name="theme-color">` first, then falls back to the most common saturated hex literal in the page |
+| 4. `hash` | a deterministic HSL-derived colour from the brand string | always succeeds — the floor of the waterfall |
 
-Nothing can fail: a blocked fetch or 404 falls through to the next tier, and the
-bottom tier is always reachable. **Provenance is recorded per asset** and shown
-in the UI (which tier, which source, and whether it was rehosted to HTTPS).
+A blocked/failed/timed-out fetch (DNS failure, no HTTPS, non-2xx, no usable
+colour on the page) falls through silently to the next tier — it never errors
+the `/generate` request. A full palette (primary, darkened primary, accent,
+light tint, ink, line) is derived from the resolved primary in
+`derivePalette()` and baked directly into every CSS rule — AMP4EMAIL forbids
+`:root` and `var(--…)`, so nothing is ever templated through CSS custom
+properties.
 
-> **HTTPS everywhere.** AMP requires HTTPS image sources. Uploads, `data:` URIs
-> and `http://` refs are downloaded and re-served from `PUBLIC_ASSET_BASE`
-> (see [Sending to a real inbox](#sending-to-a-real-inbox)).
+### The six interactive modules (`server/generate.js`)
 
-### Production AMP structure
+Each module is a pure function of `(brand, vertical, tone, currency, palette,
+content, rng) → { ampHtml, previewModel }`, driven entirely by an `amp-bind`
+state machine (`amp-state` + `[hidden]`/`[class]`/`[text]` +
+`on="tap:AMP.setState(...)"` / `on="input-throttle:AMP.setState(...)"`):
 
-The builder emits a production AMP4EMAIL document: `<!doctype html>` →
-`<html amp4email data-css-strict>` with `<meta charset>` first, then `amp-bind`/`amp-form`/
-`amp-carousel`/etc. component scripts, the `amp4email-boilerplate`, and a baked,
-palette-aware `<style amp-custom>`. Layout is a table-based 600px column;
-interactions are absolutely-positioned tap zones (`role="button"`,
-`on="tap:AMP.setState(...)"`) over base images, driving `amp-bind` state
-machines. All non-ASCII is encoded as HTML entities (e.g. `₹` → `&#8377;`).
+1. **Tap to Reveal Offer** — teaser → tap → discount + code + product cards. `{r:false}`
+2. **Search & Filter Catalog** — live search + category pills over a baked product grid. `{s:'',cat:'all'}`
+3. **Quiz & Match** — tap an option → a personalised result appears. `{sel:''}`
+4. **Star Rating / NPS** — 5 tap-to-rate stars with a confirmation line. `{score:0}`
+5. **Spin to Win** — one tap → reward reveal. `{spun:false}`
+6. **This or That Poll** — two options → vote → social-proof result. `{v:''}`
 
-> **Note on the CSP `<meta>`.** The real validator **rejects**
-> `<meta http-equiv="Content-Security-Policy">` in AMP4EMAIL
-> (`The attribute 'http-equiv' may not appear in tag 'meta'`), so it is omitted.
-> Per the spec, we adjust to whatever the validator actually accepts.
+The module is picked at random from a seeded RNG (`brand + reroll counter`),
+so the same brand + counter always reproduces byte-identical output, while
+**Surprise me again** varies it. Product/quiz/poll/rating copy comes from a
+per-vertical content library (`server/content.js`; Fashion, Food, Finance,
+Beauty, Electronics, Travel, Generic) with tone-swapped headline templates
+(Playful / Premium / Urgent / Informative) and a `{b}` brand-token
+interpolated in. Demo images are `https://placehold.co/...` (always HTTPS,
+always reachable, palette-tinted).
 
-### Module library
+### AMP4EMAIL correctness (baked into `generate.js`, asserted in tests)
 
-26 production modules across five groups, auto-selected by vertical when you
-leave the use case on **Auto**:
+- `<!doctype html>` then `<html amp4email data-css-strict>`; `<meta
+  charset="utf-8">` is the first child of `<head>`.
+- Head order: runtime `v0.js` → `amp-bind` component script → `<style
+  amp4email-boilerplate>` → `<style amp-custom>`.
+- No `:root`, no `var(--…)`, no `!important`, no `@import`, no external
+  stylesheet — every colour is baked straight into its rule.
+- All `<amp-img>` sources are HTTPS and carry `width`/`height`/`layout`.
+- No runtime data: no `<amp-state src>`, no `[src]` — everything is baked into
+  an inline `<amp-state>` JSON blob.
+- `amp-bind` expressions only use whitelisted methods (`indexOf`,
+  `toLowerCase`, `length`, …) and `==`, never `=`.
+- Every non-ASCII character is emitted as a numeric HTML entity (see below) —
+  never a raw multibyte glyph.
 
-- **Gamification** — Spin the Wheel, Scratch Card, Tap to Reveal, Slot Machine,
-  Flip Card, Multi-frame Tap Game …
-- **Commerce** — Add to Cart, Cart, Product Carousel, Search & Filter, Wishlist …
-- **Feedback** — Quiz & Match, This-or-That Poll, NPS/Star Rating, Survey, Yes/No …
-- **Calculators** — SIP, EMI, Points (lookup tables baked at build time — no
-  runtime `Math.pow`).
-- **Content / Utility** — Accordion, Tabs, Pincode/Store search, OTP, Lead-gen,
-  Multi-lingual toggle, Appointment booking …
+### Encoding — no mojibake, ever
+
+The classic bug: a price like `₹4,799` (UTF-8 bytes `E2 82 B9`) gets
+misread as Latin-1 somewhere in the pipeline and turns into `â‚¹4,799`.
+The fix here isn't "serve the right charset and hope" — `enc()` in
+`generate.js` converts every codepoint above 127 into a numeric entity
+(`₹` → `&#8377;`) before it ever reaches the markup, so the output is
+correct regardless of how it's later saved, pasted, or re-served. Currency is
+configurable (₹ default; $, €, £ available), all via entities.
 
 ---
 
 ## Testing
 
 ```bash
-npm test              # unit tests (encoding + validator)             -> 7/7
-npm run matrix        # every prod module × {full, partial, zero}     -> 78/78 valid
-npm run matrix:stage1 # Stage 1 generator regression                  -> 42/42 valid
-npm run test:e2e      # Playwright UI e2e (real browser + validator)  -> 4/4
+npm test              # unit tests: encoding + validator (incl. the matrix) -> 7/7
+npm run test:e2e      # Playwright UI e2e against the real server           -> 25/25
 ```
 
-- **Unit** (`node --test`): currency/entity encoding round-trips and the
-  validator wrapper.
-- **Matrix** (`tests/prod-matrix.js`): builds all 26 modules against three asset
-  modes (all user assets, partial/brand-site, and **zero input**) and validates
-  every one — the acceptance grid.
-- **e2e** (`tests/e2e.test.js`, Playwright): drives the actual UI — zero-input
-  build, explicit module + interactivity, lifecycle arc, and the edit →
-  re-validate → reset loop — each asserting the **real** validator verdict.
-  Run `npx playwright install chromium` once before the first e2e run.
+- **`tests/encoding.test.js`** — asserts `formatPrice`/`enc` never emit a raw
+  multibyte currency glyph, only the numeric entity; and that a generated INR
+  email's raw bytes contain `&#8377;`, never mojibake.
+- **`tests/validator.test.js`** — every one of the 6 modules × all 7 verticals
+  is generated and run through the real `amphtml-validator` in AMP4EMAIL mode.
+  Prints the full pass/fail matrix and asserts **42/42 PASS, zero errors**.
+  Also covers deterministic reroll (same seed ⇒ identical bytes, a reroll ⇒
+  different) and the structural rules above.
+- **`tests/e2e.test.js`** (Playwright, `npx playwright install chromium` once
+  first) drives the real UI against the real running server end to end:
+  zero-input generation, brand/vertical/tone flowing into chips and code,
+  exactly-three-tabs (no Checklist tab), the AMP code / Validation tabs
+  staying hidden until the "Developer view" toggle is switched on (and the
+  active tab snapping back to Live preview if it's switched back off), a
+  colour override reflected in its chip, all three brand-colour resolution
+  tiers (a library brand, an
+  unrecognised-but-real brand exercising the live site fetch, and a
+  nonexistent brand falling back to the deterministic hash), every one of the
+  6 modules' live-preview interactivity (reached by rerolling until each comes
+  up), the edit → Re-validate (real FAIL with real errors) → Reset (back to
+  real PASS) loop, Copy via the async Clipboard API (read back via granted
+  clipboard permissions), Download byte-for-byte matching the current/edited
+  code, both dispatch failure paths (no recipient; no SMTP configured), and
+  the Rub button's genie-lamp smoke loading animation (shown, and the button
+  disabled, for the duration of a deliberately-slowed `/generate`; fully
+  cleaned up back to the resting label once it resolves); and the campaign
+  brief — trimmed and round-tripped to the current result, whitespace-only
+  treated as no brief, the optional field never blocking generation, the soft
+  2000-character limit disabling submit without ever truncating typed text,
+  and a submitted build (with its brief) appearing in the read-only Recent
+  builds history list.
 
 ---
 
 ## Sending to a real inbox
 
-`Send to your inbox` is gated: the genie **re-validates and refuses to send
-invalid AMP**, and sends a proper multipart message — `text/plain`, an
-`text/html` static fallback, and the **`text/x-amp-html`** AMP part (added by
-nodemailer's `amp:` field).
+The dispatch button (`POST /dispatch`) is wired to a real path in
+`server/dispatch.js`: it **re-validates and refuses to send invalid AMP**, then
+sends a proper multipart message via `nodemailer` — `text/plain`, a
+`text/html` static fallback, and the `text/x-amp-html` AMP part (nodemailer's
+`amp:` field). SMTP credentials come from env vars only, never the client, and
+CORS is locked to the genie's own origin.
 
-Sending interactive AMP that *renders* in Gmail/Yahoo/Mail.ru has provider
-prerequisites that are external to this app — getting a message delivered is not
-the same as getting the AMP part to render. You must:
+Getting a message *delivered* isn't the same as getting Gmail to *render* the
+AMP part. Three things gate that, and they're external to this app:
 
-1. **Register as an AMP sender with each provider.** For Gmail, complete
-   [Google's AMP-for-Email sender registration](https://developers.google.com/gmail/ampemail/register)
-   from a real, consistently-used sending domain. Until you are allow-listed,
-   the AMP part is ignored and the HTML fallback is shown.
-2. **Authenticate the domain.** Valid **SPF**, **DKIM** *and* **DMARC** are
-   required, and the `From:` domain must align. Unauthenticated mail will not
-   render AMP.
-3. **Use a stable, allow-listed `From:` sender.** It must match what you
-   registered. Set it via `SMTP_FROM`.
-4. **Pass the self-send / dynamic-email test.** Providers require that you can
-   send the AMP email **to yourself** and that it validates and renders before
-   they enable it for other recipients.
-5. **Honour freshness rules.** Providers cap AMP email age (Gmail: ~30 days) and
-   strip AMP outside that window — the HTML fallback then applies.
+1. **Register as an AMP sender with Google.** Send
+   `ampforemail.whitelisting@gmail.com` a request per
+   [Google's AMP-for-Email guide](https://developers.google.com/gmail/ampemail/register)
+   from a real, consistently-used sending domain. Until allow-listed, the AMP
+   part is ignored and the HTML fallback renders instead.
+2. **Pass SPF, DKIM, and DMARC**, aligned to the `From:` domain.
+3. **Self-send to verify before registration completes.** Gmail renders AMP
+   for mail sent **to the same account it was sent from**, regardless of
+   allow-list status — this is the fastest way to confirm interactivity works
+   in a real inbox while registration is pending. Use the dispatch field to
+   send yourself each module and tap through it in Gmail.
 
-### SMTP configuration (env vars only — never in client code)
+### SMTP configuration (env vars only)
 
 | Var | Required | Purpose |
 |---|---|---|
@@ -145,52 +230,57 @@ the same as getting the AMP part to render. You must:
 | `SMTP_PORT` | no (587) | `465` ⇒ implicit TLS, otherwise STARTTLS |
 | `SMTP_USER` | yes | SMTP username |
 | `SMTP_PASS` | yes | SMTP password / app password |
-| `SMTP_FROM` | no | `From:` address (defaults to `SMTP_USER`); must be your allow-listed sender |
+| `SMTP_FROM` | no | `From:` address (defaults to `SMTP_USER`); must match your allow-listed sender |
+| `PORT` | no (4000) | HTTP port; CORS is locked to `http://localhost:$PORT` |
 
 ```bash
-SMTP_HOST=smtp.example.com SMTP_PORT=587 \
-SMTP_USER=genie@yourdomain.com SMTP_PASS='********' \
-SMTP_FROM='AMP Genie <genie@yourdomain.com>' \
+SMTP_HOST=smtp.gmail.com SMTP_PORT=587 \
+SMTP_USER=you@gmail.com SMTP_PASS='an-app-password' \
 npm start
 ```
 
-If SMTP is unset, dispatch returns a clear "SMTP not configured" message instead
-of failing silently — the rest of the app (build, validate, copy, download)
-works without it.
+If SMTP is unset, dispatch returns a clear "SMTP not configured. Set
+SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS env vars…" message instead of
+failing silently — everything else (build, validate, copy, download) keeps
+working without it.
 
-### `PUBLIC_ASSET_BASE` — required for real sends
+---
 
-Rehosted assets (uploads, `data:`/`http:` images) are written to `web/assets/`
-and served from `PUBLIC_ASSET_BASE`. Locally this defaults to
-`http://localhost:4000`, which is **not** reachable by a mail client. For a real
-send, point it at a **public HTTPS origin** (an S3/CDN bucket — mirroring AJIO's
-`s3.ap-south-1` pattern):
+## Project layout
 
-```bash
-PUBLIC_ASSET_BASE=https://assets.yourdomain.com npm start
+```
+amp-genie/
+  server/
+    generate.js    module generators + AMP4EMAIL document assembly (source of truth)
+    content.js     per-vertical product/quiz/poll/rating copy + tone headlines
+    validator.js   thin wrapper around amphtml-validator, AMP4EMAIL mode
+    brand.js       4-tier brand colour resolver (override/library/fetch/hash)
+    dispatch.js    nodemailer AMP send (text/x-amp-html MIME part)
+    history.js     minimal file-based .history.json persistence (read/append/normalizeBrief)
+    index.js       Express routes: /api/meta, /brand, /generate, /history, /validate, /dispatch
+  web/
+    index.html     hero (incl. campaign brief), dropdowns, result panel, 3 tabs, history list
+    app.js         UI state machine: build/edit/revalidate/copy/download/dispatch/history
+    preview.js     plain-JS mirror of each module's amp-bind logic for Live Preview
+    style.css
+  tests/
+    encoding.test.js
+    validator.test.js
+    e2e.test.js
+  playwright.config.js
+  package.json
 ```
 
 ---
 
-## Configuration reference
+## No dead controls
 
-| Var | Default | Purpose |
-|---|---|---|
-| `PORT` | `4000` | HTTP port; CORS is locked to this origin |
-| `PUBLIC_ASSET_BASE` | `http://localhost:$PORT` | public HTTPS base for rehosted assets |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | — | dispatch (see above) |
-
----
-
-## Honest caveats
-
-- **Logos usually resolve via the web (favicon) tier.** Brand-site logo capture
-  depends on the page exposing an `og:image`/recognisable logo; otherwise the
-  favicon service or a generated mark is used. Provenance always shows which.
-- **Stock/open-web images are illustrative.** They are keyworded and
-  permissively-licensed, but for production you should supply real product
-  imagery (tier 1) — it always wins.
-- **Local rehost is for development.** Real inbox sends require
-  `PUBLIC_ASSET_BASE` on a public HTTPS bucket.
-- **Inbox rendering is an external gate.** This repo proves *validity and
-  build*; provider allow-listing (above) is what makes AMP *render* in the inbox.
+Every input and button in the UI is wired to real behaviour: the colour
+picker/hex fields sync bidirectionally and feed `/generate`'s
+`colorOverride`, the dispatch recipient field drives a real
+`POST /dispatch`, Copy/Download/Re-validate/Reset all operate on the exact
+code currently shown (edits included), and there is no fourth "Checklist"
+tab — only Live preview, AMP code, and Validation. The AMP code and
+Validation tabs are hidden (`display:none`, not removed from the DOM) until
+Developer view is switched on, so every existing lookup and behaviour keeps
+working unchanged whether or not the toggle is on.

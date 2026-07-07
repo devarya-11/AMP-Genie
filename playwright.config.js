@@ -2,7 +2,7 @@
 
 // Playwright e2e config. Drives the real UI against a real server, which in turn
 // calls the real amphtml-validator — so a green run proves the whole pipeline
-// (intake -> asset resolution -> production build -> validation -> preview).
+// (brand resolution -> generation -> validation -> live preview -> dispatch).
 const { defineConfig, devices } = require('@playwright/test');
 
 const PORT = Number(process.env.PORT) || 4000;
@@ -10,7 +10,7 @@ const PORT = Number(process.env.PORT) || 4000;
 module.exports = defineConfig({
   testDir: './tests',
   testMatch: /e2e\.test\.js/,
-  // Asset resolution makes real network calls with timeouts; be generous.
+  // Brand colour resolution can make a real outbound fetch; be generous.
   timeout: 60_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,

@@ -8,7 +8,7 @@
 </head>
 <body>
 
-<!-- SVG icon library (all chrome icons are SVG, never glyphs) -->
+<!-- SVG icon library — every chrome icon is inline SVG, never a Unicode glyph. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-lamp" viewBox="0 0 24 24">
     <path fill="currentColor" d="M5 14c0-3.9 3.1-7 7-7 2.8 0 5 1.6 6.2 4l3.3-1.1.5 1.5-3.3 1.1c.2.7.3 1.4.3 2.1H5zm-1 2h16v2H4zm3 3h10l-1 2H8z"/>
@@ -25,74 +25,49 @@
   <symbol id="i-refresh" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M20 11a8 8 0 10-2 5m2 4v-5h-5"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path fill="currentColor" d="M3 11l18-8-8 18-2-7z"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" d="M16 16l4 4"/></symbol>
-  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="9.5" r="1.5" fill="currentColor"/><path d="M5 18l5-5 4 4 3-3 3 3" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
-  <symbol id="i-trash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M5 7h14M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
-  <symbol id="i-warn" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3l10 18H2z"/><path stroke="#fff" stroke-width="2" d="M12 10v5M12 17.5v.5"/></symbol>
-  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 11v5"/><circle cx="12" cy="7.6" r="1.2" fill="currentColor"/></symbol>
-  <symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 3l8 3v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/></symbol>
 </svg>
 
 <header class="topbar">
   <div class="brandmark"><svg class="ic lampic"><use href="#i-lamp"/></svg><span>AMP&nbsp;Genie</span></div>
-  <div class="tagline">Paste a store URL &rarr; a validated, interactive AMP email</div>
+  <div class="tagline">Type a brand &rarr; a validated, interactive AMP email</div>
+  <label class="devtoggle" title="Show the AMP code &amp; Validation tabs for debugging">
+    <input type="checkbox" id="devToggle" class="devtoggle-input">
+    <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
+    <span class="devtoggle-text">Developer view</span>
+  </label>
 </header>
 
 <main>
   <!-- HERO -->
   <section class="hero card">
-    <div class="hero-primary">
-      <label class="fieldlabel">Store URL <span class="hint">voice, palette &amp; products are read from the site</span></label>
-      <input id="url" type="text" placeholder="https://www.yourstore.com">
-    </div>
-    <div class="hero-secondary">
-      <label class="fieldlabel">or brand name <span class="hint">fallback</span></label>
-      <input id="brand" type="text" placeholder="e.g. Zomato">
+    <label class="fieldlabel" for="brand">Brand name</label>
+    <div class="hero-input-row">
+      <input id="brand" type="text" placeholder="e.g. Zomato, Nykaa, Groww&hellip;" autocomplete="off">
+      <button id="rub" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Rub the <span class="cursive-l">l</span>AMP</button>
     </div>
 
     <div class="controls">
-      <div class="ctrl"><label>Use case</label><select id="moduleSel"></select></div>
-      <div class="ctrl"><label>Industry</label><select id="vertical"></select></div>
-      <div class="ctrl"><label>Tone</label><select id="tone"></select></div>
-      <div class="ctrl"><label>Currency</label><select id="currency"></select></div>
-      <div class="ctrl"><label>Brand colour <span class="hint">auto from site</span></label>
-        <div class="colorwrap"><input id="colorpick" type="color" value="#6c2bd9"><input id="colorhex" type="text" value="" placeholder="auto" maxlength="7"></div>
+      <div class="ctrl"><label for="vertical">Industry</label><select id="vertical"></select></div>
+      <div class="ctrl"><label for="tone">Tone</label><select id="tone"></select></div>
+      <div class="ctrl">
+        <label for="colorhex">Brand colour <span class="hint">optional override</span></label>
+        <div class="colorwrap">
+          <input id="colorpick" type="color" value="#6c2bd9">
+          <input id="colorhex" type="text" placeholder="auto" maxlength="7">
+        </div>
       </div>
     </div>
 
-    <!-- ASSET INTAKE — every field optional; the genie fetches or generates the rest -->
-    <details class="intake">
-      <summary><svg class="ic"><use href="#i-image"/></svg> Assets <span class="hint">optional — fill in what you have, the genie fetches or generates the rest</span></summary>
-      <div class="intake-grid">
-        <label>Logo URL<input id="assetLogo" type="text" placeholder="https://…/logo.png"></label>
-        <label>Accent colour<input id="assetAccent" type="text" placeholder="#F59E0B"></label>
-        <label class="wide">Product image URLs <span class="hint">one per line</span><textarea id="assetProducts" rows="3" placeholder="https://…/a.jpg&#10;https://…/b.jpg"></textarea></label>
-        <label>Headline<input id="copyHead" type="text" placeholder="e.g. A reward is waiting"></label>
-        <label>Offer code<input id="copyCode" type="text" placeholder="e.g. WELCOME20"></label>
+    <div class="brief-field">
+      <label class="fieldlabel" for="campaignBrief">Tell us about this campaign <span class="hint">optional</span></label>
+      <textarea id="campaignBrief" rows="5" placeholder="What&rsquo;s this campaign for? Include the use case, what it should do, how the flow should work, and anything it needs to connect to (e.g. your CRM, loyalty program, a specific API)."></textarea>
+      <div class="brief-meta">
+        <span id="briefCount" class="brief-count">0/2000</span>
+        <span id="briefWarn" class="brief-warn hidden">Over 2000 characters &mdash; trim it down to Rub the lAMP. Nothing you&rsquo;ve typed is lost.</span>
       </div>
-    </details>
-
-    <div class="hero-actions">
-      <button id="rub" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Rub the <span class="cursive-l">l</span>AMP</button>
     </div>
+
     <div id="status" class="statusline"></div>
-  </section>
-
-  <!-- BRAND PROFILE + EDITOR -->
-  <section id="profilePanel" class="card hidden">
-    <div class="panel-head"><svg class="ic"><use href="#i-sparkle"/></svg> Brand read <span id="sourceBadge" class="badge"></span></div>
-    <div id="profileBody" class="profile-grid"></div>
-    <details class="editor">
-      <summary>Brand editor &mdash; lock &amp; regenerate</summary>
-      <div class="editor-grid">
-        <label>Name<input id="ed-name" type="text"></label>
-        <label>Voice<input id="ed-voice" type="text"></label>
-        <label>Currency<select id="ed-currency"></select></label>
-        <label>Accent<input id="ed-accent" type="color"></label>
-        <label>Background<input id="ed-bg" type="color"></label>
-        <label>Primary<input id="ed-primary" type="color"></label>
-      </div>
-      <button id="lockRegen" class="primary"><svg class="ic"><use href="#i-refresh"/></svg> Lock &amp; regenerate</button>
-    </details>
   </section>
 
   <!-- RESULT -->
@@ -101,109 +76,63 @@
     <aside class="rail card">
       <div id="conjured" class="conjured"></div>
       <div id="chips" class="chips"></div>
+      <div id="briefNote" class="brief-note hidden"></div>
 
       <div class="rail-actions">
         <button id="surprise" class="ghost"><svg class="ic"><use href="#i-refresh"/></svg> Surprise me again</button>
         <button id="copy" class="ghost"><svg class="ic"><use href="#i-copy"/></svg> Copy AMP code</button>
         <button id="download" class="ghost"><svg class="ic"><use href="#i-download"/></svg> Download .html</button>
-        <button id="renderVisuals" class="ghost"><svg class="ic"><use href="#i-image"/></svg> Render visuals</button>
       </div>
+      <div id="copyMsg" class="copy-msg" aria-live="polite"></div>
 
       <div class="dispatch">
-        <label class="fieldlabel">Send a test to myself <span class="hint">self-send renders AMP without Google registration</span></label>
+        <label class="fieldlabel" for="dispatchTo">Send to your inbox <span class="hint">self-send renders AMP without Google registration</span></label>
         <div class="dispatch-row">
           <input id="dispatchTo" type="email" placeholder="you@gmail.com">
           <button id="dispatch" class="primary"><svg class="ic"><use href="#i-send"/></svg></button>
         </div>
-        <div id="dispatchMsg" class="dispatch-msg"></div>
+        <div id="dispatchMsg" class="dispatch-msg" aria-live="polite"></div>
       </div>
     </aside>
 
     <!-- RIGHT TABS -->
     <div class="panel card">
       <nav class="tabs">
-        <button data-tab="preview" class="on">Live preview</button>
-        <button data-tab="code">AMP code <span id="editedDot" class="editdot hidden"></span></button>
-        <button data-tab="validation">Validation <span id="valDot" class="statdot"></span></button>
-        <button data-tab="deliver">Deliver <span id="deliverDot" class="statdot"></span></button>
+        <button data-tab="preview" class="on" type="button">Live preview</button>
+        <button data-tab="code" type="button" class="advanced-only">AMP code <span id="editedDot" class="editdot hidden"></span></button>
+        <button data-tab="validation" type="button" class="advanced-only">Validation <span id="valDot" class="statdot"></span></button>
       </nav>
 
       <div data-pane="preview" class="pane on">
-        <!-- preview-mode toolbar: device, theme, client -->
-        <div class="previewbar">
-          <div class="segmented" id="deviceSeg" role="group" aria-label="Device">
-            <button data-device="mobile" class="on" type="button">Mobile</button>
-            <button data-device="desktop" type="button">Desktop</button>
-          </div>
-          <div class="segmented" id="themeSeg" role="group" aria-label="Theme">
-            <button data-theme="light" class="on" type="button">Light</button>
-            <button data-theme="dark" type="button">Dark</button>
-          </div>
-          <div class="segmented" id="clientSeg" role="group" aria-label="Client">
-            <button data-client="amp" class="on" type="button">Gmail · AMP</button>
-            <button data-client="outlook" type="button">Outlook · static</button>
-          </div>
+        <div class="stage">
+          <div class="phone"><div id="previewArea" class="phone-screen"></div></div>
         </div>
-
-        <!-- inbox envelope: sender, subject (editable), preheader -->
-        <div class="envelope" id="envelope">
-          <div class="env-top"><span class="env-avatar" id="envAvatar"></span>
-            <div class="env-id"><span class="env-from" id="envFrom">Brand</span><span class="env-time">now</span></div>
-          </div>
-          <input class="env-subject" id="envSubject" aria-label="Subject line" spellcheck="false">
-          <div class="env-preheader" id="envPreheader"></div>
-        </div>
-
-        <div class="stage" id="previewStage">
-          <div class="phone" id="phoneFrame"><div id="previewArea" class="phone-screen"></div></div>
-        </div>
-        <div id="darkWarn" class="notice warn hidden"></div>
-        <div id="clientNote" class="notice info hidden"></div>
-        <div id="visualState" class="visualstate"></div>
       </div>
 
-      <div data-pane="code" class="pane">
+      <div data-pane="code" class="pane advanced-only">
         <div class="code-actions">
-          <button id="revalidate" class="primary sm"><svg class="ic"><use href="#i-check"/></svg> Re-validate <span class="btn-sub">real validator</span></button>
+          <button id="revalidate" class="primary sm"><svg class="ic"><use href="#i-check"/></svg> Re-validate</button>
           <button id="resetCode" class="ghost sm"><svg class="ic"><use href="#i-refresh"/></svg> Reset</button>
-          <span id="preCheck" class="precheck" title="Instant client-side regex pre-check — not the real validator. Press Re-validate to run amphtml-validator."></span>
           <span id="editedLabel" class="edited hidden">edited &mdash; differs from generated</span>
         </div>
         <textarea id="code" spellcheck="false"></textarea>
       </div>
 
-      <div data-pane="validation" class="pane">
+      <div data-pane="validation" class="pane advanced-only">
         <div id="verdict" class="verdict"></div>
-        <a id="playground" class="pglink" target="_blank" rel="noopener">Open in AMP Playground &rarr;</a>
+        <a id="playground" class="pglink" href="https://amp.gmail.dev/playground/" target="_blank" rel="noopener">Open in AMP Playground &rarr;</a>
         <ul id="errors" class="errlist"></ul>
-        <div class="checksec">
-          <div class="checksec-head"><h3>Accessibility <span id="a11yDot" class="statdot"></span></h3><span class="checksec-sub">alt text · WCAG AA contrast · heading structure</span></div>
-          <div id="a11yBody" class="checkbody"></div>
-        </div>
-      </div>
-
-      <div data-pane="deliver" class="pane">
-        <div class="checksec">
-          <div class="checksec-head"><h3>Pre-send checks <span id="preflightDot" class="statdot"></span></h3>
-            <button id="runPreflight" class="ghost sm"><svg class="ic"><use href="#i-check"/></svg> Run checks</button></div>
-          <div id="preflightBody" class="checkbody"><p class="checkhint">Estimated spam score, total size, image weight, HTTPS and asset rights — run before you send.</p></div>
-        </div>
-        <div class="checksec">
-          <div class="checksec-head"><h3>Deliverability &amp; sender registration <span id="deliverStatusDot" class="statdot"></span></h3></div>
-          <div class="deliver-input">
-            <input id="deliverDomain" type="text" placeholder="mail.yourbrand.com" spellcheck="false">
-            <button id="runDeliver" class="ghost sm"><svg class="ic"><use href="#i-search"/></svg> Check DNS</button>
-          </div>
-          <div id="deliverBody" class="checkbody"><p class="checkhint">Check live SPF, DKIM and DMARC for your sending domain, then see exactly what Google needs to enable interactive AMP in recipients' inboxes.</p></div>
-        </div>
       </div>
     </div>
   </section>
 
   <!-- HISTORY -->
-  <section id="historyPanel" class="card hidden">
-    <div class="panel-head"><svg class="ic"><use href="#i-star"/></svg> History</div>
-    <ul id="historyList" class="history"></ul>
+  <section id="historySection" class="history card hidden">
+    <div class="history-hdr">
+      <h2 class="history-title">Recent builds</h2>
+      <span class="hint">brief &amp; metadata from past generations, for review &mdash; read-only</span>
+    </div>
+    <div id="historyList" class="history-list"></div>
   </section>
 </main>
 
