@@ -5,10 +5,11 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test tests/encoding.test.js tests/validator.test.js",
+    "test": "node --test tests/encoding.test.js tests/validator.test.js tests/brief-content.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "amphtml-validator": "^1.0.38",
     "express": "^4.22.2",
     "nodemailer": "^6.10.1"

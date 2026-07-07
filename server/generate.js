@@ -143,11 +143,50 @@ function ph(w, h, bgHex, fgHex, text) {
   return `https://placehold.co/${w}x${h}/${bg}/${fg}?text=${t}`;
 }
 
+// A discount/percentage value coming from an untrusted copy override (manual
+// or LLM-composed): keep only whole numbers in a sane 1-99 range, else fall
+// back to the caller's own default (never throws, never NaN%).
+function validPct(n) {
+  const v = Math.round(Number(n));
+  return Number.isFinite(v) && v >= 1 && v <= 99 ? v : 0;
+}
+
+// Best-effort brand homepage guess for the header logo link. Mirrors (does
+// not import) brand.js's candidateDomains — this is a display-only link, not
+// used for colour resolution, so a single best guess is enough here.
+function siteGuess(brand) {
+  const slug = String(brand || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return slug ? `https://www.${slug}.com` : '#';
+}
+
+// Shared header: brand logo (placeholder image, linked to the guessed brand
+// site) plus the module's headline. `head` arrives pre-encoded (callers do
+// enc(applyBrand(...)) before passing it in, matching the existing pattern).
+function headerBlock({ brand, palette: p, head, copy = {} }) {
+  const site = siteGuess(brand);
+  const logo = copy.logoUrl || ph(96, 32, p.primary, '#ffffff', (brand || 'BRAND').trim().slice(0, 10));
+  return `<div class="hdr">
+  <a class="brand-link" href="${enc(site)}" target="_blank" rel="noopener noreferrer" aria-label="${enc(brand)}">
+    <amp-img class="logo" src="${logo}" width="96" height="32" layout="fixed" alt="${enc(brand)} logo"></amp-img>
+  </a>
+  <h1>${head}</h1>
+</div>`;
+}
+
+// Shared footer: brand name plus either an override footer line or the
+// module's own default trailing copy.
+function footerBlock({ brand, defaultText, copy = {} }) {
+  const text = copy.footerText || defaultText;
+  return `<div class="foot"><p>${enc(brand)} &#8226; ${enc(text)}</p></div>`;
+}
+
 function baseCss(p) {
   return `
 body{margin:0;background:#f3f3f6;font-family:'Helvetica Neue',Arial,sans-serif;color:${p.ink};}
 .wrap{max-width:600px;margin:0 auto;background:#ffffff;}
 .hdr{background:${p.primary};padding:22px 24px;}
+.hdr .brand-link{display:inline-block;text-decoration:none;margin:0 0 10px;}
+.hdr .logo{display:block;}
 .hdr h1{margin:0;color:#ffffff;font-size:21px;line-height:1.3;font-weight:bold;}
 .hdr p{margin:6px 0 0;color:#ffffff;font-size:13px;opacity:0.85;}
 .pad{padding:24px;}
@@ -194,12 +233,15 @@ function ampState(id, data) {
  * ------------------------------------------------------------------ */
 
 function buildReveal(ctx) {
-  const { brand, palette: p, content, t, currency, rng } = ctx;
-  const head = enc(applyBrand(t.reveal, brand));
-  const discount = pick(rng, [10, 15, 20, 25]);
+  const { brand, palette: p, content, t, currency, rng, copy = {} } = ctx;
+  const headSrc = copy.head || t.reveal;
+  const head = enc(applyBrand(headSrc, brand));
+  const discount = validPct(copy.discount) || pick(rng, [10, 15, 20, 25]);
   const code = (brand.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6) || 'GENIE') + discount;
   const items = shuffle(rng, content.items).slice(0, 2);
   const img = ph(600, 300, p.primary, '#ffffff', `${brand} OFFER`);
+  const teaserSrc = copy.teaserText || 'A hand-picked reward is waiting behind the curtain.';
+  const ctaSrc = copy.ctaLabel || 'Reveal my offer';
 
   const css = baseCss(p) + `
 .teaser{text-align:center;padding:30px 24px;}
@@ -208,11 +250,11 @@ function buildReveal(ctx) {
 `;
   const body = `
 ${ampState('s', { r: false })}
-<div class="hdr"><h1>${head}</h1></div>
+${headerBlock({ brand, palette: p, head, copy })}
 <div class="teaser" [hidden]="s.r">
   <p class="big">${discount}% OFF</p>
-  <p class="muted">A hand-picked reward is waiting behind the curtain.</p>
-  <div class="pad"><span class="btn" role="button" tabindex="0" on="tap:AMP.setState({s:{r:true}})">Reveal my offer</span></div>
+  <p class="muted">${enc(teaserSrc)}</p>
+  <div class="pad"><span class="btn" role="button" tabindex="0" on="tap:AMP.setState({s:{r:true}})">${enc(ctaSrc)}</span></div>
 </div>
 <div class="offer" hidden [hidden]="!s.r">
   <amp-img src="${img}" width="600" height="300" layout="responsive" alt="${enc(brand)} offer"></amp-img>
@@ -229,10 +271,11 @@ ${ampState('s', { r: false })}
     </div>
   </div>
 </div>
-<div class="foot"><p>${enc(brand)} &#8226; You received this because you opted in to offers.</p></div>`;
+${footerBlock({ brand, defaultText: 'You received this because you opted in to offers.', copy })}`;
 
   const previewModel = {
-    type: 'reveal', head: applyBrand(t.reveal, brand), code, discount,
+    type: 'reveal', head: applyBrand(headSrc, brand), code, discount,
+    teaserText: teaserSrc, ctaLabel: ctaSrc,
     items: items.map((it) => ({ name: it.name, price: priceText(it.price, currency) })),
     image: img,
   };
@@ -240,8 +283,9 @@ ${ampState('s', { r: false })}
 }
 
 function buildSearch(ctx) {
-  const { brand, palette: p, content, t, currency, rng } = ctx;
-  const head = enc(applyBrand(t.search, brand));
+  const { brand, palette: p, content, t, currency, rng, copy = {} } = ctx;
+  const headSrc = copy.head || t.search;
+  const head = enc(applyBrand(headSrc, brand));
   const items = shuffle(rng, content.items.map((it, i) => ({ ...it, cat: content.itemCats[i], key: it.name.toLowerCase() })));
   const cats = content.categories;
   const catKeys = content.catKeys;
@@ -273,16 +317,16 @@ function buildSearch(ctx) {
 
   const body = `
 ${ampState('s', { q: '', cat: 'all' })}
-<div class="hdr"><h1>${head}</h1></div>
+${headerBlock({ brand, palette: p, head, copy })}
 <div class="pad search">
   <input type="text" placeholder="Search products" on="input-throttle:AMP.setState({s:{q:event.value.toLowerCase()}})">
   <div class="pills">${pills}</div>
   <div class="grid row">${cards}</div>
 </div>
-<div class="foot"><p>${enc(brand)} &#8226; Live catalogue search, right inside your inbox.</p></div>`;
+${footerBlock({ brand, defaultText: 'Live catalogue search, right inside your inbox.', copy })}`;
 
   const previewModel = {
-    type: 'search', head: applyBrand(t.search, brand),
+    type: 'search', head: applyBrand(headSrc, brand),
     cats: ['all'].concat(catKeys), catLabels: ['All'].concat(cats),
     items: items.map((it) => ({ name: it.name, price: priceText(it.price, currency), cat: it.cat, key: it.key, image: ph(300, 200, p.tint, p.primary, it.name) })),
   };
@@ -290,10 +334,20 @@ ${ampState('s', { q: '', cat: 'all' })}
 }
 
 function buildQuiz(ctx) {
-  const { brand, palette: p, content, t } = ctx;
-  const head = enc(applyBrand(t.quiz, brand));
-  const q = enc(applyBrand(content.quiz.q, brand));
-  const opts = content.quiz.options;
+  const { brand, palette: p, content, t, copy = {} } = ctx;
+  const headSrc = copy.head || t.quiz;
+  const head = enc(applyBrand(headSrc, brand));
+  const qSrc = copy.question || content.quiz.q;
+  const q = enc(applyBrand(qSrc, brand));
+  // A copy-provided option override must match the template's fixed 3-option
+  // shape exactly (label required; result optional, falls back to the
+  // library's own result copy) or it is ignored outright.
+  const validOverride = Array.isArray(copy.options)
+    && copy.options.length === content.quiz.options.length
+    && copy.options.every((o) => o && typeof o.label === 'string' && o.label.trim());
+  const opts = validOverride
+    ? copy.options.map((o, i) => ({ label: o.label, result: (typeof o.result === 'string' && o.result.trim()) || content.quiz.options[i].result }))
+    : content.quiz.options;
   const keys = ['a', 'b', 'c'];
 
   const css = baseCss(p) + `
@@ -313,25 +367,27 @@ function buildQuiz(ctx) {
 
   const body = `
 ${ampState('s', { sel: '' })}
-<div class="hdr"><h1>${head}</h1></div>
+${headerBlock({ brand, palette: p, head, copy })}
 <div class="pad">
   <p class="qtitle">${q}</p>
   ${options}
   ${results}
 </div>
-<div class="foot"><p>${enc(brand)} &#8226; Tap an answer for your personalised pick.</p></div>`;
+${footerBlock({ brand, defaultText: 'Tap an answer for your personalised pick.', copy })}`;
 
   const previewModel = {
-    type: 'quiz', head: applyBrand(t.quiz, brand), q: applyBrand(content.quiz.q, brand),
+    type: 'quiz', head: applyBrand(headSrc, brand), q: applyBrand(qSrc, brand),
     options: opts.map((o, i) => ({ key: keys[i], label: o.label, result: applyBrand(o.result, brand) })),
   };
   return { scripts: [SCRIPT_BIND], css, body, previewModel };
 }
 
 function buildRating(ctx) {
-  const { brand, palette: p, content, t } = ctx;
-  const head = enc(applyBrand(t.rate, brand));
-  const prompt = enc(applyBrand(content.rate, brand));
+  const { brand, palette: p, content, t, copy = {} } = ctx;
+  const headSrc = copy.head || t.rate;
+  const head = enc(applyBrand(headSrc, brand));
+  const promptSrc = copy.prompt || content.rate;
+  const prompt = enc(applyBrand(promptSrc, brand));
 
   const css = baseCss(p) + `
 .stars{font-size:0;text-align:center;margin:10px 0;}
@@ -347,24 +403,26 @@ function buildRating(ctx) {
 
   const body = `
 ${ampState('s', { score: 0 })}
-<div class="hdr"><h1>${head}</h1></div>
+${headerBlock({ brand, palette: p, head, copy })}
 <div class="pad">
   <p class="rtitle">${prompt}</p>
   <div class="stars">${stars}</div>
   <p class="conf" [text]="s.score == 0 ? '' : 'You rated ' + s.score + ' out of 5 — thank you!'"></p>
 </div>
-<div class="foot"><p>${enc(brand)} &#8226; Your feedback shapes what we do next.</p></div>`;
+${footerBlock({ brand, defaultText: 'Your feedback shapes what we do next.', copy })}`;
 
-  const previewModel = { type: 'rating', head: applyBrand(t.rate, brand), prompt: applyBrand(content.rate, brand) };
+  const previewModel = { type: 'rating', head: applyBrand(headSrc, brand), prompt: applyBrand(promptSrc, brand) };
   return { scripts: [SCRIPT_BIND], css, body, previewModel };
 }
 
 function buildSpin(ctx) {
-  const { brand, palette: p, t, rng } = ctx;
-  const head = enc(applyBrand(t.spin, brand));
-  const pct = pick(rng, [15, 20, 25, 30]);
+  const { brand, palette: p, t, rng, copy = {} } = ctx;
+  const headSrc = copy.head || t.spin;
+  const head = enc(applyBrand(headSrc, brand));
+  const pct = validPct(copy.discount) || pick(rng, [15, 20, 25, 30]);
   const reward = (brand.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6) || 'GENIE') + pct;
   const img = ph(360, 360, p.primary, '#ffffff', 'SPIN');
+  const teaserSrc = copy.teaserText || 'One spin, one reward. Ready?';
 
   const css = baseCss(p) + `
 .spin{text-align:center;padding:24px;}
@@ -376,11 +434,11 @@ function buildSpin(ctx) {
 
   const body = `
 ${ampState('s', { spun: false })}
-<div class="hdr"><h1>${head}</h1></div>
+${headerBlock({ brand, palette: p, head, copy })}
 <div class="spin">
   <div class="wheel"><amp-img src="${img}" width="360" height="360" layout="responsive" alt="Prize wheel"></amp-img></div>
   <div [hidden]="s.spun">
-    <p class="muted">One spin, one reward. Ready?</p>
+    <p class="muted">${enc(teaserSrc)}</p>
     <div class="pad"><span class="btn alt" role="button" tabindex="0" on="tap:AMP.setState({s:{spun:true}})">Spin to win</span></div>
   </div>
   <div class="reward" hidden [hidden]="!s.spun">
@@ -389,17 +447,20 @@ ${ampState('s', { spun: false })}
     <div><span class="code">${enc(reward)}</span></div>
   </div>
 </div>
-<div class="foot"><p>${enc(brand)} &#8226; One reward per customer. Terms apply.</p></div>`;
+${footerBlock({ brand, defaultText: 'One reward per customer. Terms apply.', copy })}`;
 
-  const previewModel = { type: 'spin', head: applyBrand(t.spin, brand), reward, pct, image: img };
+  const previewModel = { type: 'spin', head: applyBrand(headSrc, brand), reward, pct, image: img };
   return { scripts: [SCRIPT_BIND], css, body, previewModel };
 }
 
 function buildPoll(ctx) {
-  const { brand, palette: p, content, t } = ctx;
-  const head = enc(applyBrand(t.poll, brand));
-  const q = enc(applyBrand(content.poll.q, brand));
-  const a = content.poll.a, b = content.poll.b;
+  const { brand, palette: p, content, t, copy = {} } = ctx;
+  const headSrc = copy.head || t.poll;
+  const head = enc(applyBrand(headSrc, brand));
+  const qSrc = copy.question || content.poll.q;
+  const q = enc(applyBrand(qSrc, brand));
+  const a = (typeof copy.optionA === 'string' && copy.optionA.trim()) || content.poll.a;
+  const b = (typeof copy.optionB === 'string' && copy.optionB.trim()) || content.poll.b;
 
   const css = baseCss(p) + `
 .poll{padding:24px;}
@@ -412,7 +473,7 @@ function buildPoll(ctx) {
 
   const body = `
 ${ampState('s', { v: '' })}
-<div class="hdr"><h1>${head}</h1></div>
+${headerBlock({ brand, palette: p, head, copy })}
 <div class="poll">
   <p class="ptitle">${q}</p>
   <div class="row" style="text-align:center">
@@ -423,10 +484,10 @@ ${ampState('s', { v: '' })}
     <p class="muted" [text]="s.v == 'a' ? 'You are with the 64% who chose ${jsStr(a)}. Great pick!' : 'You joined the 36% backing ${jsStr(b)}. Bold!'"></p>
   </div>
 </div>
-<div class="foot"><p>${enc(brand)} &#8226; Tap to vote results update instantly.</p></div>`;
+${footerBlock({ brand, defaultText: 'Tap to vote results update instantly.', copy })}`;
 
   const previewModel = {
-    type: 'poll', head: applyBrand(t.poll, brand), q: applyBrand(content.poll.q, brand), a, b,
+    type: 'poll', head: applyBrand(headSrc, brand), q: applyBrand(qSrc, brand), a, b,
   };
   return { scripts: [SCRIPT_BIND], css, body, previewModel };
 }
@@ -457,6 +518,19 @@ const MODULES = {
 };
 const MODULE_IDS = Object.keys(MODULES);
 
+// Extracted so callers (e.g. the /generate route, to pre-compute a moduleId
+// before invoking any brief-driven content composition) can resolve the same
+// module a plain generate() call would pick, without duplicating/drifting
+// from the selection logic below. Deterministic: same brand+counter always
+// picks the same module when none is explicitly given.
+function pickModuleId({ brand, counter, moduleId } = {}) {
+  if (moduleId && MODULES[moduleId]) return moduleId;
+  const b = (brand || 'Acme').trim() || 'Acme';
+  const c = Number.isFinite(counter) ? counter : 0;
+  const rng = mulberry32(hashSeed(b + ':' + c));
+  return MODULE_IDS[Math.floor(rng() * MODULE_IDS.length)];
+}
+
 function generate(opts = {}) {
   const brand = (opts.brand || 'Acme').trim() || 'Acme';
   const vertical = VERTICALS.includes(opts.vertical) ? opts.vertical : 'Generic';
@@ -472,12 +546,17 @@ function generate(opts = {}) {
   const t = TONES[tone];
   const rng = mulberry32(hashSeed(brand + ':' + counter));
 
+  // Same rule pickModuleId() applies, expressed against this call's own rng
+  // instance: consume rng() only when no valid moduleId was supplied, so
+  // pre-resolving a moduleId via pickModuleId() before calling generate()
+  // never perturbs the rest of this call's random sequence (item shuffles,
+  // discount %, etc).
   let moduleId = opts.moduleId;
   if (!moduleId || !MODULES[moduleId]) {
     moduleId = MODULE_IDS[Math.floor(rng() * MODULE_IDS.length)];
   }
   const mod = MODULES[moduleId];
-  const built = mod.build({ brand, vertical, tone, palette, content, t, currency, rng });
+  const built = mod.build({ brand, vertical, tone, palette, content, t, currency, rng, copy: opts.copy || {} });
   const title = `${brand} — ${mod.name}`;
   const ampHtml = shell({ title, scripts: built.scripts, css: built.css, body: built.body });
 
@@ -493,6 +572,6 @@ function generate(opts = {}) {
 }
 
 module.exports = {
-  generate, derivePalette, MODULES, MODULE_IDS,
+  generate, derivePalette, MODULES, MODULE_IDS, pickModuleId,
   enc, formatPrice, CURRENCIES, VERTICALS,
 };

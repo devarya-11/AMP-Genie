@@ -63,13 +63,61 @@ users") instead of forcing that into extra dropdowns. It has a soft
 warning appears, but **nothing you've typed is ever truncated** — there is
 deliberately no `maxlength` on the field.
 
-This is intentionally a one-way capture, today: the brief is trimmed
-server-side (whitespace-only → no brief, not an empty string), stored
-alongside the build, and echoed back next to the current result — it is
-**never parsed and never changes which module, vertical, or tone gets
-picked**; those still come entirely from the structured fields. Wiring an
-LLM step that actually reads the brief and suggests/overrides those choices
-is a bigger, separate feature, deliberately not built here.
+The brief is trimmed server-side (whitespace-only → no brief, not an empty
+string), stored alongside the build, and echoed back next to the current
+result. It **never changes which module, vertical, or tone gets picked** —
+those still come entirely from the structured fields. What it *can* do is
+drive a handful of short copy fragments — see the next section.
+
+### Brief-driven content generation (`server/brief-content.js`)
+
+When a brief is given, `composeContent()` makes one call to the real Claude
+API (`@anthropic-ai/sdk`, model `claude-haiku-4-5` — small and fast, since
+this sits on the `/generate` request's critical path) asking it to write a
+handful of short plain-text copy fragments for whichever module got picked —
+never markup, never the module/vertical/tone choice itself. The response is
+constrained twice: once by the API call's own `output_config.format`
+JSON-schema, and again locally by `validatePlan()` (`server/brief-content.js`)
+as defense in depth — any unrecognised field, non-string value, empty/over-long
+string, or stray `<`/`>` character rejects the **entire** plan back to `null`.
+The allowed fields per module (mirroring each module's own `copy.*` support in
+`generate.js`):
+
+| Module | Overridable fields |
+|---|---|
+| reveal | `head`, `teaserText`, `ctaLabel`, `footerText` |
+| search | `head`, `footerText` |
+| quiz | `head`, `question`, `footerText` |
+| rating | `head`, `prompt`, `footerText` |
+| spin | `head`, `teaserText`, `footerText` |
+| poll | `head`, `question`, `optionA`, `optionB`, `footerText` |
+
+A validated plan is merged into `copy` and passed straight into `generate()` —
+the exact same override channel a caller can hit manually via `POST /generate`'s
+own `copy` field, which always wins field-by-field over the LLM's plan.
+**Every failure mode degrades silently to `null`** (missing `ANTHROPIC_API_KEY`,
+network/API error, the ~8s timeout budget elapsing, a malformed or
+schema-invalid response) — a brief, or a flaky/slow LLM call, can never break
+or block a build; `/generate` always succeeds using the template's own
+built-in defaults. Set `ANTHROPIC_API_KEY` to enable it:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... npm start
+```
+
+Without that env var, briefs are still captured/stored/shown exactly as
+before — generation just falls back to the library's default copy.
+
+### Header & footer: brand logo, link, and attribution (`generate.js`)
+
+Every module's header now carries a placeholder brand-logo image
+(palette-tinted, matching the resolved brand colour) wrapped in a link to a
+best-effort guess at the brand's homepage (`https://www.<slugified-brand>.com`,
+opened in a new tab) alongside the module's headline. Every footer carries the
+brand name plus either the module's own default trailing line or an
+overridden `footerText`. Both are built by shared `headerBlock()` /
+`footerBlock()` helpers so all six modules stay visually and structurally
+consistent.
 
 ### Recent builds — a read-only history
 
@@ -160,8 +208,8 @@ configurable (₹ default; $, €, £ available), all via entities.
 ## Testing
 
 ```bash
-npm test              # unit tests: encoding + validator (incl. the matrix) -> 7/7
-npm run test:e2e      # Playwright UI e2e against the real server           -> 25/25
+npm test              # unit tests: encoding + validator + brief-content -> 24/24
+npm run test:e2e      # Playwright UI e2e against the real server        -> 25/25
 ```
 
 - **`tests/encoding.test.js`** — asserts `formatPrice`/`enc` never emit a raw
@@ -172,6 +220,15 @@ npm run test:e2e      # Playwright UI e2e against the real server           -> 2
   Prints the full pass/fail matrix and asserts **42/42 PASS, zero errors**.
   Also covers deterministic reroll (same seed ⇒ identical bytes, a reroll ⇒
   different) and the structural rules above.
+- **`tests/brief-content.test.js`** — `validatePlan()`'s allowlist rejects
+  unknown fields, non-strings, empty/over-long strings, and any `<`/`>`; a
+  dependency-injected fake Anthropic client exercises `composeContent()`'s
+  happy path, its schema-invalid-response fallback, a thrown client error, and
+  the timeout-budget race (all resolving to `null`, never throwing/hanging);
+  plus an end-to-end check that a validated plan's fields show up verbatim in
+  `generate()`'s AMP output and still pass the real validator, and that an
+  empty/omitted `copy` is a byte-for-byte no-op against the pre-feature
+  baseline.
 - **`tests/e2e.test.js`** (Playwright, `npx playwright install chromium` once
   first) drives the real UI against the real running server end to end:
   zero-input generation, brand/vertical/tone flowing into chips and code,
@@ -232,6 +289,7 @@ AMP part. Three things gate that, and they're external to this app:
 | `SMTP_PASS` | yes | SMTP password / app password |
 | `SMTP_FROM` | no | `From:` address (defaults to `SMTP_USER`); must match your allow-listed sender |
 | `PORT` | no (4000) | HTTP port; CORS is locked to `http://localhost:$PORT` |
+| `ANTHROPIC_API_KEY` | no | Enables brief-driven content generation (see above); without it, briefs are still captured/stored, generation just falls back to default copy |
 
 ```bash
 SMTP_HOST=smtp.gmail.com SMTP_PORT=587 \
@@ -251,13 +309,14 @@ working without it.
 ```
 amp-genie/
   server/
-    generate.js    module generators + AMP4EMAIL document assembly (source of truth)
-    content.js     per-vertical product/quiz/poll/rating copy + tone headlines
-    validator.js   thin wrapper around amphtml-validator, AMP4EMAIL mode
-    brand.js       4-tier brand colour resolver (override/library/fetch/hash)
-    dispatch.js    nodemailer AMP send (text/x-amp-html MIME part)
-    history.js     minimal file-based .history.json persistence (read/append/normalizeBrief)
-    index.js       Express routes: /api/meta, /brand, /generate, /history, /validate, /dispatch
+    generate.js       module generators + AMP4EMAIL document assembly (source of truth)
+    content.js        per-vertical product/quiz/poll/rating copy + tone headlines
+    validator.js      thin wrapper around amphtml-validator, AMP4EMAIL mode
+    brand.js          4-tier brand colour resolver (override/library/fetch/hash)
+    brief-content.js  brief -> schema-validated copy.* plan via the Claude API (graceful null on any failure)
+    dispatch.js       nodemailer AMP send (text/x-amp-html MIME part)
+    history.js        minimal file-based .history.json persistence (read/append/normalizeBrief)
+    index.js          Express routes: /api/meta, /brand, /generate, /history, /validate, /dispatch
   web/
     index.html     hero (incl. campaign brief), dropdowns, result panel, 3 tabs, history list
     app.js         UI state machine: build/edit/revalidate/copy/download/dispatch/history
@@ -266,6 +325,7 @@ amp-genie/
   tests/
     encoding.test.js
     validator.test.js
+    brief-content.test.js
     e2e.test.js
   playwright.config.js
   package.json

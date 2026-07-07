@@ -3,12 +3,13 @@
 const path = require('path');
 const express = require('express');
 
-const { generate, MODULE_IDS, MODULES, VERTICALS, CURRENCIES, derivePalette } = require('./generate');
+const { generate, pickModuleId, MODULE_IDS, MODULES, VERTICALS, CURRENCIES, derivePalette } = require('./generate');
 const { TONES } = require('./content');
 const { validate } = require('./validator');
 const { resolveBrandColor, libVertical } = require('./brand');
 const { dispatch } = require('./dispatch');
 const { readHistory, appendHistory, normalizeBrief, MAX_ENTRIES } = require('./history');
+const { composeContent } = require('./brief-content');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -56,21 +57,34 @@ app.post('/generate', async (req, res) => {
     const b = req.body || {};
     const brand = (b.brand || '').trim() || 'Acme';
     const colorResolved = await resolveBrandColor({ brandName: brand, hexOverride: b.colorOverride });
+    // The campaign brief never influences module/vertical/tone selection,
+    // which stay driven entirely by the structured fields below. "" /
+    // whitespace-only is normalized to null (no brief given). What it CAN do
+    // is drive short copy.* overrides (header/footer/body text) through
+    // composeContent() — a strictly schema-validated LLM call that degrades
+    // to null on any failure, so a brief never breaks or blocks a build.
+    const brief = normalizeBrief(b.brief);
+    // Resolved once, up front, so the same module a plain generate() call
+    // would pick is known before asking the LLM to write copy for it.
+    const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId });
+    const plan = brief
+      ? await composeContent(brief, { moduleId, vertical: b.vertical, brandName: brand })
+      : null;
+    // An explicit manual copy override (if the caller sent one) always wins
+    // over the LLM's plan, field by field.
+    const manualCopy = (b.copy && typeof b.copy === 'object' && !Array.isArray(b.copy)) ? b.copy : {};
+    const copy = { ...(plan || {}), ...manualCopy };
     const g = generate({
       brand,
       vertical: b.vertical,
       tone: b.tone,
       currency: b.currency,
       color: colorResolved.primary,
-      moduleId: b.moduleId,
+      moduleId,
       counter: b.counter,
+      copy,
     });
     const validation = await validate(g.ampHtml);
-    // The campaign brief is captured and stored for later human review only —
-    // it is never parsed/interpreted and never influences module/vertical/
-    // tone selection, which stay driven entirely by the structured fields
-    // above. "" / whitespace-only is normalized to null (no brief given).
-    const brief = normalizeBrief(b.brief);
     const out = { ...g, colorSource: colorResolved.source, validation, brief };
     appendHistory({
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
