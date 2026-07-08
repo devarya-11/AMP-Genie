@@ -81,6 +81,36 @@ test('callGemini parses candidates[0].content.parts[0].text on success', async (
   assert.deepStrictEqual(out, { head: 'Gemini says hi' });
 });
 
+test('callGemini strips additionalProperties from nested array/object schemas (quiz-options shape), not just the top level', async () => {
+  const nestedSchema = {
+    type: 'object',
+    properties: {
+      options: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { label: { type: 'string' }, result: { type: 'string' } },
+          required: ['label'],
+          additionalProperties: false,
+        },
+      },
+    },
+    additionalProperties: false,
+  };
+  let sentBody;
+  const fetchImpl = fakeFetch((url, init) => {
+    sentBody = JSON.parse(init.body);
+    return jsonResponse(200, { candidates: [{ content: { parts: [{ text: '{"options":[]}' }] } }] });
+  });
+  await callGemini({
+    apiKey: 'k', model: 'gemini-2.5-flash', prompt: 'p', schema: nestedSchema, timeoutMs: 100, fetchImpl,
+  });
+  const sentSchema = sentBody.generationConfig.responseSchema;
+  assert.strictEqual(sentSchema.additionalProperties, undefined);
+  assert.strictEqual(sentSchema.properties.options.items.additionalProperties, undefined,
+    'a nested additionalProperties inside an array\'s object items must be stripped too, or Gemini 400s on it');
+});
+
 test('callGemini trips a cooldown on a 429 and skips subsequent calls until it expires', async () => {
   resetCooldowns();
   let calls = 0;

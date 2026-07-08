@@ -46,44 +46,150 @@ const MAX_LEN = 140;
 // provider export name.
 const MODEL = CLAUDE_MODEL;
 
-// Per-module allowlist of copy fields an LLM plan may set. Mirrors exactly
-// the copy.* fields each build function in server/generate.js accepts, so a
-// validated plan can be merged straight into `copy` with no translation step.
+// Per-module allowlist of copy fields an LLM plan may set, each with a type
+// descriptor. Mirrors exactly the copy.* fields each build function in
+// server/generate.js accepts, so a validated plan can be merged straight
+// into `copy` with no translation step:
+//   - 'string': a single short plain-text field (head, footerText, etc.)
+//   - 'stringArray': a short list of plain-text strings (e.g. itemNames, to
+//     let a brief like "restaurants catalogue" bias which products/items
+//     the module actually shows, not just its headline copy)
+//   - 'quizOptions': quiz's real {label, result} answer choices — generate.js
+//     already accepts copy.options in exactly this shape, this just lets an
+//     LLM plan populate it instead of only ever using the vertical default
 const FIELD_SCHEMAS = {
-  reveal: ['head', 'teaserText', 'ctaLabel', 'footerText'],
-  search: ['head', 'footerText'],
-  quiz: ['head', 'question', 'footerText'],
-  rating: ['head', 'prompt', 'footerText'],
-  spin: ['head', 'teaserText', 'footerText'],
-  poll: ['head', 'question', 'optionA', 'optionB', 'footerText'],
+  reveal: {
+    head: { type: 'string' },
+    teaserText: { type: 'string' },
+    ctaLabel: { type: 'string' },
+    itemNames: { type: 'stringArray', maxItems: 2, maxLen: 40 },
+    footerText: { type: 'string' },
+  },
+  search: {
+    head: { type: 'string' },
+    itemNames: { type: 'stringArray', maxItems: 6, maxLen: 40 },
+    footerText: { type: 'string' },
+  },
+  quiz: {
+    head: { type: 'string' },
+    question: { type: 'string' },
+    options: { type: 'quizOptions', count: 3 },
+    footerText: { type: 'string' },
+  },
+  rating: {
+    head: { type: 'string' }, prompt: { type: 'string' }, footerText: { type: 'string' },
+  },
+  spin: {
+    head: { type: 'string' }, teaserText: { type: 'string' }, footerText: { type: 'string' },
+  },
+  poll: {
+    head: { type: 'string' },
+    question: { type: 'string' },
+    optionA: { type: 'string' },
+    optionB: { type: 'string' },
+    footerText: { type: 'string' },
+  },
 };
 
+function fieldsFor(moduleId) {
+  const schema = FIELD_SCHEMAS[moduleId];
+  return schema ? Object.keys(schema) : null;
+}
+
+function jsonSchemaForField(def) {
+  if (def.type === 'stringArray') {
+    return { type: 'array', items: { type: 'string', maxLength: def.maxLen || MAX_LEN }, maxItems: def.maxItems };
+  }
+  if (def.type === 'quizOptions') {
+    return {
+      type: 'array',
+      minItems: def.count,
+      maxItems: def.count,
+      items: {
+        type: 'object',
+        properties: { label: { type: 'string', maxLength: MAX_LEN }, result: { type: 'string', maxLength: MAX_LEN } },
+        required: ['label'],
+        additionalProperties: false,
+      },
+    };
+  }
+  return { type: 'string', maxLength: MAX_LEN };
+}
+
 function schemaFor(moduleId) {
-  const fields = FIELD_SCHEMAS[moduleId];
-  if (!fields) return null;
+  const schema = FIELD_SCHEMAS[moduleId];
+  if (!schema) return null;
   const properties = {};
-  for (const key of fields) properties[key] = { type: 'string' };
+  for (const [key, def] of Object.entries(schema)) properties[key] = jsonSchemaForField(def);
   return { type: 'object', properties, additionalProperties: false };
+}
+
+function describeField(key, def) {
+  if (def.type === 'stringArray') {
+    return `${key} (optional array of up to ${def.maxItems} short strings, e.g. specific item/product names that fit the brief)`;
+  }
+  if (def.type === 'quizOptions') {
+    return `${key} (optional array of EXACTLY ${def.count} objects, each { label, result } — label is the short answer choice, result is the one-line message shown when it's picked)`;
+  }
+  return key;
+}
+
+// A single plain-text string field: trimmed, non-empty, under maxLen, and
+// free of '<'/'>' (a model going off the rails and writing HTML/markup,
+// which must never reach the template). Returns null on any violation.
+function validateStringField(val, maxLen = MAX_LEN) {
+  if (typeof val !== 'string') return null;
+  const trimmed = val.trim();
+  if (!trimmed || trimmed.length > maxLen) return null;
+  if (/[<>]/.test(trimmed)) return null;
+  return trimmed;
 }
 
 // Defense-in-depth: re-validate the parsed plan even though each provider's
 // own structured-output feature already constrains the JSON shape. Reject
-// the ENTIRE plan (-> null) on any unrecognised key, non-string value, empty
-// string, over-long string, or any '<'/'>' character (a model going off the
-// rails and writing HTML/markup, which must never reach the template).
+// the ENTIRE plan (-> null) on any unrecognised key or any field failing its
+// type's validation.
 function validatePlan(moduleId, obj) {
-  const fields = FIELD_SCHEMAS[moduleId];
-  if (!fields || !obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
-  const allowed = new Set(fields);
+  const schema = FIELD_SCHEMAS[moduleId];
+  if (!schema || !obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const out = {};
   for (const key of Object.keys(obj)) {
-    if (!allowed.has(key)) return null;
+    const def = schema[key];
+    if (!def) return null;
     const val = obj[key];
-    if (typeof val !== 'string') return null;
-    const trimmed = val.trim();
-    if (!trimmed || trimmed.length > MAX_LEN) return null;
-    if (/[<>]/.test(trimmed)) return null;
-    out[key] = trimmed;
+    if (def.type === 'string') {
+      const s = validateStringField(val);
+      if (s === null) return null;
+      out[key] = s;
+    } else if (def.type === 'stringArray') {
+      if (!Array.isArray(val) || !val.length || val.length > def.maxItems) return null;
+      const items = [];
+      for (const v of val) {
+        const s = validateStringField(v, def.maxLen);
+        if (s === null) return null;
+        items.push(s);
+      }
+      out[key] = items;
+    } else if (def.type === 'quizOptions') {
+      if (!Array.isArray(val) || val.length !== def.count) return null;
+      const opts = [];
+      for (const o of val) {
+        if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+        if (Object.keys(o).some((k) => k !== 'label' && k !== 'result')) return null;
+        const label = validateStringField(o.label);
+        if (label === null) return null;
+        const entry = { label };
+        if (o.result !== undefined) {
+          const result = validateStringField(o.result);
+          if (result === null) return null;
+          entry.result = result;
+        }
+        opts.push(entry);
+      }
+      out[key] = opts;
+    } else {
+      return null;
+    }
   }
   return Object.keys(out).length ? out : null;
 }
@@ -105,6 +211,10 @@ function scorePlan(plan, fields) {
   let score = (keys.length / fields.length) * 10;
   for (const key of keys) {
     const val = plan[key];
+    // Array-shaped fields (itemNames, quiz options) already counted toward
+    // coverage above; the char-based prose heuristics below only apply to
+    // plain string fields.
+    if (typeof val !== 'string') continue;
     const len = val.length;
     if (len >= 16 && len <= 90) score += 2;
     const bangs = (val.match(/!/g) || []).length;
@@ -194,14 +304,15 @@ function defaultProviders(opts) {
 // uniformly to every provider in the fan-out.
 async function composeContent(briefText, ctx = {}, opts = {}) {
   const { moduleId, vertical, brandName } = ctx;
-  const fields = FIELD_SCHEMAS[moduleId];
+  const moduleSchema = FIELD_SCHEMAS[moduleId];
+  const fields = fieldsFor(moduleId);
   if (!briefText || !fields) return null;
 
   const providers = Array.isArray(opts.providers) ? opts.providers : defaultProviders(opts);
   if (!providers.length) return null;
 
   const schema = schemaFor(moduleId);
-  const fieldList = fields.join(', ');
+  const fieldList = fields.map((key) => describeField(key, moduleSchema[key])).join('; ');
   const prompt = buildPrompt({
     moduleId, brandName, vertical, briefText, fieldList,
   });
@@ -236,5 +347,5 @@ async function composeContent(briefText, ctx = {}, opts = {}) {
 }
 
 module.exports = {
-  composeContent, validatePlan, scorePlan, FIELD_SCHEMAS, MODEL, CLAUDE_MODEL, TIMEOUT_MS,
+  composeContent, validatePlan, scorePlan, schemaFor, fieldsFor, FIELD_SCHEMAS, MODEL, CLAUDE_MODEL, TIMEOUT_MS,
 };

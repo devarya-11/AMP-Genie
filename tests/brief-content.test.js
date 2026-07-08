@@ -11,7 +11,7 @@ delete process.env.GROQ_API_KEY;
 delete process.env.OLLAMA_BASE_URL;
 
 const {
-  composeContent, validatePlan, scorePlan, FIELD_SCHEMAS,
+  composeContent, validatePlan, scorePlan, FIELD_SCHEMAS, fieldsFor,
 } = require('../server/brief-content');
 const { generate } = require('../server/generate');
 const { validate } = require('../server/validator');
@@ -49,6 +49,36 @@ test('validatePlan rejects an empty object (nothing usable)', () => {
   assert.strictEqual(validatePlan('poll', {}), null);
 });
 
+// ---- validatePlan: the richer array-shaped fields (itemNames, quiz options) --
+
+test('validatePlan accepts a well-formed itemNames array', () => {
+  const plan = validatePlan('reveal', { itemNames: ['Butter Chicken', 'Paneer Tikka'] });
+  assert.deepStrictEqual(plan, { itemNames: ['Butter Chicken', 'Paneer Tikka'] });
+});
+
+test('validatePlan rejects itemNames that is empty, too long, or not an array of strings', () => {
+  assert.strictEqual(validatePlan('reveal', { itemNames: [] }), null);
+  assert.strictEqual(validatePlan('reveal', { itemNames: ['a', 'b', 'c'] }), null); // reveal caps at 2
+  assert.strictEqual(validatePlan('reveal', { itemNames: [42] }), null);
+  assert.strictEqual(validatePlan('reveal', { itemNames: 'not an array' }), null);
+  assert.strictEqual(validatePlan('reveal', { itemNames: ['x'.repeat(60)] }), null); // over the 40-char item cap
+});
+
+test('validatePlan accepts a well-formed 3-option quiz plan and applies the label-only default (no result)', () => {
+  const plan = validatePlan('quiz', {
+    options: [{ label: 'Spicy' }, { label: 'Mild', result: 'A gentle pick, just right.' }, { label: 'Sweet' }],
+  });
+  assert.deepStrictEqual(plan, {
+    options: [{ label: 'Spicy' }, { label: 'Mild', result: 'A gentle pick, just right.' }, { label: 'Sweet' }],
+  });
+});
+
+test('validatePlan rejects quiz options with the wrong count, missing label, or unknown keys', () => {
+  assert.strictEqual(validatePlan('quiz', { options: [{ label: 'A' }, { label: 'B' }] }), null); // needs exactly 3
+  assert.strictEqual(validatePlan('quiz', { options: [{ result: 'no label' }, { label: 'B' }, { label: 'C' }] }), null);
+  assert.strictEqual(validatePlan('quiz', { options: [{ label: 'A', bogus: 'x' }, { label: 'B' }, { label: 'C' }] }), null);
+});
+
 test('every FIELD_SCHEMAS moduleId is a real generate.js module', () => {
   const { MODULE_IDS } = require('../server/generate');
   for (const id of Object.keys(FIELD_SCHEMAS)) {
@@ -59,20 +89,27 @@ test('every FIELD_SCHEMAS moduleId is a real generate.js module', () => {
 // ---- scorePlan: heuristic best-of-N quality proxy --------------------------
 
 test('scorePlan returns -Infinity for null or an empty plan', () => {
-  assert.strictEqual(scorePlan(null, FIELD_SCHEMAS.quiz), -Infinity);
-  assert.strictEqual(scorePlan({}, FIELD_SCHEMAS.quiz), -Infinity);
+  assert.strictEqual(scorePlan(null, fieldsFor('quiz')), -Infinity);
+  assert.strictEqual(scorePlan({}, fieldsFor('quiz')), -Infinity);
 });
 
 test('scorePlan rewards fuller field coverage over partial coverage', () => {
-  const full = scorePlan({ head: 'A tidy little headline', question: 'Which one wins today?', footerText: 'Picked for you' }, FIELD_SCHEMAS.quiz);
-  const partial = scorePlan({ head: 'A tidy little headline' }, FIELD_SCHEMAS.quiz);
+  const full = scorePlan({ head: 'A tidy little headline', question: 'Which one wins today?', footerText: 'Picked for you' }, fieldsFor('quiz'));
+  const partial = scorePlan({ head: 'A tidy little headline' }, fieldsFor('quiz'));
   assert.ok(full > partial, `expected fuller coverage to score higher: ${full} vs ${partial}`);
 });
 
 test('scorePlan penalises spammy filler and shouting over clean copy', () => {
-  const clean = scorePlan({ head: 'Discover our summer picks' }, FIELD_SCHEMAS.reveal);
-  const spammy = scorePlan({ head: 'ACT NOW!!! AMAZING OFFER!!!' }, FIELD_SCHEMAS.reveal);
+  const clean = scorePlan({ head: 'Discover our summer picks' }, fieldsFor('reveal'));
+  const spammy = scorePlan({ head: 'ACT NOW!!! AMAZING OFFER!!!' }, fieldsFor('reveal'));
   assert.ok(clean > spammy, `expected clean copy to outscore spammy copy: ${clean} vs ${spammy}`);
+});
+
+test('scorePlan tolerates array-shaped fields (itemNames, quiz options) without crashing', () => {
+  const withItems = scorePlan({ head: 'A tidy little headline', itemNames: ['Butter Chicken', 'Paneer Tikka'] }, fieldsFor('reveal'));
+  assert.ok(Number.isFinite(withItems));
+  const withOptions = scorePlan({ options: [{ label: 'A', result: 'ra' }, { label: 'B', result: 'rb' }, { label: 'C', result: 'rc' }] }, fieldsFor('quiz'));
+  assert.ok(Number.isFinite(withOptions));
 });
 
 // ---- composeContent: dependency-injected fake providers, no real network --
@@ -189,6 +226,43 @@ test('a content plan merged into copy shows up verbatim in the generated AMP and
   assert.ok(g.ampHtml.includes('Made just for you'), 'overridden footer text should appear in the AMP output');
   const v = await validate(g.ampHtml);
   assert.ok(v.pass, `content-plan-driven build should still validate: ${JSON.stringify(v.errors)}`);
+});
+
+test('copy.itemNames renames the items actually shown in reveal and search, not just headline copy', async () => {
+  const revealPlan = { itemNames: ['Butter Chicken', 'Paneer Tikka'] };
+  const g1 = generate({
+    brand: 'Zomato', vertical: 'Food', tone: 'Playful', currency: 'INR', moduleId: 'reveal', copy: revealPlan,
+  });
+  assert.ok(g1.ampHtml.includes('Butter Chicken') && g1.ampHtml.includes('Paneer Tikka'));
+  const v1 = await validate(g1.ampHtml);
+  assert.ok(v1.pass, `reveal with itemNames should still validate: ${JSON.stringify(v1.errors)}`);
+
+  const searchPlan = { itemNames: ['Butter Chicken', 'Paneer Tikka', 'Chicken Biryani', 'Dal Makhani', 'Naan Basket', 'Mango Lassi'] };
+  const g2 = generate({
+    brand: 'Zomato', vertical: 'Food', tone: 'Playful', currency: 'INR', moduleId: 'search', copy: searchPlan,
+  });
+  assert.ok(g2.ampHtml.includes('Chicken Biryani'));
+  const v2 = await validate(g2.ampHtml);
+  assert.ok(v2.pass, `search with itemNames should still validate: ${JSON.stringify(v2.errors)}`);
+});
+
+test('copy.options replaces the quiz question/answers actually shown, not just the question text', async () => {
+  const plan = {
+    question: 'How hungry are we tonight?',
+    options: [
+      { label: 'Just a snack', result: 'A light bite is calling your name.' },
+      { label: 'Feed the table', result: 'Time for the sharing platters.' },
+      { label: 'Somewhere in between', result: 'A little of everything, coming right up.' },
+    ],
+  };
+  const g = generate({
+    brand: 'Zomato', vertical: 'Food', tone: 'Playful', currency: 'INR', moduleId: 'quiz', copy: plan,
+  });
+  assert.ok(g.ampHtml.includes('Just a snack'));
+  assert.ok(g.ampHtml.includes('Feed the table'));
+  assert.ok(g.ampHtml.includes('A light bite is calling your name.'));
+  const v = await validate(g.ampHtml);
+  assert.ok(v.pass, `quiz with custom options should still validate: ${JSON.stringify(v.errors)}`);
 });
 
 test('no brief / no copy: generate() output is unchanged from the pre-feature baseline shape', () => {

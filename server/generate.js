@@ -151,6 +151,16 @@ function validPct(n) {
   return Number.isFinite(v) && v >= 1 && v <= 99 ? v : 0;
 }
 
+// A brief-driven content plan may rename which items appear (e.g. a
+// "restaurants catalogue" brief naming actual dishes instead of the
+// vertical's generic placeholders) without touching their price — pure
+// display override, positional by index, ignored when absent/invalid so
+// omitting copy.itemNames is always a byte-identical no-op.
+function overrideItemName(base, itemNames, i) {
+  const v = Array.isArray(itemNames) ? itemNames[i] : undefined;
+  return (typeof v === 'string' && v.trim()) ? v.trim() : base;
+}
+
 // Best-effort brand homepage guess for the header logo link. Mirrors (does
 // not import) brand.js's candidateDomains — this is a display-only link, not
 // used for colour resolution, so a single best guess is enough here.
@@ -238,7 +248,8 @@ function buildReveal(ctx) {
   const head = enc(applyBrand(headSrc, brand));
   const discount = validPct(copy.discount) || pick(rng, [10, 15, 20, 25]);
   const code = (brand.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6) || 'GENIE') + discount;
-  const items = shuffle(rng, content.items).slice(0, 2);
+  const items = shuffle(rng, content.items).slice(0, 2)
+    .map((it, i) => ({ ...it, name: overrideItemName(it.name, copy.itemNames, i) }));
   const img = ph(600, 300, p.primary, '#ffffff', `${brand} OFFER`);
   const teaserSrc = copy.teaserText || 'A hand-picked reward is waiting behind the curtain.';
   const ctaSrc = copy.ctaLabel || 'Reveal my offer';
@@ -286,7 +297,10 @@ function buildSearch(ctx) {
   const { brand, palette: p, content, t, currency, rng, copy = {} } = ctx;
   const headSrc = copy.head || t.search;
   const head = enc(applyBrand(headSrc, brand));
-  const items = shuffle(rng, content.items.map((it, i) => ({ ...it, cat: content.itemCats[i], key: it.name.toLowerCase() })));
+  const items = shuffle(rng, content.items.map((it, i) => {
+    const name = overrideItemName(it.name, copy.itemNames, i);
+    return { ...it, name, cat: content.itemCats[i], key: name.toLowerCase() };
+  }));
   const cats = content.categories;
   const catKeys = content.catKeys;
 

@@ -85,12 +85,17 @@ async function callClaude({ client, model, prompt, schema, timeoutMs }) {
 // shared schema object through as-is.
 function toGeminiSchema(schema) {
   if (!schema || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) return schema.map(toGeminiSchema);
   const { additionalProperties, ...rest } = schema;
   if (rest.properties) {
     const properties = {};
     for (const [key, val] of Object.entries(rest.properties)) properties[key] = toGeminiSchema(val);
     rest.properties = properties;
   }
+  // Array schemas (e.g. quiz options, itemNames) nest another object/string
+  // schema under `items` — recurse there too, not just top-level `properties`,
+  // or a nested `additionalProperties: false` still slips through and 400s.
+  if (rest.items) rest.items = toGeminiSchema(rest.items);
   return rest;
 }
 
