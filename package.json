@@ -5,7 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test tests/encoding.test.js tests/validator.test.js tests/llm-providers.test.js tests/brief-content.test.js tests/brief-routing.test.js",
+    "test": "node --test tests/encoding.test.js tests/validator.test.js tests/llm-providers.test.js tests/brief-content.test.js tests/brief-routing.test.js tests/brand.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {

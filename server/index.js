@@ -18,7 +18,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { generate, pickModuleId, MODULE_IDS, MODULES, VERTICALS, CURRENCIES, derivePalette } = require('./generate');
 const { TONES } = require('./content');
 const { validate } = require('./validator');
-const { resolveBrandColor, libVertical } = require('./brand');
+const { resolveBrandColor, resolveBrandLogo, libVertical } = require('./brand');
 const { dispatch } = require('./dispatch');
 const { readHistory, appendHistory, normalizeBrief, MAX_ENTRIES } = require('./history');
 const { composeContent } = require('./brief-content');
@@ -69,7 +69,16 @@ app.post('/generate', async (req, res) => {
   try {
     const b = req.body || {};
     const brand = (b.brand || '').trim() || 'Acme';
-    const colorResolved = await resolveBrandColor({ brandName: brand, hexOverride: b.colorOverride });
+    // Colour and logo are independent live-fetch lookups against the same
+    // guessed brand domain(s) — run them concurrently rather than back to
+    // back so a real-logo lookup never adds its own extra latency on top of
+    // the colour resolver's (each already has its own timeout budget and
+    // degrades to null/placeholder independently, so a failure in one can't
+    // affect the other).
+    const [colorResolved, logoResolved] = await Promise.all([
+      resolveBrandColor({ brandName: brand, hexOverride: b.colorOverride }),
+      resolveBrandLogo({ brandName: brand }),
+    ]);
     // "" / whitespace-only is normalized to null (no brief given).
     const brief = normalizeBrief(b.brief);
     // Tier-1 deterministic keyword routing: when a brief is given and the
@@ -82,10 +91,17 @@ app.post('/generate', async (req, res) => {
     const plan = brief
       ? await composeContent(brief, { moduleId, vertical: b.vertical, brandName: brand })
       : null;
+    // Real fetched logo/site is the base layer — never a first choice over
+    // brief-driven or manual copy (neither of which currently sets logoUrl,
+    // but this ordering keeps that guarantee true if either ever does), and
+    // falls all the way back to generate.js's own placeholder image when
+    // logoResolved is null (unreachable site, no og:image/favicon found, or
+    // blank brand name).
+    const logoCopy = logoResolved ? { logoUrl: logoResolved.logoUrl, site: logoResolved.site } : {};
     // An explicit manual copy override (if the caller sent one) always wins
     // over the LLM's plan, field by field.
     const manualCopy = (b.copy && typeof b.copy === 'object' && !Array.isArray(b.copy)) ? b.copy : {};
-    const copy = { ...(plan || {}), ...manualCopy };
+    const copy = { ...logoCopy, ...(plan || {}), ...manualCopy };
     const g = generate({
       brand,
       vertical: b.vertical,

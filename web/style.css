@@ -249,9 +249,14 @@ button.sm{padding:8px 12px;font-size:13px}
 .pv-vote.on{border-color:currentColor}
 
 /* ---- history: read-only review of past builds ---- */
-.history-hdr{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+/* Collapsed-by-default accordion (Phase 7) — the header is a real button so
+   it's reachable/actionable by keyboard, not just a mouse-hover affordance. */
+.history-hdr{display:flex;align-items:baseline;gap:10px;width:100%;background:none;border:0;padding:0;margin:0;font:inherit;text-align:left;cursor:pointer;color:inherit}
+.history-hdr:focus-visible{outline:2px solid var(--primary,#8a5cf6);outline-offset:3px;border-radius:6px}
+.history-chevron{transition:transform .18s ease;flex:none;color:var(--faint)}
+.history-hdr[aria-expanded="true"] .history-chevron{transform:rotate(180deg)}
 .history-title{margin:0;font-size:15px;font-weight:800;color:var(--ink)}
-.history-list{display:flex;flex-direction:column;gap:10px;max-height:420px;overflow-y:auto}
+.history-list{display:flex;flex-direction:column;gap:10px;max-height:420px;overflow-y:auto;margin-top:14px}
 .history-item{border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;background:#ffffff05}
 .history-item-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-weight:700;font-size:13px;color:var(--ink)}
 .history-item-when{font-weight:500;font-size:11px;color:var(--faint);white-space:nowrap}

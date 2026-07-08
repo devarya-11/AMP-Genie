@@ -25,6 +25,7 @@
   <symbol id="i-refresh" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M20 11a8 8 0 10-2 5m2 4v-5h-5"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path fill="currentColor" d="M3 11l18-8-8 18-2-7z"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" d="M16 16l4 4"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></symbol>
 </svg>
 
 <header class="topbar">
@@ -126,13 +127,15 @@
     </div>
   </section>
 
-  <!-- HISTORY -->
+  <!-- HISTORY: collapsed by default (Phase 7) — available one click away
+       rather than permanently taking up space in the default, minimal view. -->
   <section id="historySection" class="history card hidden">
-    <div class="history-hdr">
+    <button type="button" id="historyToggle" class="history-hdr" aria-expanded="false" aria-controls="historyList">
+      <svg class="ic history-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
       <h2 class="history-title">Recent builds</h2>
       <span class="hint">brief &amp; metadata from past generations, for review &mdash; read-only</span>
-    </div>
-    <div id="historyList" class="history-list"></div>
+    </button>
+    <div id="historyList" class="history-list hidden"></div>
   </section>
 </main>
 

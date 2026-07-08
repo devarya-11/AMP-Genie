@@ -45,6 +45,7 @@
       document.body.classList.toggle('dev-mode', $('devToggle').checked);
       if (!$('devToggle').checked && (S.active === 'code' || S.active === 'validation')) switchTab('preview');
     };
+    $('historyToggle').onclick = toggleHistory;
     updateBriefCounter();
   }
 
@@ -217,6 +218,18 @@
     if (!items.length) { section.classList.add('hidden'); return; }
     section.classList.remove('hidden');
     items.forEach((it) => list.appendChild(historyItem(it)));
+  }
+
+  // Collapsed-by-default accordion (Phase 7): a real button toggling both the
+  // visual hidden state and aria-expanded, so keyboard/AT users and the CSS
+  // chevron-rotation rule (`.history-hdr[aria-expanded="true"] .history-chevron`)
+  // stay in sync with each other.
+  function toggleHistory() {
+    const btn = $('historyToggle');
+    const list = $('historyList');
+    const open = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+    list.classList.toggle('hidden', open);
   }
 
   function historyItem(it) {

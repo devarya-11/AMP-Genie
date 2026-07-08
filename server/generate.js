@@ -169,11 +169,14 @@ function siteGuess(brand) {
   return slug ? `https://www.${slug}.com` : '#';
 }
 
-// Shared header: brand logo (placeholder image, linked to the guessed brand
-// site) plus the module's headline. `head` arrives pre-encoded (callers do
-// enc(applyBrand(...)) before passing it in, matching the existing pattern).
+// Shared header: brand logo plus the module's headline. `copy.logoUrl` /
+// `copy.site` (real fetched image + the domain that actually answered — see
+// brand.js's resolveBrandLogo) win when present; a guessed domain and a
+// generated placeholder image are the fallback, never the first choice.
+// `head` arrives pre-encoded (callers do enc(applyBrand(...)) before passing
+// it in, matching the existing pattern).
 function headerBlock({ brand, palette: p, head, copy = {} }) {
-  const site = siteGuess(brand);
+  const site = copy.site || siteGuess(brand);
   const logo = copy.logoUrl || ph(96, 32, p.primary, '#ffffff', (brand || 'BRAND').trim().slice(0, 10));
   return `<div class="hdr">
   <a class="brand-link" href="${enc(site)}" target="_blank" rel="noopener noreferrer" aria-label="${enc(brand)}">

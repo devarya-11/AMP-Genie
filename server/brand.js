@@ -1,5 +1,7 @@
 'use strict';
 
+const { withTimeout } = require('./llm-providers');
+
 // Brand colour + guideline resolver.
 // Resolution order (spec §5): (1) user hex override, (2) curated brand
 // library, (3) live fetch of the brand's own site (theme-color meta, then
@@ -78,8 +80,8 @@ function hashColor(str) {
 // ---- live fetch (tier 3) -----------------------------------------------
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
-async function safeFetch(url, timeout = 6000) {
-  return fetch(url, {
+async function safeFetch(url, timeout = 6000, fetchImpl = fetch) {
+  return fetchImpl(url, {
     headers: { 'User-Agent': UA, Accept: 'text/html,*/*' },
     redirect: 'follow',
     signal: AbortSignal.timeout(timeout),
@@ -128,6 +130,98 @@ async function fetchBrandColor(brandName) {
   return null;
 }
 
+// ---- live fetch: real logo/hero (header image) --------------------------
+// Same "never the first choice to fail loudly" contract as fetchBrandColor:
+// any error at any stage falls through to the next candidate, and a total
+// timeout budget (not just a per-request one) means a slow/unreachable site
+// degrades to null well before it could make /generate feel stuck — the
+// caller's existing placeholder-image fallback (generate.js's headerBlock)
+// is always the safety net, never a thrown error.
+function attrValue(tag, name) {
+  const m = tag.match(new RegExp(`${name}=["']([^"']+)["']`, 'i'));
+  return m ? m[1].trim() : null;
+}
+// content/property order is unpredictable in the wild (same issue metaContent
+// already handles for theme-color), so this scans whole <meta> tags rather
+// than assuming attribute order.
+function ogImage(html) {
+  const re = /<meta\b[^>]*>/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    const tag = m[0];
+    const prop = attrValue(tag, 'property') || attrValue(tag, 'name');
+    if (prop && /^og:image$/i.test(prop)) {
+      const content = attrValue(tag, 'content');
+      if (content) return content;
+    }
+  }
+  return null;
+}
+function iconHref(html) {
+  const re = /<link\b[^>]*>/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    const tag = m[0];
+    const rel = attrValue(tag, 'rel');
+    if (rel && /(^|\s)(shortcut icon|icon|apple-touch-icon)(\s|$)/i.test(rel)) {
+      const href = attrValue(tag, 'href');
+      if (href) return href;
+    }
+  }
+  return null;
+}
+function absUrl(href, base) {
+  // `new URL(null, base)` doesn't throw — it coerces to the literal string
+  // "null" and happily resolves to `${base}/null`. Guard explicitly rather
+  // than relying on the try/catch, since that failure mode is silent, not
+  // an exception.
+  if (!href || typeof href !== 'string') return null;
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return null;
+  }
+}
+// Real fetch of the brand's own site for a logo/hero image: og:image first
+// (usually a proper hero-quality asset), favicon/apple-touch-icon as a
+// smaller-but-real fallback. Returns { logoUrl, site } — `site` is the
+// domain that actually answered, so callers can link the logo to a
+// confirmed-reachable URL instead of only ever guessing one. Bounded to a
+// hard overall timeout (not per-request) so an unreachable/slow brand site
+// can never meaningfully delay a /generate response.
+async function fetchBrandLogo(brandName, fetchImpl = fetch) {
+  const run = async () => {
+    for (const url of candidateDomains(brandName)) {
+      try {
+        const r = await safeFetch(url, 4000, fetchImpl);
+        if (!r.ok) continue;
+        const html = await r.text();
+        const og = ogImage(html);
+        if (og) {
+          const abs = absUrl(og, url);
+          if (abs) return { logoUrl: abs, site: url };
+        }
+        const icon = iconHref(html);
+        if (icon) {
+          const abs = absUrl(icon, url);
+          if (abs) return { logoUrl: abs, site: url };
+        }
+      } catch {
+        // blocked / DNS failure / timeout — try the next candidate, then fall through
+      }
+    }
+    return null;
+  };
+  return withTimeout(run, 5000);
+}
+// Public entry point mirroring resolveBrandColor's shape: never throws,
+// returns null (not an error) when no real logo could be found so the
+// caller's placeholder stays the true last resort, never the first choice.
+async function resolveBrandLogo({ brandName, fetchImpl } = {}) {
+  if (!String(brandName || '').trim()) return null;
+  return fetchBrandLogo(brandName, fetchImpl);
+}
+
 // ---- main ---------------------------------------------------------------
 // Resolves { primary, accent, source } for a brand name, honouring a user hex
 // override first. `source` is one of: override | library | fetched | hash.
@@ -149,4 +243,7 @@ function libVertical(brandName) {
   return lib ? lib.vertical : null;
 }
 
-module.exports = { resolveBrandColor, libGet, libVertical, hashColor, BRAND_LIBRARY };
+module.exports = {
+  resolveBrandColor, libGet, libVertical, hashColor, BRAND_LIBRARY,
+  resolveBrandLogo, fetchBrandLogo, ogImage, iconHref, absUrl,
+};
