@@ -17,6 +17,7 @@ const { resolveBrandColor, libVertical } = require('./brand');
 const { dispatch } = require('./dispatch');
 const { readHistory, appendHistory, normalizeBrief, MAX_ENTRIES } = require('./history');
 const { composeContent } = require('./brief-content');
+const { routeBrief } = require('./brief-router');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -64,16 +65,15 @@ app.post('/generate', async (req, res) => {
     const b = req.body || {};
     const brand = (b.brand || '').trim() || 'Acme';
     const colorResolved = await resolveBrandColor({ brandName: brand, hexOverride: b.colorOverride });
-    // The campaign brief never influences module/vertical/tone selection,
-    // which stay driven entirely by the structured fields below. "" /
-    // whitespace-only is normalized to null (no brief given). What it CAN do
-    // is drive short copy.* overrides (header/footer/body text) through
-    // composeContent() — a strictly schema-validated LLM call that degrades
-    // to null on any failure, so a brief never breaks or blocks a build.
+    // "" / whitespace-only is normalized to null (no brief given).
     const brief = normalizeBrief(b.brief);
+    // Tier-1 deterministic keyword routing: when a brief is given and the
+    // caller didn't explicitly pick a module, the brief's own wording decides
+    // which module gets built (an explicit b.moduleId always still wins).
+    const routed = brief ? routeBrief(brief, b.vertical) : null;
     // Resolved once, up front, so the same module a plain generate() call
     // would pick is known before asking the LLM to write copy for it.
-    const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId });
+    const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId || (routed && routed.moduleId) });
     const plan = brief
       ? await composeContent(brief, { moduleId, vertical: b.vertical, brandName: brand })
       : null;
@@ -92,7 +92,13 @@ app.post('/generate', async (req, res) => {
       copy,
     });
     const validation = await validate(g.ampHtml);
-    const out = { ...g, colorSource: colorResolved.source, validation, brief };
+    // `applied: false` marks the case where an explicit b.moduleId overrode
+    // the router's suggestion — kept in the response/history for audit even
+    // though it didn't win.
+    const routedFromBrief = routed
+      ? { moduleId: routed.moduleId, confidence: routed.confidence, matchedTerms: routed.matchedTerms, applied: !b.moduleId }
+      : null;
+    const out = { ...g, colorSource: colorResolved.source, validation, brief, routedFromBrief };
     appendHistory({
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
       ts: new Date().toISOString(),
@@ -104,6 +110,7 @@ app.post('/generate', async (req, res) => {
       colorSource: colorResolved.source,
       palette: g.palette,
       brief,
+      routedFromBrief,
       validationPass: validation.pass,
       ampHtml: g.ampHtml,
     });
