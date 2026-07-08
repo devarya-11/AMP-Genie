@@ -1,14 +1,19 @@
 'use strict';
 
+const path = require('path');
+const express = require('express');
+
 // Loads .env (gitignored, local-only) into process.env if present — this is
 // how GEMINI_API_KEY / GROQ_API_KEY / OLLAMA_BASE_URL etc. reach
 // server/brief-content.js's provider auto-detection without needing to be
 // exported in the shell every time. A no-op (never throws) when .env is
 // absent, so nothing breaks for anyone who sets real env vars another way.
-require('dotenv').config();
-
-const path = require('path');
-const express = require('express');
+// Resolved relative to this file (not process.cwd()) so it still finds the
+// repo's .env when the process is launched from a different working
+// directory (e.g. an external tool that starts `node <abs-path>/server/index.js`
+// from elsewhere) — dotenv's default is cwd-relative and silently loads 0
+// vars in that case, degrading brief-content generation without any error.
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { generate, pickModuleId, MODULE_IDS, MODULES, VERTICALS, CURRENCIES, derivePalette } = require('./generate');
 const { TONES } = require('./content');
