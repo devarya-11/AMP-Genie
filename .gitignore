@@ -7,6 +7,14 @@ npm-debug.log*
 .DS_Store
 *.log
 
+# Wrangler local dev cache/state (Pages/Workers).
+.wrangler/
+
+# cf-spike/ — the throwaway proof-of-concept that de-risked running the AMP
+# validator wasm on the Workers runtime. The production version now lives in
+# functions/_lib/validator*.js; the spike is kept locally for reference only.
+cf-spike/
+
 # Local provider API keys — never committed.
 .env
 

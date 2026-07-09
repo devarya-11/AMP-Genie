@@ -1,0 +1,25 @@
+# Cloudflare Pages config for AMP Genie.
+#
+# Static assets live in web/ (pages_build_output_dir); the backend is the
+# functions/ directory (file-based routing -> /generate, /brand, /validate,
+# /dispatch, /history, /api/meta). nodejs_compat lets the reused CommonJS
+# server modules run on the Workers runtime.
+#
+# Local dev needs no Cloudflare login:
+#   npx wrangler pages dev --kv HISTORY --port 8788
+# (--kv gives a local, in-memory HISTORY namespace so history works offline.)
+#
+# For a real deploy, create the KV namespace once (after `wrangler login`):
+#   npx wrangler kv namespace create HISTORY
+# then paste the returned id below and run `npx wrangler pages deploy`.
+
+name = "amp-genie"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "web"
+
+# Build history. id is only needed for remote deploys; local `wrangler pages
+# dev --kv HISTORY` simulates it in memory.
+[[kv_namespaces]]
+binding = "HISTORY"
+id = "REPLACE_WITH_KV_NAMESPACE_ID_AFTER_wrangler_kv_namespace_create"

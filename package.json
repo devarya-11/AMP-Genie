@@ -16,6 +16,7 @@
     "nodemailer": "^6.10.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.44.0"
+    "@playwright/test": "^1.44.0",
+    "wrangler": "^4.86.0"
   }
 }
