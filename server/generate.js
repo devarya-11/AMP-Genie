@@ -143,6 +143,38 @@ function ph(w, h, bgHex, fgHex, text) {
   return `https://placehold.co/${w}x${h}/${bg}/${fg}?text=${t}`;
 }
 
+// An actual wheel-of-fortune graphic — 8 coloured wedges with callout
+// labels — rendered by QuickChart (a URL-parameterised chart-image
+// service, same third-party category as ph()'s placehold.co: no fetch at
+// generate() time, no local rendering, and critically no `data:` URI,
+// which AMP4EMAIL's validator hard-rejects for amp-img src
+// (INVALID_URL_PROTOCOL). One wedge always reads the exact reward the
+// .reward panel reveals after "Spin to win" is tapped, so the wheel and
+// the payoff never disagree; the rest are shuffled filler prizes for
+// wheel-like variety. Deterministic per (brand, counter) via the shared
+// rng, same as every other seeded choice in this module.
+const WHEEL_FILLER = ['FREE SHIP', 'TRY AGAIN', 'BOGO', '10% OFF', '20% OFF', '25% OFF', '5% OFF', 'GOOD LUCK'];
+function wheelImg(p, pct, rng) {
+  const real = `${pct}% OFF`;
+  const filler = shuffle(rng, WHEEL_FILLER.filter((x) => x !== real)).slice(0, 7);
+  const labels = shuffle(rng, [real, ...filler]);
+  const colors = labels.map((_, i) => (i % 2 === 0 ? p.primary : p.primaryDark));
+  const config = {
+    type: 'outlabeledPie',
+    data: {
+      labels,
+      datasets: [{ backgroundColor: colors, borderColor: '#ffffff', borderWidth: 3, data: labels.map(() => 1) }],
+    },
+    options: {
+      plugins: {
+        legend: false,
+        outlabels: { text: '%l', color: '#ffffff', stretch: 20, font: { resizable: true, minSize: 9, maxSize: 14 } },
+      },
+    },
+  };
+  return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}&w=420&h=420&backgroundColor=transparent&format=png`;
+}
+
 // A discount/percentage value coming from an untrusted copy override (manual
 // or LLM-composed): keep only whole numbers in a sane 1-99 range, else fall
 // back to the caller's own default (never throws, never NaN%).
@@ -438,12 +470,13 @@ function buildSpin(ctx) {
   const head = enc(applyBrand(headSrc, brand));
   const pct = validPct(copy.discount) || pick(rng, [15, 20, 25, 30]);
   const reward = (brand.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6) || 'GENIE') + pct;
-  const img = ph(360, 360, p.primary, '#ffffff', 'SPIN');
+  const img = wheelImg(p, pct, rng);
   const teaserSrc = copy.teaserText || 'One spin, one reward. Ready?';
 
   const css = baseCss(p) + `
 .spin{text-align:center;padding:24px;}
-.wheel{margin:0 auto 16px;max-width:240px;}
+.wheel{margin:0 auto 16px;max-width:240px;position:relative;}
+.wheel .pointer{position:absolute;top:-4px;left:50%;margin-left:-10px;width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:16px solid ${p.primaryDark};z-index:2;}
 .reward{background:${p.tint};border-radius:12px;padding:22px;margin-top:10px;}
 .reward .big{font-size:26px;font-weight:bold;color:${p.primaryDark};margin:0 0 6px;}
 .reward .code{display:inline-block;border:2px dashed ${p.accent};color:${p.primaryDark};font-size:18px;font-weight:bold;letter-spacing:2px;padding:8px 16px;border-radius:8px;margin-top:8px;}
@@ -453,7 +486,7 @@ function buildSpin(ctx) {
 ${ampState('s', { spun: false })}
 ${headerBlock({ brand, palette: p, head, copy })}
 <div class="spin">
-  <div class="wheel"><amp-img src="${img}" width="360" height="360" layout="responsive" alt="Prize wheel"></amp-img></div>
+  <div class="wheel"><div class="pointer"></div><amp-img src="${img}" width="360" height="360" layout="responsive" alt="Prize wheel"></amp-img></div>
   <div [hidden]="s.spun">
     <p class="muted">${enc(teaserSrc)}</p>
     <div class="pad"><span class="btn alt" role="button" tabindex="0" on="tap:AMP.setState({s:{spun:true}})">Spin to win</span></div>
