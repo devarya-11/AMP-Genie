@@ -63,4 +63,21 @@ function routeBrief(briefText, vertical) { // eslint-disable-line no-unused-vars
   return { moduleId, confidence, matchedTerms };
 }
 
-module.exports = { routeBrief, KEYWORD_MAP };
+// Structured signals pulled deterministically from the brief that the LLM copy
+// layer is deliberately not allowed to set — chiefly the headline offer
+// percentage, which the modules render as the big "X% OFF" number. Living here
+// (next to routeBrief) keeps the Express route and the Pages Function deriving
+// the same number from the same brief. Only a whole percentage written with a
+// literal "%" is taken, so "top 20 products" can't be misread as 20% off;
+// anything outside 1-99 is dropped and left to the module's own default.
+function briefSignals(briefText) {
+  const out = {};
+  const m = String(briefText || '').match(/(\d{1,3})\s*%/);
+  if (m) {
+    const pct = Math.round(Number(m[1]));
+    if (Number.isFinite(pct) && pct >= 1 && pct <= 99) out.discount = pct;
+  }
+  return out;
+}
+
+module.exports = { routeBrief, briefSignals, KEYWORD_MAP };

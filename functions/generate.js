@@ -15,7 +15,7 @@ import { json, readJson } from './_lib/http.js';
 const { generate, pickModuleId } = generateMod;
 const { resolveBrandColor, resolveBrandLogo } = brandMod;
 const { composeContent } = briefContentMod;
-const { routeBrief } = briefRouterMod;
+const { routeBrief, briefSignals } = briefRouterMod;
 
 export async function onRequestPost({ request, env, waitUntil }) {
   applyEnv(env); // provider API keys reach brief-content/llm-providers via process.env
@@ -42,8 +42,12 @@ export async function onRequestPost({ request, env, waitUntil }) {
     // Real fetched logo/site is the base layer; brief-driven plan overrides it;
     // an explicit manual copy override always wins, field by field.
     const logoCopy = logoResolved ? { logoUrl: logoResolved.logoUrl, site: logoResolved.site } : {};
+    // Deterministic numbers the brief states outright (e.g. "40%") — the LLM
+    // plan is structurally barred from setting these, so the headline it writes
+    // and the big "X% OFF" the module renders would otherwise disagree.
+    const briefSig = brief ? briefSignals(brief) : {};
     const manualCopy = (b.copy && typeof b.copy === 'object' && !Array.isArray(b.copy)) ? b.copy : {};
-    const copy = { ...logoCopy, ...(plan || {}), ...manualCopy };
+    const copy = { ...logoCopy, ...briefSig, ...(plan || {}), ...manualCopy };
     const g = generate({
       brand,
       vertical: b.vertical,

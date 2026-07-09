@@ -22,7 +22,7 @@ const { resolveBrandColor, resolveBrandLogo, libVertical } = require('./brand');
 const { dispatch } = require('./dispatch');
 const { readHistory, appendHistory, normalizeBrief, MAX_ENTRIES } = require('./history');
 const { composeContent } = require('./brief-content');
-const { routeBrief } = require('./brief-router');
+const { routeBrief, briefSignals } = require('./brief-router');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -100,10 +100,16 @@ app.post('/generate', async (req, res) => {
     // logoResolved is null (unreachable site, no og:image/favicon found, or
     // blank brand name).
     const logoCopy = logoResolved ? { logoUrl: logoResolved.logoUrl, site: logoResolved.site } : {};
+    // Deterministic numbers the brief states outright (e.g. "40%"): the LLM
+    // plan is structurally barred from setting the offer amount, so without
+    // this the headline it writes and the big "X% OFF" the module renders
+    // would disagree. Sits above logo/below manual copy — an explicit
+    // b.copy.discount still wins.
+    const briefSig = brief ? briefSignals(brief) : {};
     // An explicit manual copy override (if the caller sent one) always wins
     // over the LLM's plan, field by field.
     const manualCopy = (b.copy && typeof b.copy === 'object' && !Array.isArray(b.copy)) ? b.copy : {};
-    const copy = { ...logoCopy, ...(plan || {}), ...manualCopy };
+    const copy = { ...logoCopy, ...briefSig, ...(plan || {}), ...manualCopy };
     const g = generate({
       brand,
       vertical: b.vertical,
