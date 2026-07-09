@@ -14,3 +14,9 @@ npm-debug.log*
 # (see corpus/README.md — "never redistributed" is a non-negotiable project rule).
 # Only the distilled, brand-agnostic patterns/ outputs persist into the repo.
 corpus/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
