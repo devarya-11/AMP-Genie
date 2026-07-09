@@ -1,0 +1,14 @@
+# Cloudflare Pages cache rules. The page shell must never be served stale, or a
+# UI change looks like "nothing deployed" until the visitor manually clears
+# cache. HTML is fetched fresh every load; JS/CSS may be cached but must
+# revalidate (cheap 304s) so a new build lands on the next visit.
+/
+  Cache-Control: no-store
+/index.html
+  Cache-Control: no-store
+/app.js
+  Cache-Control: no-cache
+/preview.js
+  Cache-Control: no-cache
+/style.css
+  Cache-Control: no-cache
