@@ -18,8 +18,8 @@ compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "web"
 
-# Build history. id is only needed for remote deploys; local `wrangler pages
-# dev --kv HISTORY` simulates it in memory.
+# Build history. id points at the "amp-genie-history" KV namespace created in
+# this account; local `wrangler pages dev --kv HISTORY` simulates it in memory.
 [[kv_namespaces]]
 binding = "HISTORY"
-id = "REPLACE_WITH_KV_NAMESPACE_ID_AFTER_wrangler_kv_namespace_create"
+id = "45848d264860419eae8c4869900eff10"
