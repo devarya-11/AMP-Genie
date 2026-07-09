@@ -50,44 +50,53 @@ const MODEL = CLAUDE_MODEL;
 // descriptor. Mirrors exactly the copy.* fields each build function in
 // server/generate.js accepts, so a validated plan can be merged straight
 // into `copy` with no translation step:
-//   - 'string': a single short plain-text field (head, footerText, etc.)
+//   - 'string': a single plain-text field (head, footerText, etc.). Caps at
+//     MAX_LEN (140) unless the field sets its own `maxLen` — headline/button/
+//     vote-label fields render in tight, single-line UI (h1, .btn, .vote) and
+//     stay at or under the default, while prose fields that render as
+//     multi-line paragraphs (.muted / .foot p, line-height 1.5) are widened
+//     (~200-220) so a genuine sentence or two of brand voice isn't truncated.
 //   - 'stringArray': a short list of plain-text strings (e.g. itemNames, to
 //     let a brief like "restaurants catalogue" bias which products/items
 //     the module actually shows, not just its headline copy)
 //   - 'quizOptions': quiz's real {label, result} answer choices — generate.js
 //     already accepts copy.options in exactly this shape, this just lets an
-//     LLM plan populate it instead of only ever using the vertical default
+//     LLM plan populate it instead of only ever using the vertical default.
+//     label renders as a tap target (kept short); result renders as a
+//     paragraph inside .result (widened, same reasoning as prose fields above)
 const FIELD_SCHEMAS = {
   reveal: {
     head: { type: 'string' },
-    teaserText: { type: 'string' },
-    ctaLabel: { type: 'string' },
+    teaserText: { type: 'string', maxLen: 220 },
+    ctaLabel: { type: 'string', maxLen: 40 },
     itemNames: { type: 'stringArray', maxItems: 2, maxLen: 40 },
-    footerText: { type: 'string' },
+    footerText: { type: 'string', maxLen: 200 },
   },
   search: {
     head: { type: 'string' },
     itemNames: { type: 'stringArray', maxItems: 6, maxLen: 40 },
-    footerText: { type: 'string' },
+    footerText: { type: 'string', maxLen: 200 },
   },
   quiz: {
     head: { type: 'string' },
-    question: { type: 'string' },
-    options: { type: 'quizOptions', count: 3 },
-    footerText: { type: 'string' },
+    question: { type: 'string', maxLen: 180 },
+    options: {
+      type: 'quizOptions', count: 3, labelMaxLen: 60, resultMaxLen: 180,
+    },
+    footerText: { type: 'string', maxLen: 200 },
   },
   rating: {
-    head: { type: 'string' }, prompt: { type: 'string' }, footerText: { type: 'string' },
+    head: { type: 'string' }, prompt: { type: 'string', maxLen: 220 }, footerText: { type: 'string', maxLen: 200 },
   },
   spin: {
-    head: { type: 'string' }, teaserText: { type: 'string' }, footerText: { type: 'string' },
+    head: { type: 'string' }, teaserText: { type: 'string', maxLen: 220 }, footerText: { type: 'string', maxLen: 200 },
   },
   poll: {
     head: { type: 'string' },
-    question: { type: 'string' },
-    optionA: { type: 'string' },
-    optionB: { type: 'string' },
-    footerText: { type: 'string' },
+    question: { type: 'string', maxLen: 180 },
+    optionA: { type: 'string', maxLen: 50 },
+    optionB: { type: 'string', maxLen: 50 },
+    footerText: { type: 'string', maxLen: 200 },
   },
 };
 
@@ -107,13 +116,16 @@ function jsonSchemaForField(def) {
       maxItems: def.count,
       items: {
         type: 'object',
-        properties: { label: { type: 'string', maxLength: MAX_LEN }, result: { type: 'string', maxLength: MAX_LEN } },
+        properties: {
+          label: { type: 'string', maxLength: def.labelMaxLen || MAX_LEN },
+          result: { type: 'string', maxLength: def.resultMaxLen || MAX_LEN },
+        },
         required: ['label'],
         additionalProperties: false,
       },
     };
   }
-  return { type: 'string', maxLength: MAX_LEN };
+  return { type: 'string', maxLength: def.maxLen || MAX_LEN };
 }
 
 function schemaFor(moduleId) {
@@ -158,7 +170,7 @@ function validatePlan(moduleId, obj) {
     if (!def) return null;
     const val = obj[key];
     if (def.type === 'string') {
-      const s = validateStringField(val);
+      const s = validateStringField(val, def.maxLen);
       if (s === null) return null;
       out[key] = s;
     } else if (def.type === 'stringArray') {
@@ -176,11 +188,11 @@ function validatePlan(moduleId, obj) {
       for (const o of val) {
         if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
         if (Object.keys(o).some((k) => k !== 'label' && k !== 'result')) return null;
-        const label = validateStringField(o.label);
+        const label = validateStringField(o.label, def.labelMaxLen);
         if (label === null) return null;
         const entry = { label };
         if (o.result !== undefined) {
-          const result = validateStringField(o.result);
+          const result = validateStringField(o.result, def.resultMaxLen);
           if (result === null) return null;
           entry.result = result;
         }
@@ -204,10 +216,24 @@ function validatePlan(moduleId, obj) {
 const FILLER_RE = /click here|amazing offer|don'?t miss out|act now|limited time|shop now/i;
 const SHOUT_RE = /\b[A-Z]{5,}\b/;
 
-function scorePlan(plan, fields) {
+// The generic-safety penalties above are calibrated for a neutral tone, but
+// "!!!"/urgency language/energetic filler ("shop now", "limited time") is
+// exactly the brand voice a Playful or Urgent campaign is going for, not a
+// spam signal — scoring it as harshly as a Premium/Informative brief would
+// systematically reject the copy that best matches the requested tone. A
+// leniency multiplier scales the penalties down for energetic tones (still
+// nonzero, so genuinely unhinged shouting/filler still loses) and leaves
+// calmer tones at full strength. Unknown/omitted tone defaults to 1 (the
+// original, tone-blind behaviour) so existing callers are unaffected.
+const TONE_LENIENCY = {
+  Playful: 0.5, Urgent: 0.35, Premium: 1, Informative: 1,
+};
+
+function scorePlan(plan, fields, tone) {
   if (!plan) return -Infinity;
   const keys = Object.keys(plan);
   if (!keys.length) return -Infinity;
+  const leniency = TONE_LENIENCY[tone] ?? 1;
   let score = (keys.length / fields.length) * 10;
   for (const key of keys) {
     const val = plan[key];
@@ -218,15 +244,17 @@ function scorePlan(plan, fields) {
     const len = val.length;
     if (len >= 16 && len <= 90) score += 2;
     const bangs = (val.match(/!/g) || []).length;
-    if (bangs > 1) score -= (bangs - 1);
-    if (SHOUT_RE.test(val)) score -= 2;
-    if (FILLER_RE.test(val)) score -= 3;
+    if (bangs > 1) score -= (bangs - 1) * leniency;
+    if (SHOUT_RE.test(val)) score -= 2 * leniency;
+    if (FILLER_RE.test(val)) score -= 3 * leniency;
   }
   return score;
 }
 
-function buildPrompt({ moduleId, brandName, vertical, briefText, fieldList }) {
-  return `You are writing short marketing copy fragments for one AMP email module ("${moduleId}") for the brand "${brandName || 'the brand'}"${vertical ? ` in the "${vertical}" vertical` : ''}.
+function buildPrompt({
+  moduleId, brandName, vertical, briefText, fieldList, tone,
+}) {
+  return `You are writing short marketing copy fragments for one AMP email module ("${moduleId}") for the brand "${brandName || 'the brand'}"${vertical ? ` in the "${vertical}" vertical` : ''}${tone ? `, in a ${tone} tone` : ''}.
 
 Campaign brief (context for tone/subject only — never quote it verbatim, never include HTML, markdown, or links):
 """
@@ -303,7 +331,9 @@ function defaultProviders(opts) {
 // opts.timeoutMs: override the ~8s default budget (tests only), applied
 // uniformly to every provider in the fan-out.
 async function composeContent(briefText, ctx = {}, opts = {}) {
-  const { moduleId, vertical, brandName } = ctx;
+  const {
+    moduleId, vertical, brandName, tone,
+  } = ctx;
   const moduleSchema = FIELD_SCHEMAS[moduleId];
   const fields = fieldsFor(moduleId);
   if (!briefText || !fields) return null;
@@ -314,7 +344,7 @@ async function composeContent(briefText, ctx = {}, opts = {}) {
   const schema = schemaFor(moduleId);
   const fieldList = fields.map((key) => describeField(key, moduleSchema[key])).join('; ');
   const prompt = buildPrompt({
-    moduleId, brandName, vertical, briefText, fieldList,
+    moduleId, brandName, vertical, briefText, fieldList, tone,
   });
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : TIMEOUT_MS;
 
@@ -337,7 +367,7 @@ async function composeContent(briefText, ctx = {}, opts = {}) {
     }
     const plan = validatePlan(moduleId, raw);
     if (!plan) continue;
-    const score = scorePlan(plan, fields);
+    const score = scorePlan(plan, fields, tone);
     if (score > bestScore) {
       bestScore = score;
       best = plan;

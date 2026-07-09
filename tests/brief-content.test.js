@@ -86,6 +86,37 @@ test('every FIELD_SCHEMAS moduleId is a real generate.js module', () => {
   }
 });
 
+// ---- validatePlan: per-field widened caps for prose vs tight UI fields -----
+
+test('validatePlan allows a longer prose field (teaserText) up to its own widened cap, past the old 140 default', () => {
+  const ok = validatePlan('reveal', { teaserText: 'x'.repeat(200) });
+  assert.deepStrictEqual(ok, { teaserText: 'x'.repeat(200) });
+  assert.strictEqual(validatePlan('reveal', { teaserText: 'x'.repeat(221) }), null); // over reveal's 220 cap
+});
+
+test('validatePlan keeps tight single-line fields (ctaLabel, poll vote labels) capped short even though prose fields were widened', () => {
+  assert.strictEqual(validatePlan('reveal', { ctaLabel: 'x'.repeat(41) }), null); // over the 40-char button cap
+  assert.deepStrictEqual(validatePlan('reveal', { ctaLabel: 'x'.repeat(40) }), { ctaLabel: 'x'.repeat(40) });
+  assert.strictEqual(validatePlan('poll', { optionA: 'x'.repeat(51) }), null); // over the 50-char vote-label cap
+});
+
+test('validatePlan applies independent label/result caps to quiz options (short tap target, longer result sentence)', () => {
+  const tooLongLabel = validatePlan('quiz', {
+    options: [{ label: 'x'.repeat(61) }, { label: 'B' }, { label: 'C' }],
+  });
+  assert.strictEqual(tooLongLabel, null); // over the 60-char label cap
+
+  const longResultOk = validatePlan('quiz', {
+    options: [{ label: 'A', result: 'x'.repeat(180) }, { label: 'B' }, { label: 'C' }],
+  });
+  assert.ok(longResultOk, 'a 180-char result should fit the widened quiz result cap');
+
+  const tooLongResult = validatePlan('quiz', {
+    options: [{ label: 'A', result: 'x'.repeat(181) }, { label: 'B' }, { label: 'C' }],
+  });
+  assert.strictEqual(tooLongResult, null); // over the 180-char result cap
+});
+
 // ---- scorePlan: heuristic best-of-N quality proxy --------------------------
 
 test('scorePlan returns -Infinity for null or an empty plan', () => {
@@ -110,6 +141,37 @@ test('scorePlan tolerates array-shaped fields (itemNames, quiz options) without 
   assert.ok(Number.isFinite(withItems));
   const withOptions = scorePlan({ options: [{ label: 'A', result: 'ra' }, { label: 'B', result: 'rb' }, { label: 'C', result: 'rc' }] }, fieldsFor('quiz'));
   assert.ok(Number.isFinite(withOptions));
+});
+
+// ---- scorePlan: tone-aware leniency ---------------------------------------
+// "!!!"/energetic filler is the brand voice a Playful/Urgent brief actually
+// wants, not a spam signal — so the same copy should be penalised less under
+// those tones than under a calm Premium/Informative one (or no tone at all).
+
+test('scorePlan is more lenient on exclamation marks and filler for energetic tones (Playful/Urgent) than calm ones', () => {
+  const energetic = { head: 'Shop now!!! Limited time only!!!' };
+  const noTone = scorePlan(energetic, fieldsFor('reveal'));
+  const playful = scorePlan(energetic, fieldsFor('reveal'), 'Playful');
+  const urgent = scorePlan(energetic, fieldsFor('reveal'), 'Urgent');
+  const premium = scorePlan(energetic, fieldsFor('reveal'), 'Premium');
+  const informative = scorePlan(energetic, fieldsFor('reveal'), 'Informative');
+
+  assert.ok(playful > noTone, `Playful should score the same copy higher than no tone: ${playful} vs ${noTone}`);
+  assert.ok(urgent > noTone, `Urgent should score the same copy higher than no tone: ${urgent} vs ${noTone}`);
+  // Premium/Informative are the calibrated-strict default (leniency 1), same as no tone at all.
+  assert.strictEqual(premium, noTone);
+  assert.strictEqual(informative, noTone);
+});
+
+test('scorePlan still penalises energetic-tone copy for genuinely spammy patterns, just less severely', () => {
+  const clean = scorePlan({ head: 'Discover our summer picks' }, fieldsFor('reveal'), 'Playful');
+  const spammy = scorePlan({ head: 'ACT NOW!!! AMAZING OFFER!!!' }, fieldsFor('reveal'), 'Playful');
+  assert.ok(clean > spammy, `even under a lenient tone, clean copy should still outscore spammy copy: ${clean} vs ${spammy}`);
+});
+
+test('scorePlan treats an unrecognised/omitted tone as the original tone-blind default (full-strength penalties)', () => {
+  const spammy = { head: 'ACT NOW!!! AMAZING OFFER!!!' };
+  assert.strictEqual(scorePlan(spammy, fieldsFor('reveal'), 'not-a-real-tone'), scorePlan(spammy, fieldsFor('reveal')));
 });
 
 // ---- composeContent: dependency-injected fake providers, no real network --
@@ -214,6 +276,50 @@ test('a provider may return a JSON string instead of a parsed object (e.g. Gemin
   const providers = [{ name: 'stringy', call: async () => JSON.stringify({ head: 'From a stringified provider body' }) }];
   const plan = await composeContent('Some brief', { moduleId: 'reveal' }, { providers });
   assert.deepStrictEqual(plan, { head: 'From a stringified provider body' });
+});
+
+test('composeContent threads ctx.tone into the prompt sent to providers', async () => {
+  let seenPrompt = null;
+  const providers = [{
+    name: 'spy',
+    call: async (prompt) => { seenPrompt = prompt; return { head: 'A tidy headline here' }; },
+  }];
+  await composeContent('A summer drop', {
+    moduleId: 'reveal', vertical: 'Fashion', brandName: 'Acme', tone: 'Urgent',
+  }, { providers });
+  assert.ok(seenPrompt && seenPrompt.includes('Urgent'), 'the prompt should mention the requested tone');
+});
+
+// composeContent's best-of-N picks whichever candidate scores higher — and
+// since scorePlan's leniency is tone-dependent, the SAME two competing
+// candidates can end up with a different winner depending on ctx.tone. This
+// is deliberately constructed so a fuller-coverage-but-energetic candidate
+// (bangs + shouting + "act now") loses to a leaner, fully clean one under a
+// calm tone, but overtakes it once the energetic tone's leniency shrinks its
+// penalty enough — proving the tone threading actually changes the outcome
+// end to end, not just in scorePlan isolation.
+test('composeContent lets ctx.tone flip which of two competing candidates wins', async () => {
+  const providers = [
+    {
+      name: 'clean-but-leaner',
+      call: async () => ({ head: 'Discover our summer picks', ctaLabel: 'Shop' }),
+    },
+    {
+      name: 'energetic-fuller-coverage',
+      call: async () => ({
+        head: 'ACT NOW!!! AMAZING deal',
+        teaserText: 'Your reward is ready and waiting',
+        footerText: 'Enjoy!',
+      }),
+    },
+  ];
+  const premiumPlan = await composeContent('Flash sale', { moduleId: 'reveal', tone: 'Premium' }, { providers });
+  assert.deepStrictEqual(premiumPlan, { head: 'Discover our summer picks', ctaLabel: 'Shop' });
+
+  const urgentPlan = await composeContent('Flash sale', { moduleId: 'reveal', tone: 'Urgent' }, { providers });
+  assert.deepStrictEqual(urgentPlan, {
+    head: 'ACT NOW!!! AMAZING deal', teaserText: 'Your reward is ready and waiting', footerText: 'Enjoy!',
+  });
 });
 
 // ---- end-to-end: a validated plan flows through generate() unchanged ------

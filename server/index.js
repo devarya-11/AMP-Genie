@@ -89,7 +89,9 @@ app.post('/generate', async (req, res) => {
     // would pick is known before asking the LLM to write copy for it.
     const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId || (routed && routed.moduleId) });
     const plan = brief
-      ? await composeContent(brief, { moduleId, vertical: b.vertical, brandName: brand })
+      ? await composeContent(brief, {
+        moduleId, vertical: b.vertical, brandName: brand, tone: b.tone,
+      })
       : null;
     // Real fetched logo/site is the base layer — never a first choice over
     // brief-driven or manual copy (neither of which currently sets logoUrl,
