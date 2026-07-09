@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node --test tests/encoding.test.js tests/validator.test.js tests/llm-providers.test.js tests/brief-content.test.js tests/brief-routing.test.js tests/brand.test.js",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
@@ -16,6 +18,7 @@
     "nodemailer": "^6.10.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.44.0"
+    "@playwright/test": "^1.44.0",
+    "wrangler": "^4.107.1"
   }
 }
