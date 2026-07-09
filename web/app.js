@@ -20,14 +20,9 @@
   async function init() {
     const m = await (await fetch('/api/meta')).json();
     S.meta = m;
-    fill($('vertical'), m.verticals);
-    fill($('tone'), m.tones);
     bind();
     loadHistory();
   }
-  function fill(sel, arr) { (arr || []).forEach((v) => sel.appendChild(opt(v, v))); }
-  function opt(v, label) { const o = document.createElement('option'); o.value = v; o.textContent = label; return o; }
-
   function bind() {
     $('colorpick').oninput = () => { $('colorhex').value = $('colorpick').value; S.colorTouched = true; };
     $('colorhex').oninput = () => { if (/^#[0-9a-f]{6}$/i.test($('colorhex').value)) $('colorpick').value = $('colorhex').value; S.colorTouched = true; };
@@ -123,12 +118,10 @@
     try {
       const body = {
         brand: $('brand').value.trim() || 'Acme',
-        vertical: $('vertical').value,
-        tone: $('tone').value,
         counter: S.counter,
-        // Captured and stored for later human review only — never parsed or
-        // used to pick module/vertical/tone, which stay driven by the
-        // structured fields above. "" / whitespace-only -> null.
+        // Industry and tone are no longer asked for — the backend infers them
+        // from the brand and brief. The brief itself now drives module, copy,
+        // vertical, tone, and any stated offer number. "" / whitespace -> null.
         brief: $('campaignBrief').value.trim() || null,
       };
       if (S.colorTouched && /^#[0-9a-f]{6}$/i.test($('colorhex').value)) body.colorOverride = $('colorhex').value;

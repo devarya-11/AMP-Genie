@@ -22,7 +22,9 @@ const { resolveBrandColor, resolveBrandLogo, libVertical } = require('./brand');
 const { dispatch } = require('./dispatch');
 const { readHistory, appendHistory, normalizeBrief, MAX_ENTRIES } = require('./history');
 const { composeContent } = require('./brief-content');
-const { routeBrief, briefSignals } = require('./brief-router');
+const {
+  routeBrief, briefSignals, inferVertical, inferTone,
+} = require('./brief-router');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -81,16 +83,21 @@ app.post('/generate', async (req, res) => {
     ]);
     // "" / whitespace-only is normalized to null (no brief given).
     const brief = normalizeBrief(b.brief);
+    // Industry and tone are no longer supplied by the UI — infer them from the
+    // brand + brief so the backend understands the brand on its own. An explicit
+    // b.vertical / b.tone (e.g. from an API caller) still overrides.
+    const vertical = b.vertical || inferVertical(brand, brief);
+    const tone = b.tone || inferTone(brief);
     // Tier-1 deterministic keyword routing: when a brief is given and the
     // caller didn't explicitly pick a module, the brief's own wording decides
     // which module gets built (an explicit b.moduleId always still wins).
-    const routed = brief ? routeBrief(brief, b.vertical) : null;
+    const routed = brief ? routeBrief(brief, vertical) : null;
     // Resolved once, up front, so the same module a plain generate() call
     // would pick is known before asking the LLM to write copy for it.
     const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId || (routed && routed.moduleId) });
     const plan = brief
       ? await composeContent(brief, {
-        moduleId, vertical: b.vertical, brandName: brand, tone: b.tone,
+        moduleId, vertical, brandName: brand, tone,
       })
       : null;
     // Real fetched logo/site is the base layer — never a first choice over
@@ -112,8 +119,8 @@ app.post('/generate', async (req, res) => {
     const copy = { ...logoCopy, ...briefSig, ...(plan || {}), ...manualCopy };
     const g = generate({
       brand,
-      vertical: b.vertical,
-      tone: b.tone,
+      vertical,
+      tone,
       currency: b.currency,
       color: colorResolved.primary,
       moduleId,

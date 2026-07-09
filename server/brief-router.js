@@ -80,4 +80,47 @@ function briefSignals(briefText) {
   return out;
 }
 
-module.exports = { routeBrief, briefSignals, KEYWORD_MAP };
+// Industry (vertical) and tone are no longer asked for in the UI — they are
+// inferred here from the brand name + brief so the backend "understands the
+// brand" on its own. Both scan brand+brief together (lowercased) and pick the
+// value with the most keyword hits, mirroring routeBrief; no hit falls back to
+// the same neutral default the generator already used for a blank selector
+// ('Generic' vertical, 'Playful' tone), so behaviour is unchanged when there's
+// nothing to go on. Hints include a handful of well-known brand names so a
+// bare brand with no brief (e.g. "Nykaa") still lands in the right vertical.
+const VERTICAL_HINTS = {
+  Beauty: ['beauty', 'cosmetic', 'makeup', 'make-up', 'skincare', 'skin care', 'serum', 'lipstick', 'salon', 'fragrance', 'perfume', 'grooming', 'haircare', 'nykaa', 'sephora', 'lakme', 'maybelline', "sugar cosmetics", 'mamaearth'],
+  Fashion: ['fashion', 'apparel', 'clothing', 'clothes', 'outfit', 'footwear', 'shoes', 'denim', 'dress', 'wardrobe', 'styling', 'ethnic wear', 'myntra', 'ajio', 'zara', 'uniqlo', 'h&m', 'fabindia'],
+  Food: ['food', 'restaurant', 'meal', 'dish', 'menu', 'dining', 'kitchen', 'biryani', 'pizza', 'burger', 'grocery', 'snack', 'beverage', 'zomato', 'swiggy', 'dominos', 'mcdonald', 'starbucks', 'kfc', 'blinkit', 'zepto'],
+  Finance: ['finance', 'bank', 'invest', 'loan', 'mutual fund', 'insurance', 'wallet', 'credit card', 'trading', 'stocks', 'auto-sip', 'groww', 'zerodha', 'paytm', 'phonepe', 'cred', 'upstox'],
+  Electronics: ['electronic', 'gadget', 'smartphone', 'laptop', 'appliance', 'headphone', 'earbuds', 'smartwatch', 'console', 'croma', 'boat', 'oneplus', 'samsung galaxy', 'reliance digital'],
+  Travel: ['travel', 'flight', 'hotel', 'trip', 'holiday', 'vacation', 'getaway', 'resort', 'itinerary', 'staycation', 'makemytrip', 'goibibo', 'airbnb', 'ixigo', 'cleartrip', 'oyo'],
+};
+
+const TONE_HINTS = {
+  Urgent: ['hurry', 'tonight', 'last chance', 'sale ends', 'ends soon', 'ending soon', 'expire', 'expiring', 'today only', 'flash sale', 'limited time', "don't miss", 'final hours', 'hours left', 'act now', 'while stocks last', 'closing soon', 'deadline', 'countdown'],
+  Premium: ['exclusive', 'premium', 'luxury', 'curated', 'members only', 'vip', 'handpicked', 'bespoke', 'signature', 'limited edition', 'elite', 'invitation'],
+  Informative: ['update', 'announcement', 'announcing', 'new feature', 'notice', 'reminder', 'statement', 'confirm', 'how to', 'walkthrough', 'introducing'],
+};
+
+function scorePick(haystack, hintMap, fallback) {
+  let best = fallback;
+  let bestScore = 0;
+  for (const [key, hints] of Object.entries(hintMap)) {
+    const score = hints.reduce((n, h) => n + (haystack.includes(h) ? 1 : 0), 0);
+    if (score > bestScore) { bestScore = score; best = key; }
+  }
+  return best;
+}
+
+function inferVertical(brand, briefText) {
+  return scorePick(`${brand || ''} ${briefText || ''}`.toLowerCase(), VERTICAL_HINTS, 'Generic');
+}
+
+function inferTone(briefText) {
+  return scorePick(String(briefText || '').toLowerCase(), TONE_HINTS, 'Playful');
+}
+
+module.exports = {
+  routeBrief, briefSignals, inferVertical, inferTone, KEYWORD_MAP,
+};

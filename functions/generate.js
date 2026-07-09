@@ -15,7 +15,9 @@ import { json, readJson } from './_lib/http.js';
 const { generate, pickModuleId } = generateMod;
 const { resolveBrandColor, resolveBrandLogo } = brandMod;
 const { composeContent } = briefContentMod;
-const { routeBrief, briefSignals } = briefRouterMod;
+const {
+  routeBrief, briefSignals, inferVertical, inferTone,
+} = briefRouterMod;
 
 export async function onRequestPost({ request, env, waitUntil }) {
   applyEnv(env); // provider API keys reach brief-content/llm-providers via process.env
@@ -30,13 +32,18 @@ export async function onRequestPost({ request, env, waitUntil }) {
       resolveBrandLogo({ brandName: brand }),
     ]);
     const brief = normalizeBrief(b.brief);
+    // Industry and tone are no longer supplied by the UI — infer them from the
+    // brand + brief so the backend understands the brand on its own. An explicit
+    // b.vertical / b.tone (e.g. from an API caller) still overrides.
+    const vertical = b.vertical || inferVertical(brand, brief);
+    const tone = b.tone || inferTone(brief);
     // Tier-1 deterministic keyword routing: a brief's wording picks the module
     // unless the caller set an explicit b.moduleId (which always wins).
-    const routed = brief ? routeBrief(brief, b.vertical) : null;
+    const routed = brief ? routeBrief(brief, vertical) : null;
     const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId || (routed && routed.moduleId) });
     const plan = brief
       ? await composeContent(brief, {
-        moduleId, vertical: b.vertical, brandName: brand, tone: b.tone,
+        moduleId, vertical, brandName: brand, tone,
       })
       : null;
     // Real fetched logo/site is the base layer; brief-driven plan overrides it;
@@ -50,8 +57,8 @@ export async function onRequestPost({ request, env, waitUntil }) {
     const copy = { ...logoCopy, ...briefSig, ...(plan || {}), ...manualCopy };
     const g = generate({
       brand,
-      vertical: b.vertical,
-      tone: b.tone,
+      vertical,
+      tone,
       currency: b.currency,
       color: colorResolved.primary,
       moduleId,
