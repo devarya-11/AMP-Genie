@@ -15,16 +15,22 @@ const express = require('express');
 // vars in that case, degrading brief-content generation without any error.
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-const { generate, pickModuleId, MODULE_IDS, MODULES, VERTICALS, CURRENCIES, derivePalette } = require('./generate');
+const { MODULE_IDS, MODULES, VERTICALS, CURRENCIES, derivePalette } = require('./generate');
 const { TONES } = require('./content');
 const { validate } = require('./validator');
-const { resolveBrandColor, resolveBrandLogo, libVertical } = require('./brand');
+const { resolveBrandColor, libVertical } = require('./brand');
 const { dispatch } = require('./dispatch');
-const { readHistory, appendHistory, normalizeBrief, MAX_ENTRIES } = require('./history');
-const { composeContent } = require('./brief-content');
-const {
-  routeBrief, briefSignals, inferVertical, inferTone,
-} = require('./brief-router');
+const { readHistory, appendHistory, MAX_ENTRIES } = require('./history');
+const { createBuild, buildHistoryEntry } = require('./build-pipeline');
+const { createSlate } = require('./slate-core');
+const { getBuild, getSlate } = require('./store');
+const { createFsKv } = require('./store-fs');
+const { buildPageHtml, slatePageHtml, notFoundPageHtml } = require('./share-pages');
+
+// Local persistence for builds/slates/brand-kits: the same store interface the
+// Pages Functions back with the HISTORY KV namespace, here backed by a
+// git-ignored .data/ directory — so share links work in local dev too.
+const kv = createFsKv(path.join(__dirname, '..', '.data'));
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -67,93 +73,58 @@ app.post('/brand', async (req, res) => {
 });
 
 // ---- generate: the single source of truth for AMP output ------------------
+// The whole flow lives once in server/build-pipeline.js (shared with the
+// Pages Function in functions/generate.js); this route only parses, injects
+// the Node validator + fs store, and appends the legacy history entry.
 app.post('/generate', async (req, res) => {
   try {
     const b = req.body || {};
-    const brand = (b.brand || '').trim() || 'Acme';
-    // Colour and logo are independent live-fetch lookups against the same
-    // guessed brand domain(s) — run them concurrently rather than back to
-    // back so a real-logo lookup never adds its own extra latency on top of
-    // the colour resolver's (each already has its own timeout budget and
-    // degrades to null/placeholder independently, so a failure in one can't
-    // affect the other).
-    const [colorResolved, logoResolved] = await Promise.all([
-      resolveBrandColor({ brandName: brand, hexOverride: b.colorOverride }),
-      resolveBrandLogo({ brandName: brand }),
-    ]);
-    // "" / whitespace-only is normalized to null (no brief given).
-    const brief = normalizeBrief(b.brief);
-    // Industry and tone are no longer supplied by the UI — infer them from the
-    // brand + brief so the backend understands the brand on its own. An explicit
-    // b.vertical / b.tone (e.g. from an API caller) still overrides.
-    const vertical = b.vertical || inferVertical(brand, brief);
-    const tone = b.tone || inferTone(brief);
-    // Tier-1 deterministic keyword routing: when a brief is given and the
-    // caller didn't explicitly pick a module, the brief's own wording decides
-    // which module gets built (an explicit b.moduleId always still wins).
-    const routed = brief ? routeBrief(brief, vertical) : null;
-    // Resolved once, up front, so the same module a plain generate() call
-    // would pick is known before asking the LLM to write copy for it.
-    const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId || (routed && routed.moduleId) });
-    const plan = brief
-      ? await composeContent(brief, {
-        moduleId, vertical, brandName: brand, tone,
-      })
-      : null;
-    // Real fetched logo/site is the base layer — never a first choice over
-    // brief-driven or manual copy (neither of which currently sets logoUrl,
-    // but this ordering keeps that guarantee true if either ever does), and
-    // falls all the way back to generate.js's own placeholder image when
-    // logoResolved is null (unreachable site, no og:image/favicon found, or
-    // blank brand name).
-    const logoCopy = logoResolved ? { logoUrl: logoResolved.logoUrl, site: logoResolved.site } : {};
-    // Deterministic numbers the brief states outright (e.g. "40%"): the LLM
-    // plan is structurally barred from setting the offer amount, so without
-    // this the headline it writes and the big "X% OFF" the module renders
-    // would disagree. Sits above logo/below manual copy — an explicit
-    // b.copy.discount still wins.
-    const briefSig = brief ? briefSignals(brief) : {};
-    // An explicit manual copy override (if the caller sent one) always wins
-    // over the LLM's plan, field by field.
-    const manualCopy = (b.copy && typeof b.copy === 'object' && !Array.isArray(b.copy)) ? b.copy : {};
-    const copy = { ...logoCopy, ...briefSig, ...(plan || {}), ...manualCopy };
-    const g = generate({
-      brand,
-      vertical,
-      tone,
-      currency: b.currency,
-      color: colorResolved.primary,
-      moduleId,
-      counter: b.counter,
-      copy,
-    });
-    const validation = await validate(g.ampHtml);
-    // `applied: false` marks the case where an explicit b.moduleId overrode
-    // the router's suggestion — kept in the response/history for audit even
-    // though it didn't win.
-    const routedFromBrief = routed
-      ? { moduleId: routed.moduleId, confidence: routed.confidence, matchedTerms: routed.matchedTerms, applied: !b.moduleId }
-      : null;
-    const out = { ...g, colorSource: colorResolved.source, validation, brief, routedFromBrief };
-    appendHistory({
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-      ts: new Date().toISOString(),
-      brand: g.brand,
-      vertical: g.vertical,
-      tone: g.tone,
-      moduleId: g.moduleId,
-      moduleName: g.moduleName,
-      colorSource: colorResolved.source,
-      palette: g.palette,
-      brief,
-      routedFromBrief,
-      validationPass: validation.pass,
-      ampHtml: g.ampHtml,
-    });
-    res.json(out);
+    const author = typeof b.author === 'string' ? b.author.slice(0, 60) : null;
+    const { response, build } = await createBuild(b, { validate, kv, author });
+    appendHistory(buildHistoryEntry(build));
+    res.json(response);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// ---- slate: one brief -> up to 6 distinct-module validated builds ----------
+app.post('/slate', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const { builds, response } = await createSlate(b, { validate, kv });
+    // Slate builds land in the Recent-builds panel too, oldest first so the
+    // panel (newest-first) ends up showing them in slate order.
+    for (const built of builds.slice().reverse()) appendHistory(buildHistoryEntry(built));
+    res.json(response);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ---- share pages: the pitch deliverable ------------------------------------
+app.get('/b/:id', async (req, res) => {
+  const build = await getBuild(kv, req.params.id);
+  res.status(build ? 200 : 404).type('html').send(build ? buildPageHtml(build) : notFoundPageHtml('build'));
+});
+app.get('/s/:id', async (req, res) => {
+  const slate = await getSlate(kv, req.params.id);
+  if (!slate) return res.status(404).type('html').send(notFoundPageHtml('slate'));
+  const builds = (await Promise.all((slate.buildIds || []).map((id) => getBuild(kv, id)))).filter(Boolean);
+  res.type('html').send(slatePageHtml(slate, builds));
+});
+app.get('/build/:id', async (req, res) => {
+  const build = await getBuild(kv, req.params.id);
+  if (!build) return res.status(404).json({ error: 'No such build.' });
+  const fmt = req.query.format;
+  if (fmt === 'amp' || fmt === 'fallback') {
+    const body = fmt === 'amp' ? build.ampHtml : build.fallbackHtml;
+    res.setHeader('Content-Disposition', `attachment; filename="amp-genie-${(build.brand || 'brand').toLowerCase().replace(/[^a-z0-9]/g, '')}-${build.moduleId}${fmt === 'fallback' ? '-fallback' : ''}.html"`);
+    return res.type('html').send(body || '');
+  }
+  // JSON view strips the heavy parts — share pages only need the model.
+  const { ampHtml, fallbackHtml, fallbackText, ...meta } = build;
+  res.json(meta);
 });
 
 // ---- history: past builds, newest first, for later review -----------------

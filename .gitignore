@@ -22,3 +22,4 @@ cf-spike/
 # (see corpus/README.md — "never redistributed" is a non-negotiable project rule).
 # Only the distilled, brand-agnostic patterns/ outputs persist into the repo.
 corpus/
+.data/

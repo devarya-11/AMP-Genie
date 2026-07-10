@@ -4,6 +4,11 @@
 
   const S = { meta: null, result: null, edited: null, counter: 0, colorTouched: false, active: 'preview', briefOverLimit: false, building: false };
   const BRIEF_MAX = 2000;
+  // Lightweight identity for team attribution: a name kept in localStorage and
+  // stamped onto every build/slate this browser creates. Not auth — access
+  // control is Cloudflare Access's job (see SETUP-CLOUDFLARE.md).
+  const AUTHOR_KEY = 'genieAuthor';
+  function author() { try { return (localStorage.getItem(AUTHOR_KEY) || '').trim() || null; } catch (e) { return null; } }
 
   async function api(path, body) {
     const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -30,6 +35,9 @@
     $('surprise').onclick = () => { S.counter++; build(true); };
     $('copy').onclick = copyCode;
     $('download').onclick = downloadCode;
+    $('share').onclick = copyShareLink;
+    $('authorName').value = author() || '';
+    $('authorName').onchange = () => { try { localStorage.setItem(AUTHOR_KEY, $('authorName').value.trim()); } catch (e) {} };
     $('revalidate').onclick = revalidate;
     $('resetCode').onclick = resetCode;
     $('dispatch').onclick = doDispatch;
@@ -113,7 +121,8 @@
       return;
     }
     setBuilding(true);
-    setStatus('Rubbing the lamp&hellip;', true);
+    const slateMode = $('slateToggle').checked;
+    setStatus(slateMode ? 'Conjuring the full slate — six validated emails&hellip;' : 'Rubbing the lamp&hellip;', true);
     let ok = false;
     try {
       const body = {
@@ -123,16 +132,25 @@
         // from the brand and brief. The brief itself now drives module, copy,
         // vertical, tone, and any stated offer number. "" / whitespace -> null.
         brief: $('campaignBrief').value.trim() || null,
+        author: author(),
       };
       if (S.colorTouched && /^#[0-9a-f]{6}$/i.test($('colorhex').value)) body.colorOverride = $('colorhex').value;
-      const out = await api('/generate', body);
-      if (out.error) { setStatus('Error: ' + out.error); return; }
-      S.result = out;
-      S.edited = null;
-      if (!S.colorTouched) { $('colorhex').value = out.palette.primary; $('colorpick').value = out.palette.primary; }
-      $('result').classList.remove('hidden');
-      renderResult();
-      setStatus(out.validation.pass ? 'Done — valid AMP4EMAIL, zero errors.' : 'Done — see Validation tab for issues.');
+      if (slateMode) {
+        const out = await api('/slate', body);
+        if (out.error) { setStatus('Error: ' + out.error); return; }
+        renderSlate(out);
+        setStatus('Done — ' + out.builds.length + ' validated emails on one pitch page.');
+      } else {
+        const out = await api('/generate', body);
+        if (out.error) { setStatus('Error: ' + out.error); return; }
+        S.result = out;
+        S.edited = null;
+        if (!S.colorTouched) { $('colorhex').value = out.palette.primary; $('colorpick').value = out.palette.primary; }
+        $('slateResult').classList.add('hidden');
+        $('result').classList.remove('hidden');
+        renderResult();
+        setStatus(out.validation.pass ? 'Done — valid AMP4EMAIL, zero errors.' : 'Done — see Validation tab for issues.');
+      }
       ok = true;
       loadHistory();
     } catch (e) {
@@ -140,6 +158,46 @@
     } finally {
       setBuilding(false, ok);
     }
+  }
+
+  // ---------- slate rendering: the pitch deliverable ----------
+  function renderSlate(out) {
+    $('result').classList.add('hidden');
+    const box = $('slateResult');
+    box.classList.remove('hidden');
+    $('slateTitle').textContent = out.title || (out.brand + ' — pitch slate');
+    $('slateSub').textContent = out.builds.length + ' interactive modules, each validated AMP4EMAIL';
+    const open = $('slateOpen');
+    if (out.sharePath) {
+      open.href = out.sharePath;
+      open.classList.remove('hidden');
+    } else {
+      // KV/storage write failed — builds still happened, they just have no
+      // hosted pages. Say so instead of showing a dead link.
+      open.classList.add('hidden');
+      $('slateMsg').textContent = 'Share pages unavailable — storage is not configured on this server.';
+    }
+    const list = $('slateBuilds'); list.innerHTML = '';
+    out.builds.forEach((b) => {
+      const row = el('div', 'slate-build');
+      const name = el('span', 'slate-build-name', b.useCase || b.moduleName);
+      const chipEl = el('span', 'chip ' + (b.validation && b.validation.pass ? 'pass' : 'fail'), b.validation && b.validation.pass ? 'valid' : 'invalid');
+      row.appendChild(name);
+      row.appendChild(chipEl);
+      if (b.sharePath) {
+        const a = el('a', 'slate-build-open', 'open');
+        a.href = b.sharePath; a.target = '_blank'; a.rel = 'noopener';
+        row.appendChild(a);
+      }
+      list.appendChild(row);
+    });
+  }
+
+  async function copyShareLink() {
+    if (!S.result || !S.result.sharePath) return;
+    const url = location.origin + S.result.sharePath;
+    try { await navigator.clipboard.writeText(url); flash($('share'), 'Link copied!'); }
+    catch (e) { flash($('share'), url); }
   }
 
   // ---------- result rendering ----------
@@ -154,6 +212,11 @@
     chip(chips, 'vertical', r.vertical);
     chip(chips, 'tone', r.tone);
     chip(chips, 'colour', r.palette.primary + ' (' + (r.colorSource || '?') + ')');
+    // Copy provenance: whether an LLM wrote the copy or the template library
+    // did. Without this a configured API key silently degrading to templates
+    // is invisible — the one observability gap that costs real money.
+    if (r.copySource) chip(chips, 'copy', r.copySource);
+    $('share').classList.toggle('hidden', !r.sharePath);
 
     const note = $('briefNote');
     if (r.brief) {
@@ -256,6 +319,10 @@
     const edited = S.edited != null && S.edited !== S.result.ampHtml;
     $('editedDot').classList.toggle('hidden', !edited);
     $('editedLabel').classList.toggle('hidden', !edited);
+    // The live preview renders previewModel from the last generation — it does
+    // NOT re-parse edited AMP. Say so right on the preview instead of letting
+    // an edited build silently show stale content (the old honesty gap).
+    $('previewStale').classList.toggle('hidden', !edited);
   }
   async function revalidate() {
     setStatus('Validating edited code&hellip;');
@@ -310,7 +377,15 @@
     msg.className = 'dispatch-msg'; msg.innerHTML = '<span class="spinner"></span> Sending&hellip;';
     try {
       const out = await api('/dispatch', {
-        to, subject: S.result.brand + ' — ' + S.result.moduleName, ampHtml: currentCode(), fromName: S.result.brand,
+        to,
+        subject: S.result.brand + ' — ' + S.result.moduleName,
+        ampHtml: currentCode(),
+        fromName: S.result.brand,
+        // Branded fallback parts from the same generation context (server
+        // fallback.js) — what non-AMP clients (Outlook) render instead of the
+        // generic stub. They match the last generation, not manual code edits.
+        html: S.result.fallbackHtml || undefined,
+        text: S.result.fallbackText || undefined,
       });
       if (out && out.ok) {
         msg.className = 'dispatch-msg ok';

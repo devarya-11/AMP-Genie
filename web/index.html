@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 
@@ -31,6 +31,8 @@
 <header class="topbar">
   <div class="brandmark"><svg class="ic lampic"><use href="#i-lamp"/></svg><span>AMP&nbsp;Genie</span></div>
   <div class="tagline">Type a brand &rarr; a validated, interactive AMP email</div>
+  <input id="authorName" class="author-input" type="text" placeholder="Your name" maxlength="60"
+         title="Shown on the builds you create so the team knows whose demo is whose">
   <label class="devtoggle" title="Show the AMP code &amp; Validation tabs for debugging">
     <input type="checkbox" id="devToggle" class="devtoggle-input">
     <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
@@ -55,6 +57,14 @@
           <input id="colorhex" type="text" placeholder="auto" maxlength="7">
         </div>
       </div>
+      <div class="ctrl slate-ctrl">
+        <label>Pitch slate <span class="hint">every module, one shareable page</span></label>
+        <label class="devtoggle slate-toggle" title="One brief &rarr; all six interactive modules, grouped on a single shareable pitch page">
+          <input type="checkbox" id="slateToggle" class="devtoggle-input">
+          <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
+          <span class="devtoggle-text">Full slate (6 emails)</span>
+        </label>
+      </div>
     </div>
 
     <div class="brief-field">
@@ -69,6 +79,21 @@
     <div id="status" class="statusline"></div>
   </section>
 
+  <!-- SLATE RESULT: one brief -> all six modules on a single shareable pitch page -->
+  <section id="slateResult" class="slate card hidden">
+    <div class="slate-hdr">
+      <div>
+        <div id="slateTitle" class="conjured"></div>
+        <div id="slateSub" class="slate-sub"></div>
+      </div>
+      <a id="slateOpen" class="primary slate-open" href="#" target="_blank" rel="noopener">
+        <svg class="ic"><use href="#i-sparkle"/></svg> Open pitch page
+      </a>
+    </div>
+    <div id="slateBuilds" class="slate-builds"></div>
+    <div id="slateMsg" class="copy-msg" aria-live="polite"></div>
+  </section>
+
   <!-- RESULT -->
   <section id="result" class="result hidden">
     <!-- LEFT RAIL -->
@@ -81,6 +106,7 @@
         <button id="surprise" class="ghost"><svg class="ic"><use href="#i-refresh"/></svg> Surprise me again</button>
         <button id="copy" class="ghost"><svg class="ic"><use href="#i-copy"/></svg> Copy AMP code</button>
         <button id="download" class="ghost"><svg class="ic"><use href="#i-download"/></svg> Download .html</button>
+        <button id="share" class="ghost hidden"><svg class="ic"><use href="#i-send"/></svg> Copy share link</button>
       </div>
       <div id="copyMsg" class="copy-msg" aria-live="polite"></div>
 
@@ -103,6 +129,9 @@
       </nav>
 
       <div data-pane="preview" class="pane on">
+        <div id="previewStale" class="preview-stale hidden" role="status">
+          Preview shows the last <b>generated</b> version &mdash; your code edits are not reflected here. Re-validate &amp; download use your edits.
+        </div>
         <div class="stage">
           <div class="phone"><div id="previewArea" class="phone-screen"></div></div>
         </div>
@@ -138,6 +167,6 @@
 </main>
 
 <script src="preview.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

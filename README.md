@@ -13,8 +13,15 @@ Two rules are absolute:
    **zero errors** before it's shown as done. There is no regex approximation —
    the real validator is the only gate, in the server, on every generation.
 2. **The server is the single source of truth.** `server/generate.js` builds
-   the AMP; the web UI never re-derives it. The live preview, the downloadable
-   file, and the validated file are always byte-identical.
+   the AMP; the web UI never re-derives it. The code editor, the downloadable
+   file, the validated file, and the dispatched file are always byte-identical.
+   (The live preview is a faithful plain-JS *mirror* of the same generation
+   context — not a render of the bytes — and says so on screen the moment you
+   edit the code, so it can never silently show you something you didn't send.)
+
+Since v2 the tool is organised around the **pitch**, not the single email: one
+brand + one brief can produce a full **slate** of validated interactive
+demos, grouped on one shareable page — see *The pitch workspace* below.
 
 ---
 
@@ -51,6 +58,38 @@ included, whether or not Developer view is on.
 Click **Surprise me again** to reroll: brand, industry, and tone stay put, but
 a reroll counter advances the seed, so you get a different (but reproducible)
 module/content pick each time.
+
+### The pitch workspace (v2)
+
+Nobody pitches one email. The v2 surface turns a brand + brief into the thing
+you actually take to a client:
+
+- **Slates** — flip the **Full slate** toggle (or `POST /slate`) and one brief
+  becomes up to **6 distinct-module builds** (the brief-routed module first),
+  each independently validated to zero errors, grouped under a slate record.
+- **Share pages** — every persisted build gets a hosted page at **`/b/<id>`**:
+  brand header, interactive phone-frame demo (rendered by the *same*
+  `preview.js` the app uses — one renderer, no second implementation),
+  validation badge, and an AMP download. A slate gets **`/s/<id>`** — a
+  responsive grid of all its demos on one page. Drop that link straight into
+  the pitch deck.
+- **Brand kits** — the first successful live brand resolution (colour + logo +
+  site) is saved to KV as `brandkit:<slug>` and reused on every later build
+  for that brand (`colorSource: "kit"`): repeat pitches stop re-fetching the
+  brand's site and always render consistently. An explicit colour override
+  still wins and refreshes the resolution.
+- **Attribution** — the optional **Your name** field (top bar, stored in
+  localStorage) stamps builds and slates so the team can tell whose demo is
+  whose. It is attribution, not auth — lock the deployment itself with
+  Cloudflare Access (see `SETUP-CLOUDFLARE.md`).
+- **Copy provenance** — the result chips show whether the copy came from the
+  template library or an LLM, so a configured key silently degrading to
+  templates is visible instead of invisible.
+
+Storage note: builds, slates and brand kits share the existing `HISTORY` KV
+namespace under key prefixes (`build:`, `slate:`, `brandkit:`) — no new
+infrastructure. The Express dev server persists the same records to a local
+`.data/` directory (git-ignored) so share links work in local dev too.
 
 ### Campaign brief — captured, not interpreted
 
@@ -293,12 +332,27 @@ npm run test:e2e      # Playwright UI e2e against the real server        -> 25/2
 
 ## Sending to a real inbox
 
-The dispatch button (`POST /dispatch`) is wired to a real path in
-`server/dispatch.js`: it **re-validates and refuses to send invalid AMP**, then
-sends a proper multipart message via `nodemailer` — `text/plain`, a
-`text/html` static fallback, and the `text/x-amp-html` AMP part (nodemailer's
-`amp:` field). SMTP credentials come from env vars only, never the client, and
-CORS is locked to the genie's own origin.
+The dispatch button (`POST /dispatch`) is wired to a real path: it
+**re-validates and refuses to send invalid AMP**, then sends a proper
+multipart message — `text/plain`, a `text/html` fallback, and the
+`text/x-amp-html` AMP part. Credentials come from env vars only, never the
+client, and CORS is locked to the genie's own origin.
+
+The `text/html` and `text/plain` parts are the **real branded fallback** built
+by `server/fallback.js` from the same generation context as the AMP (palette,
+logo, module content, entity-encoded prices) — what Outlook and other non-AMP
+clients render. The UI passes them along automatically; API callers can
+override them via `html`/`text` on `POST /dispatch`.
+
+Two transports, one contract:
+
+- **Express dev server** (`server/dispatch.js`) — `nodemailer` over SMTP
+  (`SMTP_*` env vars below).
+- **Cloudflare Pages deployment** (`functions/_lib/email.js`) — SMTP sockets
+  don't exist on Workers, so it sends over an HTTP email API that accepts the
+  AMP MIME part: **SendGrid** (`SENDGRID_API_KEY`) or **Mailgun**
+  (`MAILGUN_API_KEY` + `MAILGUN_DOMAIN`), plus `EMAIL_FROM`, auto-selected by
+  which secret is present.
 
 Getting a message *delivered* isn't the same as getting Gmail to *render* the
 AMP part. Three things gate that, and they're external to this app:
@@ -332,6 +386,9 @@ AMP part. Three things gate that, and they're external to this app:
 | `GROQ_MODEL` | no (`llama-3.1-8b-instant`) | Overrides the Groq model used |
 | `OLLAMA_BASE_URL` | no | Enables the local Ollama provider (e.g. `http://localhost:11434`); unset means never probed |
 | `OLLAMA_MODEL` | no (`llama3.2`) | Overrides the local Ollama model used |
+| `SENDGRID_API_KEY` | no | Cloudflare deployment only: send-to-inbox via SendGrid (AMP MIME part supported) |
+| `MAILGUN_API_KEY` + `MAILGUN_DOMAIN` | no | Cloudflare deployment only: send-to-inbox via Mailgun |
+| `EMAIL_FROM` | with either of the above | Verified sender address for the HTTP email APIs |
 
 None of the above are required — with none set, briefs are still
 captured/stored, and generation just falls back to default copy.
@@ -353,27 +410,35 @@ working without it.
 
 ```
 amp-genie/
-  server/
-    generate.js       module generators + AMP4EMAIL document assembly (source of truth)
-    content.js        per-vertical product/quiz/poll/rating copy + tone headlines
-    validator.js      thin wrapper around amphtml-validator, AMP4EMAIL mode
-    brand.js          4-tier brand colour resolver (override/library/fetch/hash)
-    brief-content.js  brief -> best-of-N schema-validated copy.* plan across all configured LLM providers (graceful null on any/all failures)
-    llm-providers.js  fetch-based callers for Claude/Gemini/Groq/Ollama + shared timeout + free-tier cooldown helpers
-    dispatch.js       nodemailer AMP send (text/x-amp-html MIME part)
-    history.js        minimal file-based .history.json persistence (read/append/normalizeBrief)
-    index.js          Express routes: /api/meta, /brand, /generate, /history, /validate, /dispatch
+  server/                 runtime-agnostic engine + Express dev server
+    generate.js           module generators + AMP4EMAIL document assembly (source of truth)
+    content.js            per-vertical product/quiz/poll/rating copy + tone headlines
+    validator.js          thin wrapper around amphtml-validator, AMP4EMAIL mode
+    brand.js              4-tier brand colour resolver (override/library/fetch/hash)
+    brief-router.js       deterministic brief->module routing + vertical/tone inference + brief signals
+    brief-content.js      brief -> best-of-N schema-validated copy.* plan across all configured LLM providers
+    llm-providers.js      fetch-based callers for Claude/Gemini/Groq/Ollama + timeout + free-tier cooldown
+    build-pipeline.js     the ONE build flow (brand kit -> resolve -> route -> compose -> generate -> validate -> fallback -> persist), shared by Express and Pages Functions
+    slate-core.js         one brief -> N distinct-module validated builds under a slate record
+    fallback.js           branded static text/html fallback from the same generation context
+    share-pages.js        share-page HTML builders (/b/<id>, /s/<id>)
+    store.js              KV-backed builds/slates/brand-kits (key-prefixed, best-effort)
+    store-fs.js           same store interface over a local .data/ dir for Express dev
+    dispatch.js           nodemailer AMP send over SMTP (Express dev)
+    history.js            legacy recent-builds list (read/append/normalizeBrief)
+    index.js              Express routes: /api/meta, /brand, /generate, /slate, /history, /validate, /dispatch, /b/:id, /s/:id, /build/:id
+  functions/              Cloudflare Pages Functions (production backend)
+    generate.js slate.js validate.js brand.js dispatch.js history.js api/meta.js
+    b/[id].js s/[id].js build/[id].js
+    _lib/                 Workers-runtime edges: validator (wasm), KV history, store glue, HTTP email (SendGrid/Mailgun), env bridge
   web/
-    index.html     hero (incl. campaign brief), dropdowns, result panel, 3 tabs, history list
-    app.js         UI state machine: build/edit/revalidate/copy/download/dispatch/history
-    preview.js     plain-JS mirror of each module's amp-bind logic for Live Preview
+    index.html            hero (brand + brief + slate toggle), result panel, 3 tabs, history
+    app.js                UI state machine: build/slate/share/edit/revalidate/copy/download/dispatch
+    preview.js            plain-JS mirror of each module's amp-bind logic (app + share pages)
     style.css
-  tests/
-    encoding.test.js
-    validator.test.js
-    llm-providers.test.js
-    brief-content.test.js
-    e2e.test.js
+  tests/                  node:test unit suites (offline, no keys) + Playwright e2e
+  SETUP-CLOUDFLARE.md     one-time dashboard steps: production branch, secrets, Cloudflare Access
+  CHANGELOG.md
   playwright.config.js
   package.json
 ```
