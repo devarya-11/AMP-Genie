@@ -80,15 +80,18 @@ function briefSignals(briefText) {
   return out;
 }
 
-// Real product/price pairs the user pasted into the brief, so the generated
-// email can show the brand's ACTUAL items (name + price) instead of the
-// vertical's synthetic placeholders. This is the deliberate "you paste the
-// real details and the genie lays them out" path — the LLM copy layer is
-// structurally barred from setting prices, so a real price can only reach the
-// render deterministically, through here. Only a name sitting next to an
-// explicit currency-marked amount is taken (e.g. "Vitamin C Serum ₹899"), so
-// prose like "40% off tonight" or "orders above ₹999" is never mistaken for a
-// product; pure discount phrases ("Flat ₹200 off") are skipped outright.
+// Real products the user pasted into the brief, so the generated email can show
+// the brand's ACTUAL items instead of the vertical's synthetic placeholders.
+// This is the deliberate "you paste the real details and the genie lays them
+// out" path — the LLM copy layer is structurally barred from setting prices, so
+// a real price can only reach the render deterministically, through here. Two
+// shapes are accepted: (1) name + currency-marked amount ("Vitamin C Serum
+// ₹899"), taken anywhere in the text; and (2) a deliberately-pasted LIST of
+// real names with prices optional ("Bao Haus, Naru Noodle Bar, Toast & Tonic"),
+// for announcements that have no prices. Prose is never mistaken for a product:
+// a priced name needs a real name beside a real amount, and a name-only entry
+// must survive a strict grammar veto plus a majority-of-the-list rule; pure
+// discount phrases ("Flat ₹200 off") are skipped outright.
 const PRICE_RE = /(₹|rs\.?|inr|\$|usd|€|eur|£|gbp)\s?(\d[\d,]*)/i;
 const PRICE_RE_G = /(₹|rs\.?|inr|\$|usd|€|eur|£|gbp)\s?\d[\d,]*/ig;
 const CUR_CODE = {
@@ -129,11 +132,10 @@ function isRealItemName(name) {
   return meaningful.length >= 2 || meaningful[0].length >= 3;
 }
 
-function briefProducts(briefText) {
-  // Normalise "Rs." → "Rs " up front so a rupee marker's own full stop is never
-  // mistaken for a sentence break when we split below (PRICE_RE accepts either).
-  const text = String(briefText || '').replace(/\brs\.\s*/ig, 'Rs ');
-  if (!text.trim()) return {};
+// The price-anchored scan: pull "name + currency-marked amount" pairs out of
+// free text. This is the strict path — a name is only taken when it sits next
+// to a real price, so prose can never be mistaken for a product.
+function pricedProducts(text) {
   const items = [];
   let currency;
   // Newline / comma / semicolon / sentence-end each separate a list entry, so
@@ -154,6 +156,133 @@ function briefProducts(briefText) {
     if (items.length >= 8) break;
   }
   return items.length ? { items, currency: currency || 'INR' } : {};
+}
+
+// Words that betray grammatical PROSE (verbs, auxiliaries, pronouns, question
+// words, common contraction stems). A phrase containing any of these is a
+// sentence fragment, not a name — the veto that keeps a described campaign
+// ("there are new restaurants that have been added...") from being read as a
+// product list. Deliberately excludes words that legitimately appear in real
+// brand/restaurant names (new, the, house, co, and, of, for, free, sale) so
+// those still parse.
+const PROSE_WORDS = new Set([
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am', 'that', 'this',
+  'these', 'those', 'give', 'gives', 'giving', 'present', 'presents', 'show',
+  'shows', 'showing', 'showcase', 'make', 'makes', 'want', 'wants', 'need',
+  'needs', 'here', 'there', 'please', 'have', 'has', 'had', 'will', 'would',
+  'should', 'could', 'can', 'our', 'your', 'their', 'them', 'they', 'you',
+  'we', 'best', 'interactive', 'email', 'emails', 'campaign', 'because',
+  'about', 'which', 'what', 'how', 'when', 'where', 'added', 'adding',
+  'introduce', 'introducing', 'same', 'following', 'get', 'gets', 'let',
+  'lets', 'put', 'send', 'sending', 'tell', 'telling', 'help', 'using',
+  'heres', 'theres', 'whats', 'dont', 'doesnt', 'cant', 'wont', 'isnt',
+  'arent', 'wasnt', 'werent', 'im', 'ive', 'weve', 'youve', 'youre',
+  'theyre', 'hes', 'shes', 'thats',
+  // Common offer / legal trailer words — "T&C apply", "while stocks last",
+  // "subject to" — that ride along at the end of a pasted list but are never a
+  // product name themselves.
+  'apply', 'applies', 'terms', 'conditions', 'while', 'stocks', 'hurry',
+  'subject', 'valid',
+]);
+
+// A short phrase that reads like a real product / brand / restaurant NAME
+// rather than a fragment of a sentence. Used only for the names-only list path
+// (there is no price to anchor on), so it is deliberately strict: a comma or
+// contraction, more than six words, or any PROSE_WORD vetoes the phrase, and at
+// least one substantive word is required. This is what lets a pasted list
+// through while a described campaign yields nothing.
+function looksLikeName(name) {
+  const raw = String(name).trim();
+  if (!raw || raw.includes(',')) return false; // a comma means prose / sub-list
+  const words = raw.split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 6) return false;
+  let substantive = 0;
+  for (const w of words) {
+    const lw = w.toLowerCase().replace(/[^a-z0-9&]/g, '');
+    if (!lw) continue;
+    if (PROSE_WORDS.has(lw)) return false; // a sentence word — not a name
+    if (/[a-z]/.test(lw) && lw.length >= 3 && !NAME_STOP.has(lw)) substantive++;
+  }
+  return substantive >= 1;
+}
+
+// Cue words that mark a labelled list ("New restaurants: A, B, C") — the label
+// before the colon must name a category of things for the inline path to fire.
+const LIST_CUE = /\b(restaurants?|menu|items?|dishes|products?|brands?|stores?|outlets?|spots?|places?|featured|featuring|collection|catalogue|catalog|lineup|line-?up|arrivals|picks|launching|launches|available|options|choices|range|now on|new on)\b/i;
+
+// Break a deliberately-pasted list into its entries. Three shapes, all things a
+// person types on purpose (never free prose): one item per line (2+ lines, an
+// optional "Header:" line dropped); a labelled inline list ("Featured: a, b,
+// c"); or the whole brief being a single clean comma list ("a, b, c").
+function splitListSegments(text) {
+  const lines = text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  if (lines.length >= 2) {
+    // Multi-line: each line is one entry; a leading "Header:" line is dropped.
+    return lines.filter((ln, i) => !(i === 0 && /:\s*$/.test(ln)));
+  }
+  const line = lines[0] || '';
+  const labelled = line.match(/^(.{0,40}?):\s*(.+)$/);
+  if (labelled && LIST_CUE.test(labelled[1]) && labelled[2].includes(',')) {
+    // Commas separate entries; a sentence-end peels off any trailing note
+    // ("...Toast & Tonic. While stocks last") so it doesn't swallow a real name.
+    return labelled[2].split(/[,]|[.!?]\s+/).map((s) => s.trim()).filter(Boolean);
+  }
+  // Bare single-line comma list — no mid-line sentence break. looksLikeName
+  // does the real filtering; the majority rule below rejects prose commas.
+  if (line.includes(',') && !/[.!?]\s/.test(line)) {
+    return line.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+// The names-only path: pull real item NAMES (prices optional) out of a pasted
+// list, so a restaurant / store / collection announcement with no prices still
+// lays out the brand's ACTUAL items instead of the vertical's placeholders. A
+// strong majority of the list's entries must read like names, so a prose brief
+// that merely contains a comma or a line break can never masquerade as a list.
+function nameListProducts(text) {
+  const segs = splitListSegments(text).slice(0, 12);
+  if (segs.length < 2) return {};
+  const items = [];
+  let currency;
+  for (const seg of segs) {
+    const m = seg.match(PRICE_RE);
+    let price = null;
+    if (m && !/^\s*(off|cashback|discount|back)\b/.test(seg.slice(m.index + m[0].length).toLowerCase())) {
+      const n = parseInt(m[2].replace(/,/g, ''), 10);
+      if (Number.isFinite(n) && n > 0) price = n;
+    }
+    const name = cleanItemName(seg);
+    if (price != null && isRealItemName(name)) {
+      if (!currency) currency = CUR_CODE[m[1].toLowerCase()] || 'INR';
+      items.push({ name, price });
+    } else if (looksLikeName(name)) {
+      items.push(price != null ? { name, price } : { name });
+      if (price != null && !currency) currency = CUR_CODE[m[1].toLowerCase()] || 'INR';
+    }
+  }
+  // Majority rule: at least two entries, and 60%+ of the segments must survive.
+  if (items.length >= 2 && items.length >= Math.ceil(segs.length * 0.6)) {
+    const out = items.slice(0, 8);
+    return currency ? { items: out, currency } : { items: out };
+  }
+  return {};
+}
+
+// Real products the user pasted, resolved deterministically. The price-anchored
+// scan wins when it finds a proper priced list (its exact prior behaviour is
+// preserved); otherwise a pasted list of real NAMES (prices optional) is taken,
+// so name-only announcements still ground the email in real items.
+function briefProducts(briefText) {
+  // Normalise "Rs." → "Rs " up front so a rupee marker's own full stop is never
+  // mistaken for a sentence break when we split below (PRICE_RE accepts either).
+  const text = String(briefText || '').replace(/\brs\.\s*/ig, 'Rs ');
+  if (!text.trim()) return {};
+  const priced = pricedProducts(text);
+  if (priced.items && priced.items.length >= 2) return priced;
+  const named = nameListProducts(text);
+  if (named.items && named.items.length >= 2) return named;
+  return priced; // 0 or 1 priced item, exactly as before
 }
 
 // Industry (vertical) and tone are no longer asked for in the UI — they are

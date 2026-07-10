@@ -46,7 +46,7 @@
         el('span', { class: 'pv-code', style: `border-color:${p.accent};color:${p.primaryDark}`, text: m.code }),
         el('div', { class: 'pv-row' }, m.items.map((it) => el('div', { class: 'pv-card' }, [
           el('div', { class: 'pv-card-name', text: it.name }),
-          el('div', { class: 'pv-card-price', style: `color:${p.primary}`, text: it.price }),
+          it.price ? el('div', { class: 'pv-card-price', style: `color:${p.primary}`, text: it.price }) : null,
         ]))),
       ]);
       offerWrap.appendChild(body);
@@ -82,7 +82,7 @@
         grid.appendChild(el('div', { class: 'pv-card' }, [
           el('img', { src: it.image, style: 'width:100%;display:block' }),
           el('div', { class: 'pv-card-name', text: it.name }),
-          el('div', { class: 'pv-card-price', style: `color:${p.primary}`, text: it.price }),
+          it.price ? el('div', { class: 'pv-card-price', style: `color:${p.primary}`, text: it.price }) : null,
         ]));
       });
     }
