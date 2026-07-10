@@ -193,6 +193,23 @@ function overrideItemName(base, itemNames, i) {
   return (typeof v === 'string' && v.trim()) ? v.trim() : base;
 }
 
+// Real, user-supplied items (name + price) pasted into the brief and threaded
+// through as copy.items — these REPLACE the vertical's synthetic placeholders
+// so the email shows the brand's actual products at their actual prices. Only
+// a deterministic caller ever sets copy.items (the LLM plan is barred from
+// prices); still validated defensively: keep entries with a non-empty name and
+// a finite positive price, capped so a runaway list can't bloat the render.
+// Returns [] when nothing valid, so callers fall back to content.items and the
+// output stays byte-identical to before when no real items were supplied.
+function validItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((it) => it && typeof it.name === 'string' && it.name.trim()
+      && Number.isFinite(Number(it.price)) && Number(it.price) > 0)
+    .map((it) => ({ name: it.name.trim(), price: Math.round(Number(it.price)) }))
+    .slice(0, 8);
+}
+
 // Best-effort brand homepage guess for the header logo link. Mirrors (does
 // not import) brand.js's candidateDomains — this is a display-only link, not
 // used for colour resolution, so a single best guess is enough here.
@@ -283,8 +300,12 @@ function buildReveal(ctx) {
   const head = enc(applyBrand(headSrc, brand));
   const discount = validPct(copy.discount) || pick(rng, [10, 15, 20, 25]);
   const code = (brand.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6) || 'GENIE') + discount;
-  const items = shuffle(rng, content.items).slice(0, 2)
-    .map((it, i) => ({ ...it, name: overrideItemName(it.name, copy.itemNames, i) }));
+  // Real pasted products (name + price) win over the vertical's placeholders;
+  // when present their names are authoritative, so the LLM's copy.itemNames
+  // rename is skipped (it must not overwrite a real product name).
+  const real = validItems(copy.items);
+  const items = shuffle(rng, real.length ? real : content.items).slice(0, 2)
+    .map((it, i) => ({ ...it, name: real.length ? it.name : overrideItemName(it.name, copy.itemNames, i) }));
   const img = ph(600, 300, p.primary, '#ffffff', `${brand} OFFER`);
   const teaserSrc = copy.teaserText || 'A hand-picked reward is waiting behind the curtain.';
   const ctaSrc = copy.ctaLabel || 'Reveal my offer';
@@ -332,12 +353,19 @@ function buildSearch(ctx) {
   const { brand, palette: p, content, t, currency, rng, copy = {} } = ctx;
   const headSrc = copy.head || t.search;
   const head = enc(applyBrand(headSrc, brand));
-  const items = shuffle(rng, content.items.map((it, i) => {
-    const name = overrideItemName(it.name, copy.itemNames, i);
-    return { ...it, name, cat: content.itemCats[i], key: name.toLowerCase() };
-  }));
-  const cats = content.categories;
-  const catKeys = content.catKeys;
+  // Real pasted products replace the vertical's placeholders. They carry no
+  // category taxonomy, so they all sit under a single "All" filter rather than
+  // inventing categories the pills wouldn't match; the search box still filters
+  // them by name.
+  const real = validItems(copy.items);
+  const items = shuffle(rng, real.length
+    ? real.map((it) => ({ ...it, cat: 'all', key: it.name.toLowerCase() }))
+    : content.items.map((it, i) => {
+      const name = overrideItemName(it.name, copy.itemNames, i);
+      return { ...it, name, cat: content.itemCats[i], key: name.toLowerCase() };
+    }));
+  const cats = real.length ? [] : content.categories;
+  const catKeys = real.length ? [] : content.catKeys;
 
   const css = baseCss(p) + `
 .search input{width:100%;box-sizing:border-box;padding:13px 14px;font-size:15px;border:1px solid ${p.line};border-radius:8px;outline:none;}
