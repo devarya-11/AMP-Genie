@@ -269,8 +269,19 @@ ${body}
 </html>`;
 }
 
+// JSON destined for an <amp-state> script tag. Script content is raw text —
+// the parser never decodes entities there — so enc()'s numeric entities can't
+// help; instead every non-ASCII codepoint (and, defensively, <, > and &)
+// becomes a \uXXXX JSON escape. Same guarantee as enc(): the document stays
+// pure ASCII and byte-encoding-proof, and no state string can ever smuggle a
+// literal </script> into the markup. A pure-ASCII payload passes through
+// byte-identical, so the six original modules' output is unchanged.
+function jsonEnc(data) {
+  return JSON.stringify(data).replace(/[<>&\u0080-\uffff]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+}
+
 function ampState(id, data) {
-  return `<amp-state id="${id}"><script type="application/json">${JSON.stringify(data)}<\/script></amp-state>`;
+  return `<amp-state id="${id}"><script type="application/json">${jsonEnc(data)}<\/script></amp-state>`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -543,6 +554,493 @@ ${footerBlock({ brand, defaultText: 'Tap to vote results update instantly.', cop
 }
 
 /* ------------------------------------------------------------------ *
+ * calc + report: shared override sanitizers and receipt/divider fragments
+ * ------------------------------------------------------------------ */
+
+// buildPoll's "(typeof v === 'string' && v.trim()) || fallback" idiom, named —
+// the calc/report builders take a dozen optional copy strings each.
+function strOr(v, fallback) {
+  return (typeof v === 'string' && v.trim()) ? v.trim() : fallback;
+}
+
+// A numeric copy override in validPct's spirit, generalised: finite and inside
+// the caller's sane window, else the caller's default — never NaN money.
+function validNum(n, min, max, dflt) {
+  const v = Number(n);
+  return Number.isFinite(v) && v >= min && v <= max ? v : dflt;
+}
+
+// A numeric axis override (calc pills / stepper values): only finite in-range
+// numbers survive, length-clamped; fewer than two usable values cannot express
+// a choice, so the whole override is ignored in favour of the fallback.
+function validAxis(arr, { min, max, maxLen }, fallback) {
+  if (!Array.isArray(arr)) return fallback;
+  const vals = arr.map(Number).filter((v) => Number.isFinite(v) && v >= min && v <= max).slice(0, maxLen);
+  return vals.length >= 2 ? vals : fallback;
+}
+
+// A k/v meta-row list (calc receipt, report meta): only well-shaped string
+// pairs survive, length-clamped — a bad override degrades to "no receipt",
+// never to broken markup.
+function validKvRows(arr, maxRows = 4) {
+  if (!Array.isArray(arr)) return null;
+  const out = [];
+  for (const r of arr) {
+    if (!r || typeof r !== 'object') continue;
+    const k = strOr(r.k, '').slice(0, 40);
+    const v = strOr(r.v, '').slice(0, 60);
+    if (k && v) out.push({ k, v });
+    if (out.length >= maxRows) break;
+  }
+  return out.length ? out : null;
+}
+
+// A short list of tap-target labels (report next-step slots): trimmed, capped,
+// and at least two long — one option is not a choice.
+function validStrList(arr, maxItems, maxLen) {
+  if (!Array.isArray(arr)) return null;
+  const out = [];
+  for (const v of arr) {
+    const s = strOr(v, '').slice(0, maxLen);
+    if (s) out.push(s);
+    if (out.length >= maxItems) break;
+  }
+  return out.length >= 2 ? out : null;
+}
+
+// Mirrors fallback.js's safeUrl: only a plain http(s) URL may become a CTA
+// deep link; anything else falls back to the in-email latch button.
+function safeHttpUrl(v) {
+  const s = (typeof v === 'string') ? v.trim() : '';
+  return /^https?:\/\/[^\s"'<>]+$/i.test(s) ? s : null;
+}
+
+// The two-layer composition both winning decks lead with: a bordered
+// "untouched transactional" receipt card (corner-tagged, optional PDF
+// attachment chip — pure CSS/text, amp-img data: URIs are validator-illegal)
+// above a labelled dashed divider that marks where the living layer begins.
+function receiptCard({ tag, rows, attachment = null }) {
+  const kvs = rows.map((r) => `<p class="krow"><span class="kv">${enc(r.v)}</span><span class="kk">${enc(r.k)}</span></p>`).join('\n    ');
+  const att = attachment
+    ? `\n    <div class="att"><span class="att-ic">PDF</span><span class="att-name">${enc(attachment.name)}</span><span class="att-meta">${enc(attachment.meta)}</span></div>`
+    : '';
+  return `<div class="receipt">
+    <span class="rc-tag">${enc(tag)}</span>
+    ${kvs}${att}
+  </div>`;
+}
+
+function dividerRule(label) {
+  return `<div class="divider"><span class="divider-label">${enc(label)}</span></div>`;
+}
+
+function receiptCss(p) {
+  return `
+.rwrap{padding:20px 24px 0;}
+.receipt{border:1px solid ${p.line};border-radius:12px;padding:14px 14px 8px;position:relative;}
+.rc-tag{position:absolute;top:-9px;right:10px;font-size:9px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;background:${p.tint};border:1px solid ${p.line};color:${p.primaryDark};padding:2px 8px;border-radius:9px;}
+.krow{margin:0 0 6px;font-size:12px;color:#6b6b7b;overflow:hidden;}
+.krow .kv{float:right;font-weight:bold;color:${p.ink};margin-left:10px;}
+.att{border-top:1px solid ${p.line};margin-top:8px;padding-top:10px;padding-bottom:4px;overflow:hidden;}
+.att .att-ic{float:left;width:36px;height:36px;border-radius:9px;background:#fde8e8;color:#b42318;font-size:10px;font-weight:bold;text-align:center;line-height:36px;letter-spacing:0.04em;}
+.att .att-name{display:block;margin-left:46px;font-size:12px;font-weight:bold;color:${p.ink};padding-top:3px;}
+.att .att-meta{display:block;margin-left:46px;font-size:11px;color:#9a9aa8;margin-top:2px;}
+.divider{border-top:1.5px dashed ${p.line};margin:22px 24px 0;text-align:center;height:0;}
+.divider .divider-label{display:inline-block;position:relative;top:-9px;font-size:9px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;background:${p.tint};border:1px solid ${p.line};color:${p.primaryDark};padding:2px 10px;border-radius:9px;}
+`;
+}
+
+/* ------------------------------------------------------------------ *
+ * calc: precomputed lookup-table calculator
+ * ------------------------------------------------------------------ */
+
+const CALC_TYPES = ['sip', 'emi', 'plan', 'margin'];
+
+// Per-type fallback axes/labels/rates. Used whenever the vertical's own calc
+// preset wasn't authored for the requested calcType (a copy.calcType override
+// would otherwise feed order counts into SIP maths and bake nonsense).
+const CALC_DEFAULTS = {
+  sip: {
+    aOptions: [1000, 2500, 5000, 10000, 25000], bOptions: [1, 3, 5, 10, 15, 20, 25], ratePct: 12,
+    aLabel: 'Monthly amount', bLabel: 'Invested for', resultLabel: 'Estimated corpus',
+    promptText: 'Tap an amount and a horizon — the maths updates instantly.',
+  },
+  emi: {
+    aOptions: [25000, 50000, 100000, 200000, 500000], bOptions: [1, 2, 3, 4, 5], ratePct: 9,
+    aLabel: 'Amount', bLabel: 'Pay over', resultLabel: 'Your monthly EMI',
+    promptText: 'Tap an amount and a tenure — the EMI updates instantly.',
+  },
+  plan: {
+    aOptions: [1, 2, 4, 8, 12], bOptions: [1, 2, 3, 4], perUseFee: 99, planPrice: 299,
+    aLabel: 'Uses a month', bLabel: 'People on the plan', resultLabel: 'You would save every month',
+    promptText: 'Tap your usage — pay-per-use vs the flat plan, worked out live.',
+  },
+  margin: {
+    aOptions: [10, 25, 50, 100], bOptions: [1, 2, 3, 4], unitPrice: 434, ratePct: 14.95,
+    aLabel: 'Order size', bLabel: 'Leverage', resultLabel: 'Margin you pay',
+    promptText: 'Tap a quantity and a leverage step — margin and funding, worked out live.',
+  },
+};
+
+// Sane input windows per axis, so a hostile override can never bake an absurd
+// or NaN table (validPct's contract, per calculator).
+const CALC_LIMITS = {
+  sip: { a: { min: 100, max: 1000000, maxLen: 5 }, b: { min: 1, max: 40, maxLen: 7 } },
+  emi: { a: { min: 1000, max: 10000000, maxLen: 5 }, b: { min: 1, max: 30, maxLen: 7 } },
+  plan: { a: { min: 0, max: 500, maxLen: 5 }, b: { min: 1, max: 20, maxLen: 7 } },
+  margin: { a: { min: 1, max: 100000, maxLen: 5 }, b: { min: 1, max: 10, maxLen: 7 } },
+};
+
+// Every displayed number is computed HERE, in Node, at generate time — the
+// result is flat string arrays (currency glyph included) that amp-bind only
+// ever indexes with `s.a * B + s.b`. The whitelisted bind grammar has no
+// toFixed/Math/locale, so bind never formats, rounds or computes money; the
+// lookup table IS the formula, edge-case copy (break-even, zero usage)
+// included. Raw glyphs here; enc()/jsonEnc() encode per destination.
+function calcTables({ calcType, aOptions, bOptions, ratePct, perUseFee, planPrice, unitPrice, currency }) {
+  const pt = (n) => priceText(Math.round(n), currency);
+  const big = [];
+  const sub = [];
+  for (const a of aOptions) {
+    for (const b of bOptions) {
+      if (calcType === 'sip') {
+        const r = ratePct / 1200;
+        const n = b * 12;
+        const fv = a * (((Math.pow(1 + r, n) - 1) / r) * (1 + r));
+        const invested = a * n;
+        big.push(pt(fv));
+        sub.push(`${pt(a)} x ${n} months in = ${pt(invested)} · growth ${pt(fv - invested)}`);
+      } else if (calcType === 'emi') {
+        const r = ratePct / 1200;
+        const n = b * 12;
+        const pow = Math.pow(1 + r, n);
+        const emi = (a * r * pow) / (pow - 1);
+        big.push(`${pt(emi)}/mo`);
+        sub.push(`${pt(a)} over ${n} months · total interest ${pt(emi * n - a)}`);
+      } else if (calcType === 'plan') {
+        const uses = a * b;
+        const gross = uses * perUseFee;
+        const save = gross - planPrice;
+        if (uses === 0) {
+          big.push(`${pt(planPrice)}/mo`);
+          sub.push(`at zero usage the plan is ${pt(planPrice)} flat — it starts paying back on the first use`);
+        } else if (save > 0) {
+          big.push(pt(save));
+          sub.push(`${uses} uses = ${pt(gross)} pay-per-use · plan is ${pt(planPrice)} flat`);
+        } else {
+          big.push('Break-even');
+          sub.push(`${uses} uses = ${pt(gross)} pay-per-use vs ${pt(planPrice)} flat — about the same either way`);
+        }
+      } else { // margin
+        const value = a * unitPrice;
+        const margin = value / b;
+        big.push(pt(margin));
+        sub.push(`order ${pt(value)} · ${pt(value - margin)} funded at ${ratePct}% p.a.`);
+      }
+    }
+  }
+  const aVals = aOptions.map((a) => {
+    if (calcType === 'plan') return `${a}/mo`;
+    if (calcType === 'margin') return `Qty ${a}`;
+    return pt(a);
+  });
+  const bVals = bOptions.map((b) => {
+    if (calcType === 'sip') return `${b} yr${b === 1 ? '' : 's'}`;
+    if (calcType === 'emi') return `${b * 12} months`;
+    if (calcType === 'plan') return `${b} ${b === 1 ? 'person' : 'people'}`;
+    return `${b}x`;
+  });
+  return { big, sub, aVals, bVals };
+}
+
+// Honesty-guardrail assumption line per formula, built from the numbers that
+// actually fed the table so copy and maths can never disagree.
+function calcAssumption(calcType, { ratePct, perUseFee, planPrice, currency }) {
+  const pt = (n) => priceText(n, currency);
+  if (calcType === 'sip') return `Assumes ${ratePct}% p.a., compounded monthly. Illustration only, not a promise of returns.`;
+  if (calcType === 'emi') return `Assumes ${ratePct}% p.a. on reducing balance. Processing fee and taxes not included.`;
+  if (calcType === 'plan') return `Pay-per-use compared at ${pt(perUseFee)} a use vs the ${pt(planPrice)}/month plan. Cancel any time.`;
+  return `Assumes ${ratePct}% p.a. funding rate. Leverage amplifies losses too — margin calls apply.`;
+}
+
+function buildCalc(ctx) {
+  const { brand, palette: p, content, t, currency, rng, copy = {} } = ctx;
+  const cc = content.calc || {};
+  const headSrc = copy.head || cc.head || t.calc;
+  const head = enc(applyBrand(headSrc, brand));
+
+  const calcType = CALC_TYPES.includes(copy.calcType) ? copy.calcType
+    : (CALC_TYPES.includes(cc.calcType) ? cc.calcType : 'sip');
+  const base = CALC_DEFAULTS[calcType];
+  const lim = CALC_LIMITS[calcType];
+  // The vertical's preset only applies when it was authored for this calcType.
+  const cv = cc.calcType === calcType ? cc : {};
+
+  const aOptions = validAxis(copy.aOptions, lim.a, validAxis(cv.aOptions, lim.a, base.aOptions));
+  const bOptions = validAxis(copy.bOptions, lim.b, validAxis(cv.bOptions, lim.b, base.bOptions));
+  const ratePct = validNum(copy.ratePct, 0.5, 40, validNum(cv.ratePct, 0.5, 40, base.ratePct || 12));
+  const perUseFee = validNum(copy.perUseFee, 1, 1000000, validNum(cv.perUseFee, 1, 1000000, base.perUseFee || 99));
+  const planPrice = validNum(copy.planPrice, 1, 1000000, validNum(cv.planPrice, 1, 1000000, base.planPrice || 299));
+  const unitPrice = validNum(copy.unitPrice, 1, 10000000, validNum(cv.unitPrice, 1, 10000000, base.unitPrice || 434));
+
+  const tbl = calcTables({ calcType, aOptions, bOptions, ratePct, perUseFee, planPrice, unitPrice, currency });
+  const aVals = tbl.aVals.map((v, i) => overrideItemName(v, copy.aLabels, i));
+  const { big, sub, bVals } = tbl;
+  const A = aOptions.length;
+  const B = bOptions.length;
+  // Middle-biased seeded defaults: every combo is precomputed and valid, so a
+  // reroll may open the email on a different (still sensible) starting combo.
+  const defA = A > 2 ? 1 + Math.floor(rng() * (A - 2)) : Math.floor(rng() * A);
+  const defB = B > 2 ? 1 + Math.floor(rng() * (B - 2)) : Math.floor(rng() * B);
+  const defIdx = defA * B + defB;
+
+  const promptText = applyBrand(strOr(copy.promptText, strOr(cv.promptText, base.promptText)), brand);
+  const aLabel = applyBrand(strOr(copy.aLabel, strOr(cv.aLabel, base.aLabel)), brand);
+  const bLabel = applyBrand(strOr(copy.bLabel, strOr(cv.bLabel, base.bLabel)), brand);
+  const resultLabel = applyBrand(strOr(copy.resultLabel, strOr(cv.resultLabel, base.resultLabel)), brand);
+  const assumptionText = applyBrand(strOr(copy.assumptionText, strOr(cv.assumptionText,
+    calcAssumption(calcType, { ratePct, perUseFee, planPrice, currency }))), brand);
+  // Honest-mechanics CTA: never claims an in-email payment — the latch (or an
+  // explicit deep link) hands off to the brand's own app/site.
+  const ctaLabel = applyBrand(strOr(copy.ctaLabel, strOr(cv.ctaLabel, 'Continue in the app')), brand);
+  const doneLabel = applyBrand(strOr(copy.doneLabel, strOr(cv.doneLabel, 'Request sent — approve in your app')), brand);
+  const ctaHref = safeHttpUrl(copy.ctaHref);
+  const dividerLabel = applyBrand(strOr(copy.dividerLabel, strOr(cv.dividerLabel, 'Composed for you at open')), brand);
+  const receiptTag = applyBrand(strOr(copy.receiptTag, strOr(cv.receiptTag, 'Your account')), brand);
+  const receiptRows = (validKvRows(copy.receiptRows) || validKvRows(cv.receiptRows) || [])
+    .map((r) => ({ k: applyBrand(r.k, brand), v: applyBrand(r.v, brand) }));
+  const footerDefault = applyBrand(strOr(cv.footerText, 'Estimates only. Nothing is ever charged inside this email.'), brand);
+
+  const css = baseCss(p) + receiptCss(p) + `
+.pills{font-size:0;margin:0 0 6px;}
+.pill{display:inline-block;font-size:13px;padding:8px 14px;border:1px solid ${p.line};border-radius:20px;margin:0 6px 6px 0;cursor:pointer;color:${p.ink};}
+.pill.on{background:${p.primary};color:#ffffff;border-color:${p.primary};}
+.ctl{font-size:11px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b7b;margin:16px 0 8px;}
+.stepper{display:inline-flex;border:1.5px solid ${p.line};border-radius:9px;overflow:hidden;vertical-align:middle;}
+.stepper .stp{width:32px;height:32px;background:${p.tint};color:${p.primaryDark};font-size:16px;font-weight:bold;cursor:pointer;text-align:center;line-height:32px;}
+.stepper .stp.dim{opacity:0.35;}
+.stepper .sv{min-width:72px;text-align:center;font-weight:bold;font-size:14px;line-height:32px;padding:0 8px;}
+.calc-out{background:${p.tint};border:1px solid ${p.line};border-radius:12px;padding:16px;text-align:center;margin-top:18px;}
+.co-label{font-size:10px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:${p.primaryDark};margin:0 0 6px;}
+.co-big{font-family:'Courier New',Courier,monospace;font-size:26px;font-weight:bold;color:${p.primaryDark};margin:0;}
+.co-sub{font-size:12px;color:#6b6b7b;margin:6px 0 0;line-height:1.5;}
+.assume{margin:10px 0 0;font-size:11px;}
+.ctawrap{text-align:center;margin-top:16px;}
+.btn.done{opacity:0.55;}
+`;
+
+  const pillsHtml = aVals.map((label, i) =>
+    `<span class="pill${i === defA ? ' on' : ''}" role="button" tabindex="0" on="tap:AMP.setState({s:{a:${i}}})" [class]="s.a == ${i} ? 'pill on' : 'pill'">${enc(label)}</span>`).join('\n    ');
+
+  const bMax = B - 1;
+  const cta = ctaHref
+    ? `<a class="btn" href="${enc(ctaHref)}" target="_blank" rel="noopener noreferrer">${enc(ctaLabel)}</a>`
+    : `<span class="btn" role="button" tabindex="0" on="tap:AMP.setState({s:{done:true}})" [class]="s.done ? 'btn done' : 'btn'" [text]="s.done ? '${jsStr(doneLabel)}' : '${jsStr(ctaLabel)}'">${enc(ctaLabel)}</span>`;
+
+  const body = `
+${ampState('s', { a: defA, b: defB, done: false })}
+${ampState('d', { big, sub, aVals, bVals })}
+${headerBlock({ brand, palette: p, head, copy })}
+${receiptRows.length ? `<div class="rwrap">${receiptCard({ tag: receiptTag, rows: receiptRows })}</div>\n${dividerRule(dividerLabel)}` : ''}
+<div class="pad">
+  <p class="muted">${enc(promptText)}</p>
+  <p class="ctl">${enc(aLabel)}</p>
+  <div class="pills">
+    ${pillsHtml}
+  </div>
+  <p class="ctl">${enc(bLabel)}</p>
+  <div class="stepper">
+    <span class="stp${defB === 0 ? ' dim' : ''}" role="button" tabindex="0" on="tap:AMP.setState({s:{b: s.b - 1 &lt; 0 ? 0 : s.b - 1}})" [class]="s.b == 0 ? 'stp dim' : 'stp'">&#8722;</span>
+    <span class="sv" [text]="d.bVals[s.b]">${enc(bVals[defB])}</span>
+    <span class="stp${defB === bMax ? ' dim' : ''}" role="button" tabindex="0" on="tap:AMP.setState({s:{b: s.b + 1 &gt; ${bMax} ? ${bMax} : s.b + 1}})" [class]="s.b == ${bMax} ? 'stp dim' : 'stp'">+</span>
+  </div>
+  <div class="calc-out">
+    <p class="co-label">${enc(resultLabel)}</p>
+    <p class="co-big" [text]="d.big[s.a * ${B} + s.b]">${enc(big[defIdx])}</p>
+    <p class="co-sub" [text]="d.sub[s.a * ${B} + s.b]">${enc(sub[defIdx])}</p>
+  </div>
+  <p class="muted assume">${enc(assumptionText)}</p>
+  <div class="ctawrap">${cta}</div>
+</div>
+${footerBlock({ brand, defaultText: footerDefault, copy })}`;
+
+  const previewModel = {
+    type: 'calc', head: applyBrand(headSrc, brand), calcType,
+    promptText, aLabel, bLabel, aVals, bVals, big, sub,
+    defaults: { a: defA, b: defB },
+    resultLabel, assumptionText, ctaLabel, doneLabel, ctaHref,
+    dividerLabel, receiptTag, receiptRows,
+    disclaimer: strOr(copy.footerText, footerDefault),
+  };
+  return { scripts: [SCRIPT_BIND], css, body, previewModel };
+}
+
+/* ------------------------------------------------------------------ *
+ * report: personalised report viewer (accordion rows + verdict + slots)
+ * ------------------------------------------------------------------ */
+
+// Semantic status colours are FIXED constants, not palette-derived: green must
+// stay green and amber amber whatever the brand colour — only chrome brands.
+const STATUS_OK = { fg: '#0a6b51', bg: '#e4f0ea' };
+const STATUS_ATTN = { fg: '#b45309', bg: '#fff3dc' };
+
+// copy.rows arrives whole or not at all (buildQuiz's validOverride rule):
+// every row needs a name and a display value; status is coerced to 'normal'
+// unless it is exactly 'attention'; optional strings are trimmed and capped.
+function validReportRows(arr) {
+  if (!Array.isArray(arr) || arr.length < 3) return null;
+  const out = [];
+  for (const r of arr.slice(0, 6)) {
+    if (!r || typeof r !== 'object') return null;
+    const name = strOr(r.name, '').slice(0, 48);
+    const value = strOr(r.value, '').slice(0, 28);
+    if (!name || !value) return null;
+    out.push({
+      name,
+      value,
+      sub: strOr(r.sub, '').slice(0, 60),
+      unit: strOr(r.unit, '').slice(0, 12),
+      range: strOr(r.range, '').slice(0, 40),
+      status: r.status === 'attention' ? 'attention' : 'normal',
+      detail: strOr(r.detail, '').slice(0, 260),
+    });
+  }
+  return out;
+}
+
+function buildReport(ctx) {
+  const { brand, palette: p, content, t, rng, copy = {} } = ctx;
+  const rc = content.report || {};
+  const headSrc = copy.head || rc.head || t.report;
+  const head = enc(applyBrand(headSrc, brand));
+
+  // rng is consumed identically whether or not a rows override lands, so a
+  // copy override never perturbs this seed's other draws (the same discipline
+  // the pickModuleId comment demands of generate() itself).
+  const sampled = validReportRows(shuffle(rng, rc.rows || []).slice(0, 4));
+  const rows = (validReportRows(copy.rows) || sampled || []).map((r) => ({
+    ...r,
+    name: applyBrand(r.name, brand),
+    sub: applyBrand(r.sub, brand),
+    detail: applyBrand(r.detail || (r.range ? `Typical range: ${r.range}.`
+      : (r.status === 'attention' ? 'Worth a quick follow-up — details in the app.'
+        : 'Nothing to do here — this one is on track.')), brand),
+  }));
+  const attnCount = rows.filter((r) => r.status === 'attention').length;
+
+  const slSrc = (copy.statusLabels && typeof copy.statusLabels === 'object' && !Array.isArray(copy.statusLabels)) ? copy.statusLabels : {};
+  const rcSl = (rc.statusLabels && typeof rc.statusLabels === 'object') ? rc.statusLabels : {};
+  const statusLabels = {
+    normal: strOr(slSrc.normal, strOr(rcSl.normal, 'In range')).slice(0, 20),
+    attention: strOr(slSrc.attention, strOr(rcSl.attention, 'Needs a look')).slice(0, 20),
+  };
+
+  const reportNoun = strOr(copy.reportNoun, strOr(rc.reportNoun, 'report')).slice(0, 24);
+  const itemNoun = strOr(copy.itemNoun, strOr(rc.itemNoun, 'items')).slice(0, 20);
+  const receiptTag = applyBrand(strOr(copy.receiptTag, strOr(rc.receiptTag, `Your ${reportNoun}`)), brand);
+  const metaRows = (validKvRows(copy.metaRows) || validKvRows(rc.metaRows) || [])
+    .map((r) => ({ k: applyBrand(r.k, brand), v: applyBrand(r.v, brand) }));
+  const attachmentName = strOr(copy.attachmentName, strOr(rc.attachmentName, ''));
+  const attachmentMeta = strOr(copy.attachmentMeta, strOr(rc.attachmentMeta, 'secure download'));
+  const dividerLabel = applyBrand(strOr(copy.dividerLabel, strOr(rc.dividerLabel, 'Personalised for you · composed at open')), brand);
+
+  // The verdict is a STATIC string composed here from the rows that actually
+  // rendered — bind never counts or branches on statuses.
+  const verdictAction = strOr(copy.verdictAction, strOr(rc.verdictAction, 'a quick follow-up would sort it.'));
+  const verdictText = applyBrand(strOr(copy.verdictText,
+    attnCount === 0
+      ? `All ${rows.length} ${itemNoun} look good — nothing needs action right now.`
+      : `${attnCount} of ${rows.length} ${itemNoun} could use attention — ${verdictAction}`), brand);
+  const verdictCta = applyBrand(strOr(copy.verdictCta, strOr(rc.verdictCta, 'See what it means')), brand);
+
+  const nextPrompt = applyBrand(strOr(copy.nextPrompt, strOr(rc.nextPrompt, 'What next?')), brand);
+  const slotLabels = (validStrList(copy.slotLabels, 4, 36) || validStrList(rc.slotLabels, 4, 36)
+    || ['Book a follow-up', 'Email me the details']).map((s) => applyBrand(s, brand));
+  const pickPrompt = applyBrand(strOr(copy.pickPrompt, strOr(rc.pickPrompt, 'Pick an option first')), brand);
+  const ctaLabel = applyBrand(strOr(copy.ctaLabel, strOr(rc.ctaLabel, 'Book it')), brand);
+  const doneLabel = applyBrand(strOr(copy.doneLabel, strOr(rc.doneLabel, '✓ Booked — confirmation on its way')), brand);
+  const footerDefault = applyBrand(strOr(rc.footerText, 'This summary is informational, not advice.'), brand);
+
+  const attn = attnCount > 0;
+  const css = baseCss(p) + receiptCss(p) + `
+.rrow{border:1px solid ${p.line};border-radius:10px;padding:12px;margin:0 0 8px;cursor:pointer;overflow:hidden;}
+.rrow.open{border-color:${p.primary};background:${p.tint};}
+.car{float:right;color:#9a9aa8;font-size:12px;margin-left:8px;}
+.rright{float:right;text-align:right;margin-left:8px;}
+.rval{font-weight:bold;font-size:13px;}
+.rval.normal{color:${STATUS_OK.fg};}
+.rval.attention{color:${STATUS_ATTN.fg};}
+.rstat{display:inline-block;font-size:10px;font-weight:bold;border-radius:8px;padding:2px 8px;margin-left:6px;}
+.rstat.normal{background:${STATUS_OK.bg};color:${STATUS_OK.fg};}
+.rstat.attention{background:${STATUS_ATTN.bg};color:${STATUS_ATTN.fg};}
+.rname{font-size:14px;font-weight:bold;margin:0;}
+.rsub{font-size:11px;color:#9a9aa8;margin:2px 0 0;}
+.rdetail p{font-size:12px;color:#6b6b7b;line-height:1.5;margin:8px 0 0;}
+.rdetail .rrange{color:#9a9aa8;font-size:11px;}
+.vwrap{text-align:center;margin:14px 0 0;}
+.verdict{border-radius:10px;padding:14px 16px;margin:14px 0 0;background:${attn ? STATUS_ATTN.bg : STATUS_OK.bg};}
+.verdict p{margin:0;font-size:13px;line-height:1.5;font-weight:bold;color:${attn ? STATUS_ATTN.fg : STATUS_OK.fg};}
+.np{font-size:11px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:#6b6b7b;margin:20px 0 8px;}
+.slots{font-size:0;}
+.slot{display:inline-block;font-size:13px;font-weight:bold;text-align:center;border:1.5px solid ${p.line};border-radius:9px;padding:10px 14px;margin:0 8px 8px 0;cursor:pointer;color:${p.ink};}
+.slot.on{background:${p.primary};border-color:${p.primary};color:#ffffff;}
+.rcta{margin-top:6px;}
+.btn.off{opacity:0.5;}
+.btn.done{background:${STATUS_OK.fg};}
+`;
+
+  const rowsHtml = rows.map((r, i) => `<div class="rrow" role="button" tabindex="0" on="tap:AMP.setState({s:{open: s.open == ${i} ? -1 : ${i}}})" [class]="s.open == ${i} ? 'rrow open' : 'rrow'">
+    <span class="car" [text]="s.open == ${i} ? '${jsStr('▴')}' : '${jsStr('▾')}'">${enc('▾')}</span>
+    <span class="rright"><span class="rval ${r.status}">${enc(r.value)}${r.unit ? ' ' + enc(r.unit) : ''}</span><span class="rstat ${r.status}">${enc(statusLabels[r.status])}</span></span>
+    <p class="rname">${enc(r.name)}</p>${r.sub ? `\n    <p class="rsub">${enc(r.sub)}</p>` : ''}
+    <div class="rdetail" hidden [hidden]="s.open != ${i}">
+      <p>${enc(r.detail)}</p>${r.range ? `\n      <p class="rrange">Typical: ${enc(r.range)}</p>` : ''}
+    </div>
+  </div>`).join('\n  ');
+
+  const slotsHtml = slotLabels.map((label, i) =>
+    `<span class="slot" role="button" tabindex="0" on="tap:AMP.setState({s:{sel:${i}}})" [class]="s.sel == ${i} ? 'slot on' : 'slot'">${enc(label)}</span>`).join('\n    ');
+
+  // The gated CTA: disabled-look until a slot is picked, then it echoes the
+  // pick back ("Book it · 7:30 PM today" — the decks' signature write-back
+  // moment), then latches done. All in comparisons against integer literals.
+  const gatedCta = `<span class="btn off" role="button" tabindex="0" on="tap:AMP.setState({s:{done: s.sel &gt;= 0 ? true : false}})" [class]="s.done ? 'btn done' : (s.sel &gt;= 0 ? 'btn' : 'btn off')" [text]="s.done ? '${jsStr(doneLabel)}' : (s.sel &gt;= 0 ? '${jsStr(ctaLabel + ' · ')}' + d.slotLabels[s.sel] : '${jsStr(pickPrompt)}')">${enc(pickPrompt)}</span>`;
+
+  const body = `
+${ampState('s', { open: -1, rev: false, sel: -1, done: false })}
+${ampState('d', { slotLabels })}
+${headerBlock({ brand, palette: p, head, copy })}
+${(metaRows.length || attachmentName) ? `<div class="rwrap">${receiptCard({ tag: receiptTag, rows: metaRows, attachment: attachmentName ? { name: attachmentName, meta: attachmentMeta } : null })}</div>` : ''}
+${dividerRule(dividerLabel)}
+<div class="pad">
+  ${rowsHtml}
+  <div class="vwrap" [hidden]="s.rev">
+    <span class="btn" role="button" tabindex="0" on="tap:AMP.setState({s:{rev:true}})">${enc(verdictCta)}</span>
+  </div>
+  <div class="verdict" hidden [hidden]="!s.rev"><p>${enc(verdictText)}</p></div>
+  <p class="np">${enc(nextPrompt)}</p>
+  <div class="slots">
+    ${slotsHtml}
+  </div>
+  <div class="rcta">${gatedCta}</div>
+</div>
+${footerBlock({ brand, defaultText: footerDefault, copy })}`;
+
+  const previewModel = {
+    type: 'report', head: applyBrand(headSrc, brand),
+    receiptTag, metaRows,
+    attachmentName: attachmentName || null,
+    attachmentMeta: attachmentName ? attachmentMeta : null,
+    dividerLabel,
+    rows: rows.map((r) => ({ ...r, statusLabel: statusLabels[r.status] })),
+    statusLabels, attnCount,
+    verdictCta, verdictText, nextPrompt, slotLabels, pickPrompt, ctaLabel, doneLabel,
+    disclaimer: strOr(copy.footerText, footerDefault),
+  };
+  return { scripts: [SCRIPT_BIND], css, body, previewModel };
+}
+
+/* ------------------------------------------------------------------ *
  * small string helpers for safe embedding inside amp-bind expressions
  * ------------------------------------------------------------------ */
 function jsStr(s) {
@@ -565,8 +1063,19 @@ const MODULES = {
   rating: { name: 'Star Rating / NPS', kind: 'rating', build: buildRating },
   spin: { name: 'Spin to Win', kind: 'spin', build: buildSpin },
   poll: { name: 'This or That Poll', kind: 'poll', build: buildPoll },
+  calc: { name: 'Interactive Calculator', kind: 'calculator', build: buildCalc },
+  report: { name: 'Personal Report', kind: 'report', build: buildReport },
 };
 const MODULE_IDS = Object.keys(MODULES);
+
+// The seeded random pick draws over the ORIGINAL six modules only. Both pick
+// sites compute `rng() * pool.length`, so growing the pool would silently
+// remap every existing brand+counter seed to a different module — exactly the
+// drift the RNG-order comments below forbid. calc and report are therefore
+// reachable only by an explicit moduleId (UI picker, brief routing, slate
+// fan-out), never by the seeded random pick. If a module is ever added to
+// this pool deliberately, accept that every stored seed re-rolls.
+const RANDOM_POOL_IDS = ['reveal', 'search', 'quiz', 'rating', 'spin', 'poll'];
 
 // Extracted so callers (e.g. the /generate route, to pre-compute a moduleId
 // before invoking any brief-driven content composition) can resolve the same
@@ -578,7 +1087,7 @@ function pickModuleId({ brand, counter, moduleId } = {}) {
   const b = (brand || 'Acme').trim() || 'Acme';
   const c = Number.isFinite(counter) ? counter : 0;
   const rng = mulberry32(hashSeed(b + ':' + c));
-  return MODULE_IDS[Math.floor(rng() * MODULE_IDS.length)];
+  return RANDOM_POOL_IDS[Math.floor(rng() * RANDOM_POOL_IDS.length)];
 }
 
 function generate(opts = {}) {
@@ -603,7 +1112,7 @@ function generate(opts = {}) {
   // discount %, etc).
   let moduleId = opts.moduleId;
   if (!moduleId || !MODULES[moduleId]) {
-    moduleId = MODULE_IDS[Math.floor(rng() * MODULE_IDS.length)];
+    moduleId = RANDOM_POOL_IDS[Math.floor(rng() * RANDOM_POOL_IDS.length)];
   }
   const mod = MODULES[moduleId];
   const built = mod.build({ brand, vertical, tone, palette, content, t, currency, rng, copy: opts.copy || {} });

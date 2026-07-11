@@ -243,6 +243,111 @@ function renderPoll(pm, p) {
   return { html, lines };
 }
 
+// Semantic status colours mirror generate.js's fixed constants (green stays
+// green, amber stays amber whatever the brand palette).
+const FB_OK = { fg: '#0a6b51', bg: '#e4f0ea' };
+const FB_ATTN = { fg: '#b45309', bg: '#fff3dc' };
+
+function kvTable(rows, p) {
+  const trs = rows.map((r) => {
+    const o = (r && typeof r === 'object') ? r : {};
+    const k = str(o.k);
+    const v = str(o.v);
+    if (!k || !v) return '';
+    const cell = `padding:6px 2px;border-bottom:1px solid ${p.line};font-family:${FONT};font-size:12px;`;
+    return `<tr><td style="${cell}color:#6b6b7b;">${enc(k)}</td><td align="right" style="${cell}font-weight:bold;color:${p.ink};">${enc(v)}</td></tr>`;
+  }).join('\n');
+  return trs ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px;">\n${trs}\n</table>` : '';
+}
+
+// The interactive calculator collapses to its tier table: every axis-A option
+// with the precomputed result at the default axis-B position — real numbers,
+// no interaction required.
+function renderCalc(pm, p) {
+  const aVals = list(pm.aVals).map((v) => str(v));
+  const big = list(pm.big);
+  const bVals = list(pm.bVals).map((v) => str(v));
+  const B = bVals.length || 1;
+  const d = (pm.defaults && typeof pm.defaults === 'object') ? pm.defaults : {};
+  const bIdx = (Number.isInteger(d.b) && d.b >= 0 && d.b < B) ? d.b : 0;
+  const resultLabel = str(pm.resultLabel, 'Your estimate');
+  const bAt = str(bVals[bIdx]);
+  let html = '';
+  const lines = [];
+
+  const prompt = str(pm.promptText);
+  if (prompt) { html += mutedPara(prompt, p); lines.push(prompt); }
+
+  const tiers = aVals
+    .map((label, i) => ({ label, out: str(big[i * B + bIdx]) }))
+    .filter((t) => t.label && t.out);
+  if (tiers.length) {
+    const aLabel = str(pm.aLabel, 'Option');
+    const headCell = `padding:8px 2px;border-bottom:2px solid ${p.line};font-family:${FONT};font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#6b6b7b;`;
+    const cell = `padding:9px 2px;border-bottom:1px solid ${p.line};font-family:${FONT};font-size:14px;`;
+    html += `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">
+<tr><td style="${headCell}">${enc(aLabel)}</td><td align="right" style="${headCell}">${enc(resultLabel)}${bAt ? ` &#8226; ${enc(bAt)}` : ''}</td></tr>
+${tiers.map((t2) => `<tr><td style="${cell}color:${p.ink};">${enc(t2.label)}</td><td align="right" style="${cell}font-weight:bold;color:${p.primary};">${enc(t2.out)}</td></tr>`).join('\n')}
+</table>`;
+    lines.push(`${aLabel} -> ${resultLabel}${bAt ? ' (' + bAt + ')' : ''}:`);
+    tiers.forEach((t2) => lines.push('- ' + t2.label + ': ' + t2.out));
+  }
+  const assumption = str(pm.assumptionText);
+  if (assumption) {
+    html += `<p style="margin:12px 0 0;font-family:${FONT};font-size:11px;line-height:1.5;color:#9a9aa8;">${enc(assumption)}</p>`;
+    lines.push(assumption);
+  }
+  return { html, lines };
+}
+
+// The report viewer collapses to its rows with baked status chips, the
+// verdict line, and the next-step options as plain text.
+function renderReport(pm, p) {
+  let html = '';
+  const lines = [];
+  const metaRows = list(pm.metaRows);
+  if (metaRows.length) {
+    html += kvTable(metaRows, p);
+    metaRows.forEach((r) => {
+      const o = (r && typeof r === 'object') ? r : {};
+      if (str(o.k) && str(o.v)) lines.push(str(o.k) + ': ' + str(o.v));
+    });
+  }
+  const statusLabels = (pm.statusLabels && typeof pm.statusLabels === 'object') ? pm.statusLabels : {};
+  for (const r of list(pm.rows).slice(0, 6)) {
+    const o = (r && typeof r === 'object') ? r : {};
+    const name = str(o.name);
+    const value = str(o.value);
+    if (!name || !value) continue;
+    const attention = o.status === 'attention';
+    const c = attention ? FB_ATTN : FB_OK;
+    const label = str(o.statusLabel, str(attention ? statusLabels.attention : statusLabels.normal, attention ? 'Needs a look' : 'In range'));
+    const unit = str(o.unit);
+    html += `<div style="border:1px solid ${p.line};border-radius:10px;padding:12px;margin:0 0 8px;">
+<span style="float:right;font-family:${FONT};font-size:13px;font-weight:bold;color:${c.fg};">${enc(value)}${unit ? ' ' + enc(unit) : ''} <span style="display:inline-block;font-size:10px;border-radius:8px;padding:2px 8px;margin-left:6px;background:${c.bg};color:${c.fg};">${enc(label)}</span></span>
+<p style="margin:0;font-family:${FONT};font-size:14px;font-weight:bold;color:${p.ink};">${enc(name)}</p>${str(o.sub) ? `\n<p style="margin:2px 0 0;font-family:${FONT};font-size:11px;color:#9a9aa8;">${enc(str(o.sub))}</p>` : ''}
+</div>`;
+    lines.push(`- ${name}: ${value}${unit ? ' ' + unit : ''} [${label}]`);
+  }
+  const verdict = str(pm.verdictText);
+  if (verdict) {
+    const attn = Number(pm.attnCount) > 0;
+    const c = attn ? FB_ATTN : FB_OK;
+    html += `<div style="border-radius:10px;padding:14px 16px;margin:14px 0 0;background:${c.bg};">
+<p style="margin:0;font-family:${FONT};font-size:13px;line-height:1.5;font-weight:bold;color:${c.fg};">${enc(verdict)}</p>
+</div>`;
+    lines.push(verdict);
+  }
+  const slots = list(pm.slotLabels).map((s) => str(s)).filter(Boolean).slice(0, 4);
+  if (slots.length) {
+    const nextPrompt = str(pm.nextPrompt, 'What next?');
+    html += `<p style="margin:16px 0 6px;font-family:${FONT};font-size:11px;font-weight:bold;letter-spacing:0.06em;text-transform:uppercase;color:#6b6b7b;">${enc(nextPrompt)}</p>
+<p style="margin:0;font-family:${FONT};font-size:13px;line-height:1.7;color:${p.ink};">${slots.map((s) => enc(s)).join(' &#8226; ')}</p>`;
+    lines.push(nextPrompt + ': ' + slots.join(' / '));
+  }
+  return { html, lines };
+}
+
 const RENDERERS = {
   reveal: renderReveal,
   search: renderSearch,
@@ -250,6 +355,8 @@ const RENDERERS = {
   rating: renderRating,
   spin: renderSpin,
   poll: renderPoll,
+  calc: renderCalc,
+  report: renderReport,
 };
 
 // The explicit moduleId wins; previewModel.type is the backstop when only the

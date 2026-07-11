@@ -1,7 +1,7 @@
 'use strict';
 
 // The slate is the pitch deliverable: one brand + one brief fanned out into
-// up to six validated builds — one per distinct interactive module — grouped
+// validated builds — one per distinct interactive module — grouped
 // under a single slate record the /s/<id> share page renders as a phone-frame
 // grid. This lives beside (not inside) build-pipeline.js because a slate is
 // pure orchestration: every per-build concern (brand kit, routing, LLM copy,
@@ -78,7 +78,9 @@ async function createSlate(body, deps = {}) {
     const order = routed
       ? [routed.moduleId, ...MODULE_IDS.filter((id) => id !== routed.moduleId)]
       : MODULE_IDS.slice();
-    const count = Math.max(1, Math.min(Number(b.count) || 6, MODULE_IDS.length));
+    // No explicit count means the full slate: one build per registered module
+    // (tracks the registry, so newly added modules join the fan-out).
+    const count = Math.max(1, Math.min(Number(b.count) || MODULE_IDS.length, MODULE_IDS.length));
     jobs = order.slice(0, count).map((moduleId) => ({
       moduleId, title: MODULES[moduleId].name, contentPlan: {},
     }));

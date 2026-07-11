@@ -374,10 +374,16 @@ test('shapeUserIdea zero-key: routes the idea to its module and fills determinis
   assert.deepStrictEqual(uc.contentPlan, {});
 });
 
-test('shapeUserIdea zero-key: an unrouteable idea falls back to reveal', async () => {
+test('shapeUserIdea zero-key: the Practo-style lab-report idea now routes to the report module', async () => {
   const uc = await shapeUserIdea({ idea: 'lab report opener like Practo' }, { providers: [] });
-  assert.strictEqual(uc.moduleId, 'reveal');
+  assert.strictEqual(uc.moduleId, 'report');
   assert.strictEqual(uc.title, 'lab report opener like Practo');
+});
+
+test('shapeUserIdea zero-key: a genuinely unrouteable idea falls back to reveal', async () => {
+  const uc = await shapeUserIdea({ idea: 'a fun little inbox moment for loyal fans' }, { providers: [] });
+  assert.strictEqual(uc.moduleId, 'reveal');
+  assert.strictEqual(uc.title, 'a fun little inbox moment for loyal fans');
 });
 
 test('shapeUserIdea zero-key: over-long ideas are capped at the 80-char title budget', async () => {

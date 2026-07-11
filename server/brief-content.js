@@ -98,6 +98,24 @@ const FIELD_SCHEMAS = {
     optionB: { type: 'string', maxLen: 50 },
     footerText: { type: 'string', maxLen: 200 },
   },
+  // calc/report expose only their prose surfaces to the LLM. The numeric
+  // machinery (axes, rates, precomputed tables, report rows/statuses) stays
+  // template/manual-only: an LLM must never be able to bake wrong maths or
+  // flip a health flag — the same reasoning that keeps discount % out of
+  // every plan (see briefSignals in brief-router.js).
+  calc: {
+    head: { type: 'string' },
+    promptText: { type: 'string', maxLen: 220 },
+    ctaLabel: { type: 'string', maxLen: 40 },
+    assumptionText: { type: 'string', maxLen: 200 },
+    footerText: { type: 'string', maxLen: 200 },
+  },
+  report: {
+    head: { type: 'string' },
+    verdictText: { type: 'string', maxLen: 200 },
+    ctaLabel: { type: 'string', maxLen: 40 },
+    footerText: { type: 'string', maxLen: 200 },
+  },
 };
 
 function fieldsFor(moduleId) {

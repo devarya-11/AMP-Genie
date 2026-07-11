@@ -16,6 +16,8 @@ const KEYWORD_MAP = {
   rating: ['rate', 'rating', 'review', 'feedback', 'nps', 'survey', 'stars'],
   spin: ['spin', 'wheel', 'lucky draw', 'jackpot', 'spin to win'],
   poll: ['poll', 'vote', 'this or that', 'pick one', 'choose between'],
+  calc: ['calculator', 'calculate', 'emi', 'sip', 'estimate', 'savings', 'how much', 'maturity', 'premium quote', 'work out the'],
+  report: ['report', 'statement', 'results', 'summary', 'lab', 'portfolio', 'order status', 'health check', 'check-in'],
 };
 
 // If a module is ever renamed/removed in generate.js, fail loudly here
