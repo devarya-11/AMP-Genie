@@ -37,12 +37,10 @@ function appendHistory(entry) {
   return list;
 }
 
-// "" / whitespace-only counts as "no brief given" (null), distinct from a
-// real (if short) brief — kept separate from the UI's own trimming so the
-// server never trusts a client to have done this correctly.
-function normalizeBrief(raw) {
-  const trimmed = String(raw || '').trim();
-  return trimmed ? trimmed : null;
-}
+// normalizeBrief moved to server/store.js (runtime-agnostic) because this
+// module touches __dirname/fs at load time and must never be pulled into the
+// Workers bundle just for a pure string helper. Re-exported here so existing
+// Node callers keep working.
+const { normalizeBrief } = require('./store');
 
 module.exports = { readHistory, appendHistory, normalizeBrief, HISTORY_FILE, MAX_ENTRIES };

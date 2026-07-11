@@ -25,8 +25,7 @@ const { createBuild, buildHistoryEntry } = require('./build-pipeline');
 const { createSlate } = require('./slate-core');
 const { buildDossier } = require('./brand-research');
 const { proposeUseCases, shapeUserIdea } = require('./usecase-engine');
-const { getBuild, getSlate, readSlateIndex } = require('./store');
-const { normalizeBrief } = require('./history');
+const { getBuild, getSlate, readSlateIndex, normalizeBrief } = require('./store');
 const { createFsKv } = require('./store-fs');
 const { buildPageHtml, slatePageHtml, notFoundPageHtml } = require('./share-pages');
 

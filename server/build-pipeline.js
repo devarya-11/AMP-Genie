@@ -18,9 +18,8 @@ const { composeContent } = require('./brief-content');
 const {
   routeBrief, briefSignals, inferVertical, inferTone,
 } = require('./brief-router');
-const { normalizeBrief } = require('./history');
 const {
-  newId, brandSlug, getBrandKit, putBrandKit, putBuild,
+  newId, brandSlug, normalizeBrief, getBrandKit, putBrandKit, putBuild,
 } = require('./store');
 const { buildFallback } = require('./fallback');
 

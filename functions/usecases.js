@@ -8,13 +8,15 @@
 
 import brandResearchMod from '../server/brand-research.js';
 import usecaseEngineMod from '../server/usecase-engine.js';
-import historyMod from '../server/history.js';
+import storeMod from '../server/store.js';
 import { applyEnv } from './_lib/env.js';
 import { json, readJson } from './_lib/http.js';
 
 const { buildDossier } = brandResearchMod;
 const { proposeUseCases, shapeUserIdea } = usecaseEngineMod;
-const { normalizeBrief } = historyMod;
+// normalizeBrief comes from store.js, NOT server/history.js — history touches
+// __dirname/fs at module load, which does not exist in the Workers bundle.
+const { normalizeBrief } = storeMod;
 
 // The wire-shape is intentional, not a pass-through — new dossier internals
 // (hashes, cache bookkeeping) must not leak into the UI contract by accident.

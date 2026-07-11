@@ -16,8 +16,7 @@
 const { createBuild } = require('./build-pipeline');
 const { MODULES, MODULE_IDS, pickModuleId } = require('./generate');
 const { routeBrief } = require('./brief-router');
-const { normalizeBrief } = require('./history');
-const { newId, putSlate, appendSlateIndex } = require('./store');
+const { newId, putSlate, appendSlateIndex, normalizeBrief } = require('./store');
 
 // The v3 ideation flow sends explicit use-cases instead of letting the slate
 // fan out one-per-module. Each item is untrusted client JSON — titles are

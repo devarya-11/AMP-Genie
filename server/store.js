@@ -9,6 +9,16 @@
 // history: a failed read is null, a failed write is false, and neither ever
 // throws into the request that triggered it.
 
+// "" / whitespace-only counts as "no brief given" (null), distinct from a real
+// (if short) brief. Lives HERE (not server/history.js) because history.js
+// touches __dirname/fs at module load — Node-only — while this pure helper is
+// needed by the shared pipeline modules that must also bundle for the Workers
+// runtime. history.js re-exports it so existing Node callers keep working.
+function normalizeBrief(raw) {
+  const trimmed = String(raw || '').trim();
+  return trimmed ? trimmed : null;
+}
+
 // Ids are 12 lowercase hex chars (48 bits) cut from crypto.randomUUID(),
 // which Node 18+ and Workers both expose as a global — no Date.now or
 // Math.random, which are guessable and can collide under concurrency.
@@ -125,7 +135,7 @@ async function appendSlateIndex(kv, slate) {
 }
 
 module.exports = {
-  newId, brandSlug,
+  newId, brandSlug, normalizeBrief,
   getBuild, putBuild, getSlate, putSlate, getBrandKit, putBrandKit,
   readSlateIndex, appendSlateIndex,
 };
