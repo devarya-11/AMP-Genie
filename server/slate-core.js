@@ -14,16 +14,35 @@
 // returned build records via buildHistoryEntry).
 
 const { createBuild } = require('./build-pipeline');
-const { MODULES, MODULE_IDS } = require('./generate');
+const { MODULES, MODULE_IDS, pickModuleId } = require('./generate');
 const { routeBrief } = require('./brief-router');
 const { normalizeBrief } = require('./history');
-const { newId, putSlate } = require('./store');
+const { newId, putSlate, appendSlateIndex } = require('./store');
+
+// The v3 ideation flow sends explicit use-cases instead of letting the slate
+// fan out one-per-module. Each item is untrusted client JSON — titles are
+// plain-text labels headed for share pages and build records, so markup is
+// stripped here (share-pages escapes again on render; two layers, same rule).
+function sanitizeUseCase(item, index) {
+  const it = (item && typeof item === 'object') ? item : {};
+  const title = String(it.title || '').replace(/[<>]/g, '').trim().slice(0, 80);
+  const moduleId = MODULE_IDS.includes(it.moduleId)
+    ? it.moduleId
+    : pickModuleId({ brand: 'slate', counter: index });
+  const contentPlan = (it.contentPlan && typeof it.contentPlan === 'object' && !Array.isArray(it.contentPlan))
+    ? it.contentPlan
+    : {};
+  return { title: title || MODULES[moduleId].name, moduleId, contentPlan };
+}
 
 // body: the parsed /slate request body (untrusted client JSON) —
 //   { brand, brief?, count?, currency?, colorOverride?, vertical?, tone?,
-//     copy?, author? }. Everything build-shaped is passed through to
-//     createBuild unchanged, so an explicit vertical/tone/copy steers every
+//     copy?, author?, useCases? }. Everything build-shaped is passed through
+//     to createBuild unchanged, so an explicit vertical/tone/copy steers every
 //     build in the slate the same way it steers a single /generate build.
+//     body.useCases (the v3 ideation flow) replaces the module-order fan-out:
+//     each item { title?, moduleId?, contentPlan? } becomes one build, in
+//     caller order, with the title as the build's use-case label.
 // deps: { validate, kv } with the same meaning as createBuild's.
 //   deps.createBuildImpl is a TEST-ONLY seam: it lets tests inject per-module
 //   build failures without monkey-patching build-pipeline internals (the
@@ -45,38 +64,50 @@ async function createSlate(body, deps = {}) {
   const brief = normalizeBrief(b.brief);
   const author = typeof b.author === 'string' ? b.author.slice(0, 60) : null;
 
-  // Module order: the brief's routed module leads the slate — it's the
-  // concept the client actually asked for, so it must be the first phone on
-  // the share page — and the rest follow in canonical MODULE_IDS order, so a
-  // full slate covers every module exactly once with no duplicates.
-  const routed = brief ? routeBrief(brief) : null;
-  const order = routed
-    ? [routed.moduleId, ...MODULE_IDS.filter((id) => id !== routed.moduleId)]
-    : MODULE_IDS.slice();
-  const count = Math.max(1, Math.min(Number(b.count) || 6, MODULE_IDS.length));
-  const moduleIds = order.slice(0, count);
+  // Two fan-out shapes. Explicit use-cases (the v3 ideation flow) build one
+  // email per approved idea, in caller order, modules free to repeat — two
+  // reveal-based use-cases are legitimately different businesses. Without
+  // them: the brief's routed module leads the slate — it's the concept the
+  // client actually asked for, so it must be the first phone on the share
+  // page — and the rest follow in canonical MODULE_IDS order, so a full
+  // slate covers every module exactly once with no duplicates.
+  let jobs;
+  if (Array.isArray(b.useCases) && b.useCases.length) {
+    jobs = b.useCases.slice(0, 8).map(sanitizeUseCase);
+  } else {
+    const routed = brief ? routeBrief(brief) : null;
+    const order = routed
+      ? [routed.moduleId, ...MODULE_IDS.filter((id) => id !== routed.moduleId)]
+      : MODULE_IDS.slice();
+    const count = Math.max(1, Math.min(Number(b.count) || 6, MODULE_IDS.length));
+    jobs = order.slice(0, count).map((moduleId) => ({
+      moduleId, title: MODULES[moduleId].name, contentPlan: {},
+    }));
+  }
 
   // Minted before the builds so each build record carries its slateId from
   // birth — no second write to stitch the grouping on afterwards.
   const slateId = newId();
 
   // All builds run in parallel. Each createBuild may fan out to LLM providers
-  // for brief copy, so a keys-configured deploy pays `count` compositions at
-  // once — acceptable: a slate is generated live in a pitch, and demo-time
+  // for brief copy, so a keys-configured deploy pays one composition per job
+  // at once — acceptable: a slate is generated live in a pitch, and demo-time
   // latency beats a sequential 6x wait.
-  const settled = await Promise.allSettled(moduleIds.map((moduleId, i) => build({
+  const settled = await Promise.allSettled(jobs.map((job, i) => build({
     brand: b.brand,
     brief: b.brief,
     currency: b.currency,
     colorOverride: b.colorOverride,
     vertical: b.vertical,
     tone: b.tone,
-    copy: b.copy,
-    moduleId,
+    // The use-case's content plan seeds the copy; an explicit caller-level
+    // copy override still wins field-by-field (same precedence as /generate).
+    copy: { ...job.contentPlan, ...(b.copy && typeof b.copy === 'object' && !Array.isArray(b.copy) ? b.copy : {}) },
+    moduleId: job.moduleId,
     counter: i,
     author,
   }, {
-    validate, kv, author, slateId, useCase: MODULES[moduleId].name,
+    validate, kv, author, slateId, useCase: job.title,
   })));
 
   // One failed build (provider meltdown, validator crash) must not sink the
@@ -101,10 +132,14 @@ async function createSlate(body, deps = {}) {
     title: brand + ' — pitch slate',
     buildIds: builds.map((x) => x.id),
     moduleIds: builds.map((x) => x.moduleId),
+    useCases: builds.map((x) => ({ title: x.useCase, moduleId: x.moduleId })),
   };
   // Best-effort like every store write: putSlate never throws, and a failed
-  // write only costs the share page, never the builds already returned.
+  // write only costs the share page, never the builds already returned. The
+  // index write feeds the Pitches view; losing it loses a listing row, not
+  // the slate itself.
   await putSlate(kv, slate);
+  await appendSlateIndex(kv, slate);
 
   const response = {
     slateId,

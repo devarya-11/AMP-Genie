@@ -151,3 +151,57 @@ test('zero surviving builds fails the slate outright', async () => {
     /every build failed/,
   );
 });
+
+// ---- v3: explicit use-cases replace the module-order fan-out ----------------
+
+test('explicit useCases build in caller order with titles as labels, contentPlan copy landing in the AMP', async () => {
+  const kv = fakeKv();
+  const useCases = [
+    { title: 'Diwali offer reveal for loyalists', moduleId: 'reveal', contentPlan: { head: 'Your Diwali surprise from Groww' } },
+    { title: 'Risk-profile quiz', moduleId: 'quiz', contentPlan: {} },
+    { title: 'Second reveal play', moduleId: 'reveal', contentPlan: {} },
+  ];
+  const { slate, builds, response } = await createSlate({
+    brand: 'Groww', useCases, colorOverride: '#00d09c',
+  }, { validate, kv });
+
+  assert.strictEqual(builds.length, 3);
+  assert.deepStrictEqual(builds.map((b) => b.moduleId), ['reveal', 'quiz', 'reveal'], 'caller order, repeats allowed');
+  assert.strictEqual(builds[0].useCase, 'Diwali offer reveal for loyalists');
+  for (const b of builds) assert.strictEqual(b.validation.pass, true, `${b.moduleId} must pass the real validator`);
+  // The plan's head must appear in the AMP bytes (entity-encoding leaves ASCII as-is).
+  assert.ok(builds[0].ampHtml.includes('Your Diwali surprise from Groww'), 'contentPlan.head must drive the module copy');
+  assert.ok(response.builds[0].useCase, 'response rows carry the use-case label');
+  const storedSlate = JSON.parse(kv.map.get('slate:' + slate.id));
+  assert.deepStrictEqual(storedSlate.useCases.map((u) => u.moduleId), ['reveal', 'quiz', 'reveal']);
+});
+
+test('hostile titles are stripped, unknown moduleIds fall back, caller copy still wins over contentPlan', async () => {
+  const kv = fakeKv();
+  const { builds } = await createSlate({
+    brand: 'Groww',
+    colorOverride: '#00d09c',
+    copy: { head: 'Caller override wins' },
+    useCases: [
+      { title: '<img onerror=x>Sneaky', moduleId: 'reveal', contentPlan: { head: 'Plan head loses' } },
+      { title: 'No such module', moduleId: 'nope', contentPlan: {} },
+    ],
+  }, { validate, kv });
+
+  assert.strictEqual(builds.length, 2);
+  assert.ok(!builds[0].useCase.includes('<') && !builds[0].useCase.includes('>'), 'markup stripped from titles');
+  assert.ok(MODULE_IDS.includes(builds[1].moduleId), 'unknown moduleId falls back to a real module');
+  assert.ok(builds[0].ampHtml.includes('Caller override wins'), 'body.copy beats contentPlan field-by-field');
+  assert.ok(!builds[0].ampHtml.includes('Plan head loses'));
+});
+
+test('slates land newest-first in the slates:index for the Pitches view', async () => {
+  const kv = fakeKv();
+  await createSlate({ brand: 'First', count: 1, colorOverride: '#112233' }, { validate, kv });
+  await createSlate({ brand: 'Second', count: 1, colorOverride: '#445566' }, { validate, kv });
+  const index = JSON.parse(kv.map.get('slates:index'));
+  assert.strictEqual(index.length, 2);
+  assert.strictEqual(index[0].brand, 'Second', 'newest first');
+  assert.ok(Array.isArray(index[0].buildIds) && index[0].buildIds.length === 1);
+  assert.ok(!index[0].ampHtml, 'index rows are summaries, never full records');
+});

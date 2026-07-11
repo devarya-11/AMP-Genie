@@ -4,6 +4,9 @@
 
   const S = { meta: null, result: null, edited: null, counter: 0, colorTouched: false, active: 'preview', briefOverLimit: false, building: false };
   const BRIEF_MAX = 2000;
+  // Guided-wizard state: the dossier and proposal being refined before build.
+  const W = { dossier: null, useCases: [], gColorTouched: false };
+
   // Lightweight identity for team attribution: a name kept in localStorage and
   // stamped onto every build/slate this browser creates. Not auth — access
   // control is Cloudflare Access's job (see SETUP-CLOUDFLARE.md).
@@ -15,11 +18,12 @@
     return r.json();
   }
 
-  function setStatus(t, loading) {
-    const s = $('status'); s.innerHTML = '';
+  function setLine(id, t, loading) {
+    const s = $(id); s.innerHTML = '';
     if (loading) { const sp = document.createElement('span'); sp.className = 'spinner'; s.appendChild(sp); }
     if (t) s.appendChild(document.createTextNode(t));
   }
+  function setStatus(t, loading) { setLine('status', t, loading); }
 
   // ---------- init ----------
   async function init() {
@@ -27,8 +31,35 @@
     S.meta = m;
     bind();
     loadHistory();
+    loadPitches();
   }
+
   function bind() {
+    // shell navigation
+    document.querySelectorAll('.nav-item').forEach((b) => b.onclick = () => switchView(b.dataset.view));
+    $('modeGuided').onclick = () => switchMode(true);
+    $('modeQuick').onclick = () => switchMode(false);
+
+    // guided wizard
+    $('gResearch').onclick = research;
+    $('gPropose').onclick = propose;
+    $('ucReroll').onclick = reroll;
+    $('ucAddIdea').onclick = addIdea;
+    $('ucBuild').onclick = buildFromUseCases;
+    $('gBrand').onkeydown = (e) => { if (e.key === 'Enter') research(); };
+    $('gColorpick').oninput = () => { $('gColorhex').value = $('gColorpick').value; W.gColorTouched = true; };
+    $('gColorhex').oninput = () => { if (/^#[0-9a-f]{6}$/i.test($('gColorhex').value)) $('gColorpick').value = $('gColorhex').value; W.gColorTouched = true; };
+
+    // brands view
+    $('bShow').onclick = lookupBrand;
+    $('bSearch').onkeydown = (e) => { if (e.key === 'Enter') lookupBrand(); };
+    $('bUse').onclick = () => {
+      switchView('create'); switchMode(true);
+      $('gBrand').value = $('bSearch').value.trim();
+      research();
+    };
+
+    // quick generate (v2 flow, unchanged)
     $('colorpick').oninput = () => { $('colorhex').value = $('colorpick').value; S.colorTouched = true; };
     $('colorhex').oninput = () => { if (/^#[0-9a-f]{6}$/i.test($('colorhex').value)) $('colorpick').value = $('colorhex').value; S.colorTouched = true; };
     $('rub').onclick = () => build(false);
@@ -52,9 +83,233 @@
     updateBriefCounter();
   }
 
+  // ---------- shell: views + create modes ----------
+  function switchView(name) {
+    document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('on', b.dataset.view === name));
+    document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === 'view-' + name));
+    if (name === 'history') loadHistory();
+    if (name === 'pitches') loadPitches();
+  }
+  function switchMode(guided) {
+    $('modeGuided').classList.toggle('on', guided);
+    $('modeQuick').classList.toggle('on', !guided);
+    $('guided').classList.toggle('hidden', !guided);
+    $('quick').classList.toggle('hidden', guided);
+  }
+
+  // ---------- guided wizard: research -> questionnaire -> proposal -> build ----------
+  async function research() {
+    const brand = $('gBrand').value.trim();
+    if (!brand) { setLine('gStatus1', 'Type a brand name first.'); $('gBrand').focus(); return; }
+    setLine('gStatus1', 'Researching ' + brand + ' — site, products, voice…', true);
+    $('gResearch').disabled = true;
+    try {
+      const out = await api('/usecases', { brand, notes: $('gNotes').value.trim() || null, count: 1 });
+      if (out.error) { setLine('gStatus1', 'Error: ' + out.error); return; }
+      W.dossier = out.dossier || null;
+      renderDossier(W.dossier);
+      $('wstep2').classList.remove('hidden');
+      $('wstep3').classList.add('hidden');
+      W.useCases = [];
+      setLine('gStatus1', '');
+      $('wstep2').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      setLine('gStatus1', 'Error: ' + e.message);
+    } finally {
+      $('gResearch').disabled = false;
+    }
+  }
+
+  function renderDossier(d) {
+    const card = $('dossierCard');
+    if (!d) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    $('dossierConf').textContent = d.confidence === 'llm' ? 'LLM-researched' : 'heuristic (no LLM key)';
+    $('dossierSummary').textContent = d.summary || 'No public summary found — add notes above and re-research, or just continue.';
+    const chips = $('dossierChips'); chips.innerHTML = '';
+    if (d.vertical) chip(chips, 'vertical', d.vertical);
+    (d.voice && d.voice.adjectives || []).slice(0, 4).forEach((a) => chip(chips, 'voice', a));
+    (d.currentCampaigns || []).slice(0, 3).forEach((c) => chip(chips, 'campaign', c));
+    // Products land in the questionnaire as tap-to-include picks.
+    const picks = $('qProducts'); picks.innerHTML = '';
+    const prods = (d.products || []).slice(0, 10);
+    if (!prods.length) { picks.innerHTML = '<span class="hint">none found — name products in the must-include box below</span>'; }
+    prods.forEach((p) => {
+      const c = el('button', 'chip pick', p);
+      c.type = 'button';
+      c.onclick = () => c.classList.toggle('on');
+      picks.appendChild(c);
+    });
+  }
+
+  // The questionnaire folds into a synthesized brief — the same channel the
+  // engines already understand (routing, signals, LLM context), so guided
+  // answers and a hand-typed quick brief are one code path server-side.
+  function synthesizedBrief() {
+    const parts = [];
+    if ($('qGoal').value) parts.push('Goal: ' + $('qGoal').value + '.');
+    if ($('qAudience').value.trim()) parts.push('Audience: ' + $('qAudience').value.trim() + '.');
+    if ($('qMoment').value.trim()) parts.push('Campaign moment: ' + $('qMoment').value.trim() + '.');
+    const picked = Array.from(document.querySelectorAll('#qProducts .chip.on')).map((c) => c.textContent);
+    if (picked.length) parts.push('Feature these products: ' + picked.join(', ') + '.');
+    if ($('qMustHave').value.trim()) parts.push('Must include: ' + $('qMustHave').value.trim());
+    return parts.join(' ') || null;
+  }
+
+  async function propose() {
+    setLine('gStatus2', 'Drafting use-cases for ' + ($('gBrand').value.trim() || 'this brand') + '…', true);
+    $('gPropose').disabled = true;
+    try {
+      const out = await api('/usecases', {
+        brand: $('gBrand').value.trim(), notes: $('gNotes').value.trim() || null,
+        brief: synthesizedBrief(), count: 6,
+      });
+      if (out.error) { setLine('gStatus2', 'Error: ' + out.error); return; }
+      W.useCases = out.useCases || [];
+      if (out.dossier) { W.dossier = out.dossier; renderDossier(out.dossier); }
+      renderUseCases(out.source);
+      setLine('gStatus2', '');
+      $('wstep3').classList.remove('hidden');
+      $('wstep3').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      setLine('gStatus2', 'Error: ' + e.message);
+    } finally {
+      $('gPropose').disabled = false;
+    }
+  }
+
+  async function reroll() {
+    const feedback = $('ucFeedback').value.trim();
+    setLine('gStatus3', feedback ? 'Rerolling with your steer…' : 'Rerolling…', true);
+    $('ucReroll').disabled = true;
+    try {
+      const out = await api('/usecases', {
+        brand: $('gBrand').value.trim(), notes: $('gNotes').value.trim() || null,
+        brief: synthesizedBrief(), count: 6,
+        feedback: feedback || null,
+        prior: W.useCases.map((u) => u.title),
+      });
+      if (out.error) { setLine('gStatus3', 'Error: ' + out.error); return; }
+      W.useCases = out.useCases || [];
+      renderUseCases(out.source);
+      $('ucFeedback').value = '';
+      setLine('gStatus3', '');
+    } catch (e) { setLine('gStatus3', 'Error: ' + e.message); } finally { $('ucReroll').disabled = false; }
+  }
+
+  async function addIdea() {
+    const idea = $('ucFeedback').value.trim();
+    if (!idea) { setLine('gStatus3', 'Describe the use-case you want in the box first.'); $('ucFeedback').focus(); return; }
+    setLine('gStatus3', 'Shaping your idea into a use-case…', true);
+    $('ucAddIdea').disabled = true;
+    try {
+      const out = await api('/usecases', { brand: $('gBrand').value.trim(), notes: $('gNotes').value.trim() || null, idea });
+      if (out.error) { setLine('gStatus3', 'Error: ' + out.error); return; }
+      if (out.useCase) { W.useCases.push(out.useCase); renderUseCases(); $('ucFeedback').value = ''; }
+      setLine('gStatus3', '');
+    } catch (e) { setLine('gStatus3', 'Error: ' + e.message); } finally { $('ucAddIdea').disabled = false; }
+  }
+
+  function renderUseCases(source) {
+    if (source) $('ucSource').textContent = source === 'library' ? 'library (no LLM key — set one for brand-specific ideas)' : 'LLM-proposed';
+    const list = $('ucList'); list.innerHTML = '';
+    W.useCases.forEach((u, i) => {
+      const card = el('div', 'uc-card');
+      const top = el('div', 'uc-top');
+      top.appendChild(el('span', 'uc-title', u.title));
+      const rm = el('button', 'uc-remove', '✕');
+      rm.type = 'button'; rm.title = 'Remove this use-case';
+      rm.onclick = () => { W.useCases.splice(i, 1); renderUseCases(); };
+      top.appendChild(rm);
+      card.appendChild(top);
+      card.appendChild(el('div', 'uc-goal', u.businessGoal || ''));
+      const meta = el('div', 'chips');
+      chip(meta, 'module', moduleName(u.moduleId));
+      if (u.trigger) chip(meta, 'trigger', u.trigger);
+      if (u.kpi) chip(meta, 'kpi', u.kpi);
+      card.appendChild(meta);
+      list.appendChild(card);
+    });
+    $('ucCount').textContent = W.useCases.length ? '(' + W.useCases.length + ')' : '';
+    $('ucBuild').disabled = !W.useCases.length;
+  }
+  function moduleName(id) {
+    const m = (S.meta && S.meta.modules || []).find((x) => x.id === id);
+    return m ? m.name : id;
+  }
+
+  async function buildFromUseCases() {
+    if (!W.useCases.length) return;
+    setLine('gStatus3', 'Building ' + W.useCases.length + ' validated emails — this takes a moment…', true);
+    $('ucBuild').disabled = true;
+    try {
+      const body = {
+        brand: $('gBrand').value.trim() || 'Acme',
+        brief: synthesizedBrief(),
+        author: author(),
+        useCases: W.useCases.map((u) => ({ title: u.title, moduleId: u.moduleId, contentPlan: u.contentPlan || {} })),
+      };
+      if (W.gColorTouched && /^#[0-9a-f]{6}$/i.test($('gColorhex').value)) body.colorOverride = $('gColorhex').value;
+      const out = await api('/slate', body);
+      if (out.error) { setLine('gStatus3', 'Error: ' + out.error); return; }
+      renderSlate(out);
+      setLine('gStatus3', 'Done — ' + out.builds.length + ' validated emails on one pitch page.');
+      loadHistory(); loadPitches();
+      $('slateResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      setLine('gStatus3', 'Error: ' + e.message);
+    } finally {
+      $('ucBuild').disabled = !W.useCases.length;
+    }
+  }
+
+  // ---------- brands view ----------
+  async function lookupBrand() {
+    const brand = $('bSearch').value.trim();
+    if (!brand) { $('bSearch').focus(); return; }
+    setLine('bStatus', 'Looking up ' + brand + '…', true);
+    try {
+      const out = await api('/usecases', { brand, count: 1 });
+      if (out.error) { setLine('bStatus', 'Error: ' + out.error); return; }
+      const d = out.dossier || {};
+      $('brandCard').classList.remove('hidden');
+      $('bSummary').textContent = d.summary || 'Nothing on file — research it from the Create tab.';
+      const chips = $('bChips'); chips.innerHTML = '';
+      if (d.vertical) chip(chips, 'vertical', d.vertical);
+      if (d.confidence) chip(chips, 'research', d.confidence);
+      (d.products || []).slice(0, 8).forEach((p) => chip(chips, 'product', p));
+      (d.voice && d.voice.adjectives || []).slice(0, 4).forEach((a) => chip(chips, 'voice', a));
+      setLine('bStatus', '');
+    } catch (e) { setLine('bStatus', 'Error: ' + e.message); }
+  }
+
+  // ---------- pitches view ----------
+  async function loadPitches() {
+    try {
+      const res = await fetch('/slates');
+      if (!res.ok) return;
+      const data = await res.json();
+      renderPitches((data && data.items) || []);
+    } catch (e) { /* endpoint optional — the view keeps its empty note */ }
+  }
+  function renderPitches(items) {
+    const list = $('pitchesList');
+    if (!items.length) { list.innerHTML = '<div class="empty-note">No pitches yet — build a slate from the Create tab.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach((p) => {
+      const row = el('a', 'pitch-row');
+      row.href = '/s/' + p.id; row.target = '_blank'; row.rel = 'noopener';
+      const main = el('div', 'pitch-main');
+      main.appendChild(el('span', 'pitch-title', p.title || (p.brand + ' — pitch slate')));
+      main.appendChild(el('span', 'pitch-meta', (p.buildIds ? p.buildIds.length : '?') + ' emails' + (p.author ? ' · ' + p.author : '') + (p.ts ? ' · ' + new Date(p.ts).toLocaleDateString() : '')));
+      row.appendChild(main);
+      const open = el('span', 'slate-build-open', 'open ↗');
+      row.appendChild(open);
+      list.appendChild(row);
+    });
+  }
+
   // ---------- campaign brief: soft character guidance, never a hard cutoff ----------
-  // No maxlength on the textarea — typing is never silently truncated. Past
-  // BRIEF_MAX we just warn and disable the submit button until it's trimmed.
   function updateBriefCounter() {
     const len = $('campaignBrief').value.length;
     const over = len > BRIEF_MAX;
@@ -66,8 +321,6 @@
   }
 
   // ---------- build affordance: genie-lamp smoke loading animation ----------
-  // Purely visual — the disable/prevent-double-submit contract (rub.disabled
-  // toggling around the request) is unchanged from the plain-spinner version.
   const LAMP_LOADING_HTML =
     '<svg class="lamp-anim" viewBox="0 0 64 48" aria-hidden="true">' +
       '<defs>' +
@@ -104,8 +357,6 @@
       if (RUB_LABEL) rub.innerHTML = RUB_LABEL;
     };
     if (success) {
-      // Let the smoke burst into a quick flash rather than just stopping
-      // dead — but resolve well under ~400ms so it never blocks the reveal.
       const lamp = rub.querySelector('.lamp-anim');
       if (lamp) { lamp.classList.add('success'); setTimeout(finish, 300); }
       else finish();
@@ -114,7 +365,7 @@
     }
   }
 
-  // ---------- the one click: generate -> validate ----------
+  // ---------- quick generate: the one click ----------
   async function build() {
     if ($('campaignBrief').value.length > BRIEF_MAX) {
       setStatus('Trim the campaign brief below ' + BRIEF_MAX + ' characters to Rub the lAMP.');
@@ -122,15 +373,12 @@
     }
     setBuilding(true);
     const slateMode = $('slateToggle').checked;
-    setStatus(slateMode ? 'Conjuring the full slate — six validated emails&hellip;' : 'Rubbing the lamp&hellip;', true);
+    setStatus(slateMode ? 'Conjuring the full slate — validated emails on one page…' : 'Rubbing the lamp…', true);
     let ok = false;
     try {
       const body = {
         brand: $('brand').value.trim() || 'Acme',
         counter: S.counter,
-        // Industry and tone are no longer asked for — the backend infers them
-        // from the brand and brief. The brief itself now drives module, copy,
-        // vertical, tone, and any stated offer number. "" / whitespace -> null.
         brief: $('campaignBrief').value.trim() || null,
         author: author(),
       };
@@ -152,7 +400,7 @@
         setStatus(out.validation.pass ? 'Done — valid AMP4EMAIL, zero errors.' : 'Done — see Validation tab for issues.');
       }
       ok = true;
-      loadHistory();
+      loadHistory(); loadPitches();
     } catch (e) {
       setStatus('Error: ' + e.message);
     } finally {
@@ -171,9 +419,8 @@
     if (out.sharePath) {
       open.href = out.sharePath;
       open.classList.remove('hidden');
+      $('slateMsg').textContent = '';
     } else {
-      // KV/storage write failed — builds still happened, they just have no
-      // hosted pages. Say so instead of showing a dead link.
       open.classList.add('hidden');
       $('slateMsg').textContent = 'Share pages unavailable — storage is not configured on this server.';
     }
@@ -212,9 +459,6 @@
     chip(chips, 'vertical', r.vertical);
     chip(chips, 'tone', r.tone);
     chip(chips, 'colour', r.palette.primary + ' (' + (r.colorSource || '?') + ')');
-    // Copy provenance: whether an LLM wrote the copy or the template library
-    // did. Without this a configured API key silently degrading to templates
-    // is invisible — the one observability gap that costs real money.
     if (r.copySource) chip(chips, 'copy', r.copySource);
     $('share').classList.toggle('hidden', !r.sharePath);
 
@@ -238,7 +482,7 @@
     window.AmpGeniePreview.render(area, { moduleId: S.result.moduleId, previewModel: S.result.previewModel, palette: S.result.palette });
   }
 
-  function chip(box, k, v) { const c = el('span', 'chip'); c.innerHTML = '<b>' + k + '</b> ' + escapeHtml(String(v)); box.appendChild(c); }
+  function chip(box, k, v) { const c = el('span', 'chip'); c.innerHTML = '<b>' + escapeHtml(String(k)) + '</b> ' + escapeHtml(String(v)); box.appendChild(c); }
 
   function renderValidation(v) {
     const dot = $('valDot'); dot.className = 'statdot ' + (v.pass ? 'pass' : 'fail');
@@ -261,25 +505,16 @@
       const res = await fetch('/history');
       const data = await res.json();
       renderHistory((data && data.items) || []);
-    } catch (e) {
-      // best-effort review aid — a fetch failure here must never surface as
-      // an app error or block anything else.
-    }
+    } catch (e) { /* best-effort review aid */ }
   }
 
   function renderHistory(items) {
-    const section = $('historySection');
     const list = $('historyList');
     list.innerHTML = '';
-    if (!items.length) { section.classList.add('hidden'); return; }
-    section.classList.remove('hidden');
+    if (!items.length) { list.innerHTML = '<div class="empty-note">No builds yet.</div>'; return; }
     items.forEach((it) => list.appendChild(historyItem(it)));
   }
 
-  // Collapsed-by-default accordion (Phase 7): a real button toggling both the
-  // visual hidden state and aria-expanded, so keyboard/AT users and the CSS
-  // chevron-rotation rule (`.history-hdr[aria-expanded="true"] .history-chevron`)
-  // stay in sync with each other.
   function toggleHistory() {
     const btn = $('historyToggle');
     const list = $('historyList');
@@ -301,7 +536,8 @@
     meta.innerHTML =
       '<span class="chip"><b>vertical</b> ' + escapeHtml(String(it.vertical || '?')) + '</span>' +
       '<span class="chip"><b>tone</b> ' + escapeHtml(String(it.tone || '?')) + '</span>' +
-      '<span class="chip ' + (it.validationPass ? 'pass' : 'fail') + '"><b>validation</b> ' + (it.validationPass ? 'pass' : 'fail') + '</span>';
+      '<span class="chip ' + (it.validationPass ? 'pass' : 'fail') + '"><b>validation</b> ' + (it.validationPass ? 'pass' : 'fail') + '</span>' +
+      (it.shareId ? ' <a class="slate-build-open" target="_blank" rel="noopener" href="/b/' + encodeURIComponent(it.shareId) + '">open</a>' : '');
     row.appendChild(meta);
 
     if (it.brief) {
@@ -319,13 +555,10 @@
     const edited = S.edited != null && S.edited !== S.result.ampHtml;
     $('editedDot').classList.toggle('hidden', !edited);
     $('editedLabel').classList.toggle('hidden', !edited);
-    // The live preview renders previewModel from the last generation — it does
-    // NOT re-parse edited AMP. Say so right on the preview instead of letting
-    // an edited build silently show stale content (the old honesty gap).
     $('previewStale').classList.toggle('hidden', !edited);
   }
   async function revalidate() {
-    setStatus('Validating edited code&hellip;');
+    setStatus('Validating edited code…');
     const v = await api('/validate', { ampHtml: $('code').value });
     renderValidation(v);
     switchTab('validation');
@@ -382,8 +615,7 @@
         ampHtml: currentCode(),
         fromName: S.result.brand,
         // Branded fallback parts from the same generation context (server
-        // fallback.js) — what non-AMP clients (Outlook) render instead of the
-        // generic stub. They match the last generation, not manual code edits.
+        // fallback.js). They match the last generation, not manual code edits.
         html: S.result.fallbackHtml || undefined,
         text: S.result.fallbackText || undefined,
       });

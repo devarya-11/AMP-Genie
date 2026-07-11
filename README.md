@@ -59,6 +59,33 @@ Click **Surprise me again** to reroll: brand, industry, and tone stay put, but
 a reroll counter advances the seed, so you get a different (but reproducible)
 module/content pick each time.
 
+### The intelligence layer (v3)
+
+The genie researches the brand before it builds, and shows you the plan
+before it generates:
+
+1. **Research** — `POST /usecases` builds a **brand dossier**: site scrape +
+   heuristics always; one schema-constrained LLM synthesis call when a
+   provider key is configured. Pasted brand guidelines/notes are first-class
+   input and outrank scraped guesses. Cached in KV per brand.
+2. **Questionnaire** — the guided Create flow asks the few things that decide
+   pitch quality (goal, audience, campaign moment, products to feature,
+   must-have ideas). Every answer optional; answers fold into the same brief
+   channel the engines already understand.
+3. **Proposal** — the genie shows the use-cases it intends to build (title,
+   business goal, module, KPI). Steer it: reroll with feedback, remove cards,
+   or type your own idea and have it shaped into a use-case. Nothing is
+   generated until you approve.
+4. **Build** — approved use-cases become a validated slate (one email per
+   idea, `contentPlan` driving copy through the same allowlist-validated
+   channel as everything else).
+
+Zero-key behaviour: ideation falls back to a hand-authored library of real
+lifecycle plays per vertical, and research falls back to heuristics — the
+flow works identically, just less brand-specific. **The LLM never writes
+markup anywhere in this layer**: it produces schema-validated parameters; the
+deterministic engine renders them; the real validator gates the result.
+
 ### The pitch workspace (v2)
 
 Nobody pitches one email. The v2 surface turns a brand + brief into the thing

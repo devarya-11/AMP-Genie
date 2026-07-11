@@ -1,5 +1,34 @@
 # Changelog
 
+## v3.0 — the intelligence layer + team shell (2026-07-11)
+
+The genie now understands the brand before it builds, proposes use-cases you
+can steer, and lives in a proper multi-view team app.
+
+- **Brand dossier** (`server/brand-research.js`) — a brand name (+ optional
+  pasted guidelines/notes, which outrank scraped guesses) becomes a structured
+  dossier: summary, products, categories, voice, current campaigns, vertical.
+  Two tiers: deterministic site-scrape heuristics (always works, no keys) and
+  one schema-constrained LLM synthesis call when a provider key exists.
+  KV-cached per brand (`dossier:<slug>`).
+- **Steerable use-case ideation** (`server/usecase-engine.js`) — proposes
+  brand-grounded lifecycle use-cases mapped to modules via `POST /usecases`:
+  propose, reroll with feedback (+ prior titles), or shape the team's own
+  idea into the same structure. Zero-key tier: a hand-authored library of
+  42+ real lifecycle plays across all 7 verticals. Every LLM output is
+  allowlist-revalidated (no markup can ever reach a template).
+- **Guided pitch wizard** — the new default Create flow: research the brand →
+  see what the genie learned → a 30-second questionnaire (goal, audience,
+  moment, products to feature, must-haves) → **a proposal you approve or
+  steer before anything is built** → slate.
+- **Slates from use-cases** — `POST /slate` accepts `useCases[]`: one build
+  per approved idea, titles as labels, contentPlan driving copy through the
+  existing validated channel; modules may repeat.
+- **SaaS team shell** — left navigation (Create / Pitches / Brands / History),
+  Pitches view backed by a new `GET /slates` index, Brands lookup view,
+  attribution in the sidebar. Quick generate (v2 one-click) remains as a tab.
+- Tests: 145 → 218.
+
 ## v2 — pitch workspace (2026-07-10)
 
 The tool's unit of value moves from "one random validated email" to **the

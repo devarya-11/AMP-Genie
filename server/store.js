@@ -90,7 +90,42 @@ async function putBrandKit(kv, kit) {
   return kvPut(kv, 'brandkit:' + kit.slug, kit);
 }
 
+// ---- slate index ------------------------------------------------------------
+// A single newest-first list of slate SUMMARIES (never full records) so the
+// Pitches view can list the team's work without a KV list() scan — the same
+// single-key, capped, read-modify-write pattern as the history list, with the
+// same caveat: not atomic under concurrent writers, acceptable for a team
+// review aid.
+const SLATE_INDEX_KEY = 'slates:index';
+const SLATE_INDEX_MAX = 100;
+
+async function readSlateIndex(kv) {
+  if (!kv) return [];
+  try {
+    const parsed = await kv.get(SLATE_INDEX_KEY, 'json');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function appendSlateIndex(kv, slate) {
+  if (!kv || !slate || !ID_SHAPE.test(String(slate.id || ''))) return false;
+  const list = await readSlateIndex(kv);
+  list.unshift({
+    id: slate.id,
+    ts: slate.ts,
+    author: slate.author || null,
+    brand: slate.brand,
+    title: slate.title,
+    buildIds: slate.buildIds || [],
+  });
+  if (list.length > SLATE_INDEX_MAX) list.length = SLATE_INDEX_MAX;
+  return kvPut(kv, SLATE_INDEX_KEY, list);
+}
+
 module.exports = {
   newId, brandSlug,
   getBuild, putBuild, getSlate, putSlate, getBrandKit, putBrandKit,
+  readSlateIndex, appendSlateIndex,
 };

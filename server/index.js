@@ -23,7 +23,10 @@ const { dispatch } = require('./dispatch');
 const { readHistory, appendHistory, MAX_ENTRIES } = require('./history');
 const { createBuild, buildHistoryEntry } = require('./build-pipeline');
 const { createSlate } = require('./slate-core');
-const { getBuild, getSlate } = require('./store');
+const { buildDossier } = require('./brand-research');
+const { proposeUseCases, shapeUserIdea } = require('./usecase-engine');
+const { getBuild, getSlate, readSlateIndex } = require('./store');
+const { normalizeBrief } = require('./history');
 const { createFsKv } = require('./store-fs');
 const { buildPageHtml, slatePageHtml, notFoundPageHtml } = require('./share-pages');
 
@@ -100,6 +103,52 @@ app.post('/slate', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// ---- usecases: the v3 ideation front door -----------------------------------
+// One endpoint, three moves, dispatched by body shape (see functions/usecases.js
+// — the two routes must stay wire-identical): research -> dossier + proposal,
+// propose/reroll with feedback + prior titles, or shape the team's own idea.
+app.post('/usecases', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const brandName = (b.brand || '').trim() || 'Acme';
+    const notes = typeof b.notes === 'string' ? b.notes.slice(0, 4000) : null;
+    const dossier = await buildDossier({ brandName, notes, kv, force: !!b.forceResearch });
+    const publicDossier = {
+      name: dossier.name,
+      slug: dossier.slug,
+      site: dossier.site || null,
+      summary: dossier.summary || '',
+      products: dossier.products || [],
+      categories: dossier.categories || [],
+      audiences: dossier.audiences || [],
+      voice: dossier.voice || { adjectives: [], donts: [] },
+      currentCampaigns: dossier.currentCampaigns || [],
+      vertical: dossier.vertical || 'Generic',
+      confidence: dossier.confidence,
+      researchedAt: dossier.researchedAt,
+    };
+    if (typeof b.idea === 'string' && b.idea.trim()) {
+      const useCase = await shapeUserIdea({ idea: b.idea, dossier });
+      return res.json({ useCase, dossier: publicDossier });
+    }
+    const { useCases, source } = await proposeUseCases({
+      dossier,
+      brief: normalizeBrief(b.brief),
+      count: b.count,
+      feedback: typeof b.feedback === 'string' ? b.feedback.slice(0, 500) : null,
+      prior: Array.isArray(b.prior) ? b.prior.slice(0, 16).map(String) : null,
+    });
+    res.json({ useCases, source, dossier: publicDossier });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ---- slates index: the Pitches view ----------------------------------------
+app.get('/slates', async (req, res) => {
+  res.json({ items: await readSlateIndex(kv) });
 });
 
 // ---- share pages: the pitch deliverable ------------------------------------

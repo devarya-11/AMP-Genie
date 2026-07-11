@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -26,147 +26,276 @@
   <symbol id="i-send" viewBox="0 0 24 24"><path fill="currentColor" d="M3 11l18-8-8 18-2-7z"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" d="M16 16l4 4"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
+  <symbol id="i-brand" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M12 7a2.5 2.5 0 110 5 2.5 2.5 0 010-5zm0 6c2.8 0 5 1.3 5 3v1H7v-1c0-1.7 2.2-3 5-3z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="M12 7v5l3.5 2"/></symbol>
 </svg>
 
-<header class="topbar">
-  <div class="brandmark"><svg class="ic lampic"><use href="#i-lamp"/></svg><span>AMP&nbsp;Genie</span></div>
-  <div class="tagline">Type a brand &rarr; a validated, interactive AMP email</div>
-  <input id="authorName" class="author-input" type="text" placeholder="Your name" maxlength="60"
-         title="Shown on the builds you create so the team knows whose demo is whose">
-  <label class="devtoggle" title="Show the AMP code &amp; Validation tabs for debugging">
-    <input type="checkbox" id="devToggle" class="devtoggle-input">
-    <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
-    <span class="devtoggle-text">Developer view</span>
-  </label>
-</header>
+<!-- ============ SaaS shell: left nav + view container ============ -->
+<div class="shell">
+  <aside class="sidenav">
+    <div class="brandmark"><svg class="ic lampic"><use href="#i-lamp"/></svg><span>AMP&nbsp;Genie</span></div>
+    <nav class="nav">
+      <button data-view="create" class="nav-item on"><svg class="ic"><use href="#i-sparkle"/></svg> Create</button>
+      <button data-view="pitches" class="nav-item"><svg class="ic"><use href="#i-folder"/></svg> Pitches</button>
+      <button data-view="brands" class="nav-item"><svg class="ic"><use href="#i-brand"/></svg> Brands</button>
+      <button data-view="history" class="nav-item"><svg class="ic"><use href="#i-clock"/></svg> History</button>
+    </nav>
+    <div class="nav-foot">
+      <input id="authorName" class="author-input" type="text" placeholder="Your name" maxlength="60"
+             title="Shown on the builds you create so the team knows whose demo is whose">
+      <label class="devtoggle" title="Show the AMP code &amp; Validation tabs for debugging">
+        <input type="checkbox" id="devToggle" class="devtoggle-input">
+        <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
+        <span class="devtoggle-text">Developer view</span>
+      </label>
+    </div>
+  </aside>
 
-<main>
-  <!-- HERO -->
-  <section class="hero card">
-    <label class="fieldlabel" for="brand">Brand name</label>
-    <div class="hero-input-row">
-      <input id="brand" type="text" placeholder="e.g. Zomato, Nykaa, Groww&hellip;" autocomplete="off">
-      <button id="rub" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Rub the <span class="cursive-l">l</span>AMP</button>
+  <main class="content">
+
+  <!-- ======================= CREATE ======================= -->
+  <section id="view-create" class="view on">
+    <div class="mode-tabs">
+      <button id="modeGuided" class="mode-tab on" type="button">Guided pitch <span class="hint">research &rarr; propose &rarr; build</span></button>
+      <button id="modeQuick" class="mode-tab" type="button">Quick generate <span class="hint">one email, one click</span></button>
     </div>
 
-    <div class="controls">
-      <div class="ctrl">
-        <label for="colorhex">Brand colour <span class="hint">auto-detected &mdash; override optional</span></label>
-        <div class="colorwrap">
-          <input id="colorpick" type="color" value="#6c2bd9">
-          <input id="colorhex" type="text" placeholder="auto" maxlength="7">
+    <!-- ---- GUIDED WIZARD ---- -->
+    <div id="guided" class="wizard">
+      <!-- Step 1: brand + research -->
+      <section id="wstep1" class="card wstep on">
+        <div class="wstep-hdr"><span class="wstep-num">1</span> Who are we pitching?</div>
+        <label class="fieldlabel" for="gBrand">Brand name</label>
+        <div class="hero-input-row">
+          <input id="gBrand" type="text" placeholder="e.g. Groww, Nykaa, Practo&hellip;" autocomplete="off">
+          <button id="gResearch" class="primary big"><svg class="ic"><use href="#i-search"/></svg> Research brand</button>
+        </div>
+        <div class="controls">
+          <div class="ctrl">
+            <label for="gColorhex">Brand colour <span class="hint">auto-detected &mdash; override optional</span></label>
+            <div class="colorwrap">
+              <input id="gColorpick" type="color" value="#6c2bd9">
+              <input id="gColorhex" type="text" placeholder="auto" maxlength="7">
+            </div>
+          </div>
+        </div>
+        <div class="brief-field">
+          <label class="fieldlabel" for="gNotes">Brand guidelines / notes <span class="hint">optional &mdash; paste anything you know: positioning, voice, campaign calendar. Pasted truth outranks scraped guesses.</span></label>
+          <textarea id="gNotes" rows="3" placeholder="e.g. India&rsquo;s largest investment app, voice is simple-jargon-free-reassuring, big Diwali gold push this quarter&hellip;"></textarea>
+        </div>
+        <div id="gStatus1" class="statusline"></div>
+      </section>
+
+      <!-- Dossier: what the genie learned -->
+      <section id="dossierCard" class="card dossier hidden">
+        <div class="wstep-hdr"><svg class="ic accent"><use href="#i-brand"/></svg> What the genie learned <span id="dossierConf" class="chip"></span></div>
+        <p id="dossierSummary" class="dossier-summary"></p>
+        <div id="dossierChips" class="chips"></div>
+      </section>
+
+      <!-- Step 2: questionnaire -->
+      <section id="wstep2" class="card wstep hidden">
+        <div class="wstep-hdr"><span class="wstep-num">2</span> Point the genie <span class="hint">30 seconds &mdash; every answer is optional</span></div>
+        <div class="qgrid">
+          <div class="ctrl">
+            <label for="qGoal">Campaign goal</label>
+            <select id="qGoal">
+              <option value="">Not sure yet</option>
+              <option>Acquisition — win new customers</option>
+              <option>Activation — get signups to act</option>
+              <option>Retention — keep customers engaged</option>
+              <option>Reactivation — win back dormant users</option>
+              <option>Announcement — launch or festive push</option>
+            </select>
+          </div>
+          <div class="ctrl">
+            <label for="qAudience">Audience</label>
+            <input id="qAudience" type="text" placeholder="e.g. dormant SIP investors, first-time buyers">
+          </div>
+          <div class="ctrl">
+            <label for="qMoment">Campaign moment</label>
+            <input id="qMoment" type="text" placeholder="e.g. Diwali sale, IPO week, monsoon checkups">
+          </div>
+        </div>
+        <div class="ctrl" style="margin-top:12px">
+          <label>Products to feature <span class="hint">from the research &mdash; tap to include</span></label>
+          <div id="qProducts" class="chips picky"></div>
+        </div>
+        <div class="brief-field">
+          <label class="fieldlabel" for="qMustHave">Anything this pitch must include?</label>
+          <textarea id="qMustHave" rows="2" placeholder="e.g. a lab-report style opener like the Practo pitch; must mention the loyalty API"></textarea>
+        </div>
+        <div class="wstep-actions">
+          <button id="gPropose" class="primary big"><svg class="ic"><use href="#i-sparkle"/></svg> Propose use-cases</button>
+        </div>
+        <div id="gStatus2" class="statusline"></div>
+      </section>
+
+      <!-- Step 3: the proposal — see it before it's built -->
+      <section id="wstep3" class="card wstep hidden">
+        <div class="wstep-hdr"><span class="wstep-num">3</span> Here&rsquo;s what the genie will build <span id="ucSource" class="chip"></span></div>
+        <div id="ucList" class="uc-list"></div>
+        <div class="uc-refine">
+          <input id="ucFeedback" type="text" placeholder="Steer it: &lsquo;go deeper on retention&rsquo; &middot; or describe a use-case you want added&hellip;">
+          <button id="ucReroll" class="ghost" title="Regenerate the proposal using this feedback"><svg class="ic"><use href="#i-refresh"/></svg> Reroll</button>
+          <button id="ucAddIdea" class="ghost" title="Shape this text into one extra use-case"><svg class="ic"><use href="#i-sparkle"/></svg> Add as use-case</button>
+        </div>
+        <div class="wstep-actions">
+          <button id="ucBuild" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Build these <span id="ucCount"></span></button>
+        </div>
+        <div id="gStatus3" class="statusline"></div>
+      </section>
+    </div>
+
+    <!-- ---- QUICK GENERATE (the one-click v2 flow, unchanged IDs) ---- -->
+    <div id="quick" class="hidden">
+      <section class="hero card">
+        <label class="fieldlabel" for="brand">Brand name</label>
+        <div class="hero-input-row">
+          <input id="brand" type="text" placeholder="e.g. Zomato, Nykaa, Groww&hellip;" autocomplete="off">
+          <button id="rub" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Rub the <span class="cursive-l">l</span>AMP</button>
+        </div>
+        <div class="controls">
+          <div class="ctrl">
+            <label for="colorhex">Brand colour <span class="hint">auto-detected &mdash; override optional</span></label>
+            <div class="colorwrap">
+              <input id="colorpick" type="color" value="#6c2bd9">
+              <input id="colorhex" type="text" placeholder="auto" maxlength="7">
+            </div>
+          </div>
+          <div class="ctrl slate-ctrl">
+            <label>Pitch slate <span class="hint">every module, one shareable page</span></label>
+            <label class="devtoggle slate-toggle" title="One brief &rarr; all interactive modules, grouped on a single shareable pitch page">
+              <input type="checkbox" id="slateToggle" class="devtoggle-input">
+              <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
+              <span class="devtoggle-text">Full slate</span>
+            </label>
+          </div>
+        </div>
+        <div class="brief-field">
+          <label class="fieldlabel" for="campaignBrief">Tell us about this campaign <span class="hint">optional</span></label>
+          <textarea id="campaignBrief" rows="5" placeholder="What&rsquo;s this campaign for? Include the use case, what it should do, how the flow should work, and anything it needs to connect to (e.g. your CRM, loyalty program, a specific API)."></textarea>
+          <div class="brief-meta">
+            <span id="briefCount" class="brief-count">0/2000</span>
+            <span id="briefWarn" class="brief-warn hidden">Over 2000 characters &mdash; trim it down to Rub the lAMP. Nothing you&rsquo;ve typed is lost.</span>
+          </div>
+        </div>
+        <div id="status" class="statusline"></div>
+      </section>
+    </div>
+
+    <!-- SLATE RESULT -->
+    <section id="slateResult" class="slate card hidden">
+      <div class="slate-hdr">
+        <div>
+          <div id="slateTitle" class="conjured"></div>
+          <div id="slateSub" class="slate-sub"></div>
+        </div>
+        <a id="slateOpen" class="primary slate-open" href="#" target="_blank" rel="noopener">
+          <svg class="ic"><use href="#i-sparkle"/></svg> Open pitch page
+        </a>
+      </div>
+      <div id="slateBuilds" class="slate-builds"></div>
+      <div id="slateMsg" class="copy-msg" aria-live="polite"></div>
+    </section>
+
+    <!-- SINGLE RESULT -->
+    <section id="result" class="result hidden">
+      <aside class="rail card">
+        <div id="conjured" class="conjured"></div>
+        <div id="chips" class="chips"></div>
+        <div id="briefNote" class="brief-note hidden"></div>
+        <div class="rail-actions">
+          <button id="surprise" class="ghost"><svg class="ic"><use href="#i-refresh"/></svg> Surprise me again</button>
+          <button id="copy" class="ghost"><svg class="ic"><use href="#i-copy"/></svg> Copy AMP code</button>
+          <button id="download" class="ghost"><svg class="ic"><use href="#i-download"/></svg> Download .html</button>
+          <button id="share" class="ghost hidden"><svg class="ic"><use href="#i-send"/></svg> Copy share link</button>
+        </div>
+        <div id="copyMsg" class="copy-msg" aria-live="polite"></div>
+        <div class="dispatch">
+          <label class="fieldlabel" for="dispatchTo">Send to your inbox <span class="hint">self-send renders AMP without Google registration</span></label>
+          <div class="dispatch-row">
+            <input id="dispatchTo" type="email" placeholder="you@gmail.com">
+            <button id="dispatch" class="primary"><svg class="ic"><use href="#i-send"/></svg></button>
+          </div>
+          <div id="dispatchMsg" class="dispatch-msg" aria-live="polite"></div>
+        </div>
+      </aside>
+      <div class="panel card">
+        <nav class="tabs">
+          <button data-tab="preview" class="on" type="button">Live preview</button>
+          <button data-tab="code" type="button" class="advanced-only">AMP code <span id="editedDot" class="editdot hidden"></span></button>
+          <button data-tab="validation" type="button" class="advanced-only">Validation <span id="valDot" class="statdot"></span></button>
+        </nav>
+        <div data-pane="preview" class="pane on">
+          <div id="previewStale" class="preview-stale hidden" role="status">
+            Preview shows the last <b>generated</b> version &mdash; your code edits are not reflected here. Re-validate &amp; download use your edits.
+          </div>
+          <div class="stage">
+            <div class="phone"><div id="previewArea" class="phone-screen"></div></div>
+          </div>
+        </div>
+        <div data-pane="code" class="pane advanced-only">
+          <div class="code-actions">
+            <button id="revalidate" class="primary sm"><svg class="ic"><use href="#i-check"/></svg> Re-validate</button>
+            <button id="resetCode" class="ghost sm"><svg class="ic"><use href="#i-refresh"/></svg> Reset</button>
+            <span id="editedLabel" class="edited hidden">edited &mdash; differs from generated</span>
+          </div>
+          <textarea id="code" spellcheck="false"></textarea>
+        </div>
+        <div data-pane="validation" class="pane advanced-only">
+          <div id="verdict" class="verdict"></div>
+          <a id="playground" class="pglink" href="https://amp.gmail.dev/playground/" target="_blank" rel="noopener">Open in AMP Playground &rarr;</a>
+          <ul id="errors" class="errlist"></ul>
         </div>
       </div>
-      <div class="ctrl slate-ctrl">
-        <label>Pitch slate <span class="hint">every module, one shareable page</span></label>
-        <label class="devtoggle slate-toggle" title="One brief &rarr; all six interactive modules, grouped on a single shareable pitch page">
-          <input type="checkbox" id="slateToggle" class="devtoggle-input">
-          <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
-          <span class="devtoggle-text">Full slate (6 emails)</span>
-        </label>
-      </div>
-    </div>
-
-    <div class="brief-field">
-      <label class="fieldlabel" for="campaignBrief">Tell us about this campaign <span class="hint">optional</span></label>
-      <textarea id="campaignBrief" rows="5" placeholder="What&rsquo;s this campaign for? Include the use case, what it should do, how the flow should work, and anything it needs to connect to (e.g. your CRM, loyalty program, a specific API)."></textarea>
-      <div class="brief-meta">
-        <span id="briefCount" class="brief-count">0/2000</span>
-        <span id="briefWarn" class="brief-warn hidden">Over 2000 characters &mdash; trim it down to Rub the lAMP. Nothing you&rsquo;ve typed is lost.</span>
-      </div>
-    </div>
-
-    <div id="status" class="statusline"></div>
+    </section>
   </section>
 
-  <!-- SLATE RESULT: one brief -> all six modules on a single shareable pitch page -->
-  <section id="slateResult" class="slate card hidden">
-    <div class="slate-hdr">
-      <div>
-        <div id="slateTitle" class="conjured"></div>
-        <div id="slateSub" class="slate-sub"></div>
-      </div>
-      <a id="slateOpen" class="primary slate-open" href="#" target="_blank" rel="noopener">
-        <svg class="ic"><use href="#i-sparkle"/></svg> Open pitch page
-      </a>
-    </div>
-    <div id="slateBuilds" class="slate-builds"></div>
-    <div id="slateMsg" class="copy-msg" aria-live="polite"></div>
+  <!-- ======================= PITCHES ======================= -->
+  <section id="view-pitches" class="view">
+    <section class="card">
+      <div class="wstep-hdr"><svg class="ic accent"><use href="#i-folder"/></svg> Pitches <span class="hint">every slate the team has built &mdash; open, share, reuse</span></div>
+      <div id="pitchesList" class="pitches-list"><div class="empty-note">No pitches yet &mdash; build a slate from the Create tab.</div></div>
+    </section>
   </section>
 
-  <!-- RESULT -->
-  <section id="result" class="result hidden">
-    <!-- LEFT RAIL -->
-    <aside class="rail card">
-      <div id="conjured" class="conjured"></div>
-      <div id="chips" class="chips"></div>
-      <div id="briefNote" class="brief-note hidden"></div>
-
-      <div class="rail-actions">
-        <button id="surprise" class="ghost"><svg class="ic"><use href="#i-refresh"/></svg> Surprise me again</button>
-        <button id="copy" class="ghost"><svg class="ic"><use href="#i-copy"/></svg> Copy AMP code</button>
-        <button id="download" class="ghost"><svg class="ic"><use href="#i-download"/></svg> Download .html</button>
-        <button id="share" class="ghost hidden"><svg class="ic"><use href="#i-send"/></svg> Copy share link</button>
+  <!-- ======================= BRANDS ======================= -->
+  <section id="view-brands" class="view">
+    <section class="card">
+      <div class="wstep-hdr"><svg class="ic accent"><use href="#i-brand"/></svg> Brands <span class="hint">what the genie knows &mdash; research once, reuse in every pitch</span></div>
+      <div class="hero-input-row">
+        <input id="bSearch" type="text" placeholder="Brand name&hellip;" autocomplete="off">
+        <button id="bShow" class="primary"><svg class="ic"><use href="#i-search"/></svg> Look up</button>
       </div>
-      <div id="copyMsg" class="copy-msg" aria-live="polite"></div>
-
-      <div class="dispatch">
-        <label class="fieldlabel" for="dispatchTo">Send to your inbox <span class="hint">self-send renders AMP without Google registration</span></label>
-        <div class="dispatch-row">
-          <input id="dispatchTo" type="email" placeholder="you@gmail.com">
-          <button id="dispatch" class="primary"><svg class="ic"><use href="#i-send"/></svg></button>
-        </div>
-        <div id="dispatchMsg" class="dispatch-msg" aria-live="polite"></div>
-      </div>
-    </aside>
-
-    <!-- RIGHT TABS -->
-    <div class="panel card">
-      <nav class="tabs">
-        <button data-tab="preview" class="on" type="button">Live preview</button>
-        <button data-tab="code" type="button" class="advanced-only">AMP code <span id="editedDot" class="editdot hidden"></span></button>
-        <button data-tab="validation" type="button" class="advanced-only">Validation <span id="valDot" class="statdot"></span></button>
-      </nav>
-
-      <div data-pane="preview" class="pane on">
-        <div id="previewStale" class="preview-stale hidden" role="status">
-          Preview shows the last <b>generated</b> version &mdash; your code edits are not reflected here. Re-validate &amp; download use your edits.
-        </div>
-        <div class="stage">
-          <div class="phone"><div id="previewArea" class="phone-screen"></div></div>
+      <div id="bStatus" class="statusline"></div>
+      <div id="brandCard" class="hidden">
+        <p id="bSummary" class="dossier-summary"></p>
+        <div id="bChips" class="chips"></div>
+        <div class="wstep-actions">
+          <button id="bUse" class="ghost"><svg class="ic"><use href="#i-sparkle"/></svg> Start a pitch with this brand</button>
         </div>
       </div>
-
-      <div data-pane="code" class="pane advanced-only">
-        <div class="code-actions">
-          <button id="revalidate" class="primary sm"><svg class="ic"><use href="#i-check"/></svg> Re-validate</button>
-          <button id="resetCode" class="ghost sm"><svg class="ic"><use href="#i-refresh"/></svg> Reset</button>
-          <span id="editedLabel" class="edited hidden">edited &mdash; differs from generated</span>
-        </div>
-        <textarea id="code" spellcheck="false"></textarea>
-      </div>
-
-      <div data-pane="validation" class="pane advanced-only">
-        <div id="verdict" class="verdict"></div>
-        <a id="playground" class="pglink" href="https://amp.gmail.dev/playground/" target="_blank" rel="noopener">Open in AMP Playground &rarr;</a>
-        <ul id="errors" class="errlist"></ul>
-      </div>
-    </div>
+    </section>
   </section>
 
-  <!-- HISTORY: collapsed by default (Phase 7) — available one click away
-       rather than permanently taking up space in the default, minimal view. -->
-  <section id="historySection" class="history card hidden">
-    <button type="button" id="historyToggle" class="history-hdr" aria-expanded="false" aria-controls="historyList">
-      <svg class="ic history-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
-      <h2 class="history-title">Recent builds</h2>
-      <span class="hint">brief &amp; metadata from past generations, for review &mdash; read-only</span>
-    </button>
-    <div id="historyList" class="history-list hidden"></div>
+  <!-- ======================= HISTORY ======================= -->
+  <section id="view-history" class="view">
+    <section id="historySection" class="history card">
+      <button type="button" id="historyToggle" class="history-hdr" aria-expanded="true" aria-controls="historyList">
+        <svg class="ic history-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+        <h2 class="history-title">Recent builds</h2>
+        <span class="hint">brief &amp; metadata from past generations, for review &mdash; read-only</span>
+      </button>
+      <div id="historyList" class="history-list"></div>
+    </section>
   </section>
-</main>
 
-<script src="preview.js?v=3"></script>
-<script src="app.js?v=4"></script>
+  </main>
+</div>
+
+<script src="preview.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
