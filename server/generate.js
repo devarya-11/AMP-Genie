@@ -193,6 +193,29 @@ function overrideItemName(base, itemNames, i) {
   return (typeof v === 'string' && v.trim()) ? v.trim() : base;
 }
 
+// Real, user-supplied items pasted into the brief and threaded through as
+// copy.items — these REPLACE the vertical's synthetic placeholders so the email
+// shows the brand's actual products. Only a deterministic caller ever sets
+// copy.items (the LLM plan is barred from prices); still validated defensively.
+// A non-empty name is required; a price is OPTIONAL — a finite positive price
+// is kept, anything else drops the price entirely so a name-only announcement
+// (restaurants, new stores, a featured line-up) still lays out its real items
+// without inventing a number. Capped so a runaway list can't bloat the render.
+// Returns [] when nothing valid, so callers fall back to content.items and the
+// output stays byte-identical to before when no real items were supplied.
+function validItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((it) => it && typeof it.name === 'string' && it.name.trim())
+    .map((it) => {
+      const n = Number(it.price);
+      return (Number.isFinite(n) && n > 0)
+        ? { name: it.name.trim(), price: Math.round(n) }
+        : { name: it.name.trim() };
+    })
+    .slice(0, 8);
+}
+
 // Best-effort brand homepage guess for the header logo link. Mirrors (does
 // not import) brand.js's candidateDomains — this is a display-only link, not
 // used for colour resolution, so a single best guess is enough here.
@@ -294,8 +317,12 @@ function buildReveal(ctx) {
   const head = enc(applyBrand(headSrc, brand));
   const discount = validPct(copy.discount) || pick(rng, [10, 15, 20, 25]);
   const code = (brand.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6) || 'GENIE') + discount;
-  const items = shuffle(rng, content.items).slice(0, 2)
-    .map((it, i) => ({ ...it, name: overrideItemName(it.name, copy.itemNames, i) }));
+  // Real pasted products (name + price) win over the vertical's placeholders;
+  // when present their names are authoritative, so the LLM's copy.itemNames
+  // rename is skipped (it must not overwrite a real product name).
+  const real = validItems(copy.items);
+  const items = shuffle(rng, real.length ? real : content.items).slice(0, 2)
+    .map((it, i) => ({ ...it, name: real.length ? it.name : overrideItemName(it.name, copy.itemNames, i) }));
   const img = ph(600, 300, p.primary, '#ffffff', `${brand} OFFER`);
   const teaserSrc = copy.teaserText || 'A hand-picked reward is waiting behind the curtain.';
   const ctaSrc = copy.ctaLabel || 'Reveal my offer';
@@ -322,7 +349,7 @@ ${headerBlock({ brand, palette: p, head, copy })}
       ${items.map((it, i) => `<div class="col${i === 1 ? ' gap' : ''}">
         <div class="card">
           <amp-img src="${ph(300, 200, p.tint, p.primary, it.name)}" width="300" height="200" layout="responsive" alt="${enc(it.name)}"></amp-img>
-          <div class="body"><p class="name">${enc(it.name)}</p><p class="price">${formatPrice(it.price, currency)}</p></div>
+          <div class="body"><p class="name">${enc(it.name)}</p>${it.price != null ? `<p class="price">${formatPrice(it.price, currency)}</p>` : ''}</div>
         </div>
       </div>`).join('')}
     </div>
@@ -333,7 +360,7 @@ ${footerBlock({ brand, defaultText: 'You received this because you opted in to o
   const previewModel = {
     type: 'reveal', head: applyBrand(headSrc, brand), code, discount,
     teaserText: teaserSrc, ctaLabel: ctaSrc,
-    items: items.map((it) => ({ name: it.name, price: priceText(it.price, currency) })),
+    items: items.map((it) => ({ name: it.name, price: it.price != null ? priceText(it.price, currency) : '' })),
     image: img,
   };
   return { scripts: [SCRIPT_BIND], css, body, previewModel };
@@ -343,12 +370,19 @@ function buildSearch(ctx) {
   const { brand, palette: p, content, t, currency, rng, copy = {} } = ctx;
   const headSrc = copy.head || t.search;
   const head = enc(applyBrand(headSrc, brand));
-  const items = shuffle(rng, content.items.map((it, i) => {
-    const name = overrideItemName(it.name, copy.itemNames, i);
-    return { ...it, name, cat: content.itemCats[i], key: name.toLowerCase() };
-  }));
-  const cats = content.categories;
-  const catKeys = content.catKeys;
+  // Real pasted products replace the vertical's placeholders. They carry no
+  // category taxonomy, so they all sit under a single "All" filter rather than
+  // inventing categories the pills wouldn't match; the search box still filters
+  // them by name.
+  const real = validItems(copy.items);
+  const items = shuffle(rng, real.length
+    ? real.map((it) => ({ ...it, cat: 'all', key: it.name.toLowerCase() }))
+    : content.items.map((it, i) => {
+      const name = overrideItemName(it.name, copy.itemNames, i);
+      return { ...it, name, cat: content.itemCats[i], key: name.toLowerCase() };
+    }));
+  const cats = real.length ? [] : content.categories;
+  const catKeys = real.length ? [] : content.catKeys;
 
   const css = baseCss(p) + `
 .search input{width:100%;box-sizing:border-box;padding:13px 14px;font-size:15px;border:1px solid ${p.line};border-radius:8px;outline:none;}
@@ -370,7 +404,7 @@ function buildSearch(ctx) {
     return `<div class="col${i % 2 === 1 ? ' gap' : ''}" [hidden]="${hideExpr}">
       <div class="card">
         <amp-img src="${ph(300, 200, p.tint, p.primary, it.name)}" width="300" height="200" layout="responsive" alt="${enc(it.name)}"></amp-img>
-        <div class="body"><p class="name">${enc(it.name)}</p><p class="price">${formatPrice(it.price, currency)}</p></div>
+        <div class="body"><p class="name">${enc(it.name)}</p>${it.price != null ? `<p class="price">${formatPrice(it.price, currency)}</p>` : ''}</div>
       </div>
     </div>`;
   }).join('');
@@ -388,7 +422,7 @@ ${footerBlock({ brand, defaultText: 'Live catalogue search, right inside your in
   const previewModel = {
     type: 'search', head: applyBrand(headSrc, brand),
     cats: ['all'].concat(catKeys), catLabels: ['All'].concat(cats),
-    items: items.map((it) => ({ name: it.name, price: priceText(it.price, currency), cat: it.cat, key: it.key, image: ph(300, 200, p.tint, p.primary, it.name) })),
+    items: items.map((it) => ({ name: it.name, price: it.price != null ? priceText(it.price, currency) : '', cat: it.cat, key: it.key, image: ph(300, 200, p.tint, p.primary, it.name) })),
   };
   return { scripts: [SCRIPT_BIND, SCRIPT_FORM], css, body, previewModel };
 }

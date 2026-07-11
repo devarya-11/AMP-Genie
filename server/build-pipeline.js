@@ -16,7 +16,7 @@ const { generate, pickModuleId } = require('./generate');
 const { resolveBrandColor, resolveBrandLogo } = require('./brand');
 const { composeContent } = require('./brief-content');
 const {
-  routeBrief, briefSignals, inferVertical, inferTone,
+  routeBrief, briefSignals, briefProducts, inferVertical, inferTone,
 } = require('./brief-router');
 const {
   newId, brandSlug, normalizeBrief, getBrandKit, putBrandKit, putBuild,
@@ -97,10 +97,25 @@ async function createBuild(body, deps = {}) {
       updatedAt: new Date().toISOString(),
     });
   }
+  // Real products (name + price) the user pasted into the brief — these ground
+  // the email in the brand's ACTUAL items instead of the vertical's synthetic
+  // placeholders. Deterministic, like briefSignals.
+  const prod = brief ? briefProducts(brief) : {};
+  const hasRealItems = Array.isArray(prod.items) && prod.items.length >= 2;
   // Tier-1 deterministic keyword routing: a brief's wording picks the module
   // unless the caller set an explicit b.moduleId (which always wins).
   const routed = brief ? routeBrief(brief, vertical) : null;
-  const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId || (routed && routed.moduleId) });
+  const routedModule = routed && routed.moduleId;
+  // If the brief lists real products, bias toward a module that actually shows
+  // them (search for a catalogue-style brief, otherwise the offer reveal)
+  // unless the caller forced a module or the router already picked a product
+  // module.
+  const PRODUCT_MODULES = new Set(['reveal', 'search']);
+  let itemBias = null;
+  if (hasRealItems && !b.moduleId && !(routedModule && PRODUCT_MODULES.has(routedModule))) {
+    itemBias = /\b(menu|catalog|catalogue|collection|range|dishes|products|line-?up|lineup|list)\b/i.test(brief) ? 'search' : 'reveal';
+  }
+  const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId || itemBias || routedModule });
   const plan = brief
     ? await composeContent(brief, {
       moduleId, vertical, brandName: brand, tone,
@@ -113,13 +128,19 @@ async function createBuild(body, deps = {}) {
   // plan is structurally barred from setting these, so the headline it writes
   // and the big "X% OFF" the module renders would otherwise disagree.
   const briefSig = brief ? briefSignals(brief) : {};
+  // Real pasted items (name + price) sit ABOVE the LLM plan (which cannot set
+  // prices anyway) so a real product name is never overwritten, but below an
+  // explicit manual copy override.
+  const briefItems = prod.items && prod.items.length ? { items: prod.items } : {};
   const manualCopy = (b.copy && typeof b.copy === 'object' && !Array.isArray(b.copy)) ? b.copy : {};
-  const copy = { ...logoCopy, ...briefSig, ...(plan || {}), ...manualCopy };
+  const copy = { ...logoCopy, ...briefSig, ...(plan || {}), ...briefItems, ...manualCopy };
   const g = generate({
     brand,
     vertical,
     tone,
-    currency: b.currency,
+    // A currency stated in the pasted prices ("$999" → USD) flows through; an
+    // explicit b.currency still wins, and generate() defaults to INR.
+    currency: b.currency || prod.currency,
     color: colorResolved.primary,
     moduleId,
     counter: b.counter,
@@ -130,8 +151,13 @@ async function createBuild(body, deps = {}) {
   // router's suggestion — kept for audit even though it didn't win.
   const routedFromBrief = routed
     ? {
-      moduleId: routed.moduleId, confidence: routed.confidence, matchedTerms: routed.matchedTerms, applied: !b.moduleId,
+      moduleId: routed.moduleId, confidence: routed.confidence, matchedTerms: routed.matchedTerms, applied: !b.moduleId && !itemBias,
     }
+    : null;
+  // Audit: how many real products the brief supplied, the currency they
+  // implied, and whether they biased the module choice.
+  const productsFromBrief = prod.items && prod.items.length
+    ? { count: prod.items.length, currency: prod.currency, moduleBias: itemBias }
     : null;
   // Provenance of the copy that actually rendered. composeContent doesn't
   // attach a provider name today; if a plan ever carries one, surface it
@@ -167,6 +193,7 @@ async function createBuild(body, deps = {}) {
     colorSource: colorResolved.source,
     brief,
     routedFromBrief,
+    productsFromBrief,
     useCase,
     slateId,
     validation: { pass: validation.pass, errorCount: validation.errorCount, warningCount: validation.warningCount },
@@ -184,6 +211,7 @@ async function createBuild(body, deps = {}) {
     validation,
     brief,
     routedFromBrief,
+    productsFromBrief,
     copySource,
     fallbackHtml: fallback.html,
     fallbackText: fallback.text,
