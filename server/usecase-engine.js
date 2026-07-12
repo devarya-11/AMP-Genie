@@ -960,6 +960,75 @@ function libraryFor(vertical, briefText) {
  * prompts + JSON schemas for the LLM tier
  * ------------------------------------------------------------------ */
 
+// The caliber bar: eight use-cases distilled (one line each) from the team's
+// real winning pitch decks. They are injected into every propose prompt as
+// examples of SPECIFICITY AND BUSINESS GROUNDING — the model is told to match
+// their bar, never to copy them — and they are prompt-only: nothing here can
+// reach an output except through validateUseCase like any other idea. Kept as
+// { title, gist, kpi } objects so a future UI can show the bar itself.
+const EXEMPLARS = [
+  {
+    title: 'Reschedule-in-email',
+    gist: 'appointment reminder whose living layer shows real free slots at open; picking a new slot rewrites the receipt and notifies the clinic',
+    kpi: 'reschedule completion / no-shows',
+  },
+  {
+    title: 'Plus-plan savings calculator',
+    gist: 'payment receipt does quiet math on family-usage steppers against the plan price; the CTA sets up the UPI mandate',
+    kpi: 'plan starts',
+  },
+  {
+    title: 'Lab-report explainer',
+    gist: 'the PDF stays attached; a plain-English accordion decodes it, two taps book a report-review consult, and the retest reminder is consent-gated',
+    kpi: 'consult bookings',
+  },
+  {
+    title: 'Recovery check-in day 3',
+    gist: 'Better/Same/Worse in one tap; branches to a free follow-up or a quiet close',
+    kpi: 'follow-up utilisation',
+  },
+  {
+    title: 'IPO one-tap bid',
+    gist: 'prefilled lot size and cut-off price, OTP-gated submit that returns a reference number',
+    kpi: 'applications from email',
+  },
+  {
+    title: 'MTF margin calculator',
+    gist: 'quantity stepper times leverage with transparent margin math and a risk acknowledgement',
+    kpi: 'MTF activations',
+  },
+  {
+    title: 'Price-drop wishlist reveal',
+    gist: 'a tap reveals the current prices of saved items, fetched at open',
+    kpi: 'recovered carts',
+  },
+  {
+    title: 'Delivery-slot reschedule',
+    gist: 'one-tap slot grid right on the dispatch email',
+    kpi: 'support-ticket deflection',
+  },
+];
+
+function exemplarLines() {
+  return EXEMPLARS.map((e) => `- ${e.title}: ${e.gist} — KPI: ${e.kpi}`).join('\n');
+}
+
+// A voice sample is untrusted pasted text destined for a prompt: markup
+// stripped (the one rule no string may break), trimmed, capped at the kit
+// record's own 1500-char budget. Prompt-only — it never reaches an output.
+function cleanVoiceSample(val) {
+  if (typeof val !== 'string') return '';
+  return val.replace(/[<>]/g, '').trim().slice(0, 1500);
+}
+
+// The shared voice block both prompt builders append (same wording as
+// brief-content's): capped again at 800 chars IN the prompt so a maximal
+// sample can't crowd out the instructions that follow it.
+function voiceLines(voiceSample) {
+  if (!voiceSample) return [];
+  return ['Voice sample — match this brand voice, never copy sentences verbatim:', '"""', String(voiceSample).slice(0, 800), '"""', ''];
+}
+
 // What each module can DO, in business terms — the vocabulary the LLM maps
 // ideas onto. Field lists come from FIELD_SCHEMAS so the prompt can never
 // drift from what validatePlan will actually accept.
@@ -1064,7 +1133,7 @@ function proposeSchema(count) {
 }
 
 function buildProposePrompt({
-  brand, vertical, dossier, briefText, count, feedback, priorTitles,
+  brand, vertical, dossier, briefText, count, feedback, priorTitles, voiceSample,
 }) {
   const lines = [
     `You are a lifecycle-marketing strategist for the brand "${brand}"${vertical ? ` (${vertical} vertical)` : ''}. Propose ${count} interactive AMP email use-cases: real revenue and retention plays a CRM team would actually ship, each mapped to exactly one interaction module below.`,
@@ -1076,6 +1145,12 @@ function buildProposePrompt({
   if (briefText) {
     lines.push('Campaign brief:', '"""', briefText.slice(0, 600), '"""', '');
   }
+  lines.push(...voiceLines(voiceSample));
+  lines.push(
+    'The caliber bar — use-cases that won real pitches (do not copy them; match their specificity and business grounding):',
+    exemplarLines(),
+    '',
+  );
   lines.push('Available interaction modules:', moduleVocabulary(), '');
   if (feedback) {
     lines.push(`Steering feedback from the team: "${feedback}". Let it reshape what you propose.`, '');
@@ -1091,7 +1166,9 @@ function buildProposePrompt({
   return lines.join('\n');
 }
 
-function buildShapePrompt({ brand, dossier, idea }) {
+function buildShapePrompt({
+  brand, dossier, idea, voiceSample,
+}) {
   return [
     `A teammate pitched this AMP email idea for the brand "${brand}". Shape THIS exact idea into a structured use-case — do not replace it with a different idea and do not water it down. Pick the single best-fitting interaction module and keep the teammate's intent recognisable in the title.`,
     '',
@@ -1103,6 +1180,7 @@ function buildShapePrompt({ brand, dossier, idea }) {
     'Brand dossier (context only, never quote it verbatim):',
     dossierLines(dossier),
     '',
+    ...voiceLines(voiceSample),
     'Available interaction modules:',
     moduleVocabulary(),
     '',
@@ -1185,13 +1263,15 @@ function clampCount(n) {
   return Math.max(1, Math.min(8, v));
 }
 
-// input: { dossier, brief, count, feedback, prior } — dossier is the brand
-// dossier ({ name, vertical, summary, products, voice, campaigns }, all
-// optional), brief the free-text campaign brief, feedback a steering note
+// input: { dossier, brief, count, feedback, prior, voiceSample } — dossier is
+// the brand dossier ({ name, vertical, summary, products, voice, campaigns },
+// all optional), brief the free-text campaign brief, feedback a steering note
 // from the team, prior earlier use-cases (or their titles) the LLM should
-// replace/improve rather than repeat. In the zero-key tier feedback/prior
-// are accepted but deterministically ignored — the library has no dial to
-// turn, and erroring on them would punish the caller for a missing API key.
+// replace/improve rather than repeat, voiceSample the kit's pasted real brand
+// copy (sanitized here; prompt-only, never in outputs). In the zero-key tier
+// feedback/prior/voiceSample are accepted but deterministically ignored — the
+// library has no dial to turn, and erroring on them would punish the caller
+// for a missing API key.
 // opts: { providers (DI array of provider thunks), timeoutMs (tests only) }.
 // Returns { useCases: [{ id, title, businessGoal, trigger, moduleId, kpi,
 // contentPlan }], source: 'llm' | 'library' } and NEVER throws.
@@ -1204,6 +1284,7 @@ async function proposeUseCases(input = {}, opts = {}) {
   const briefText = typeof args.brief === 'string' ? args.brief.trim() : '';
   const feedback = typeof args.feedback === 'string' ? args.feedback.trim().slice(0, 600) : '';
   const priorTitles = asStringList(args.prior, 12);
+  const voiceSample = cleanVoiceSample(args.voiceSample);
 
   const providers = Array.isArray(opts.providers) ? opts.providers : defaultProviders();
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : TIMEOUT_MS;
@@ -1212,7 +1293,7 @@ async function proposeUseCases(input = {}, opts = {}) {
   const seen = new Set(); // lowercased titles, so an LLM item never shadows its library twin
   if (providers.length) {
     const prompt = buildProposePrompt({
-      brand, vertical, dossier, briefText, count, feedback, priorTitles,
+      brand, vertical, dossier, briefText, count, feedback, priorTitles, voiceSample,
     });
     const raw = await callFirstProvider(providers, prompt, proposeSchema(count), timeoutMs);
     const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.useCases) ? raw.useCases : []);
@@ -1247,24 +1328,29 @@ async function proposeUseCases(input = {}, opts = {}) {
   return { useCases: out.map((uc) => ({ id: newId(), ...uc })), source };
 }
 
-// input: { idea, dossier } — idea is free text from the team (e.g. "lab
-// report opener like Practo"). Returns one use-case in the same shape as
-// proposeUseCases' items, or null ONLY for an empty/whitespace idea. The LLM
-// tier shapes the idea into the structure; any LLM failure degrades to the
-// deterministic shape (routeBrief picks the module, the idea becomes the
-// title) — never to null, because the team's idea is always worth keeping.
+// input: { idea, dossier, voiceSample } — idea is free text from the team
+// (e.g. "lab report opener like Practo"), voiceSample the kit's pasted real
+// brand copy (sanitized here; prompt-only, never in outputs). Returns one
+// use-case in the same shape as proposeUseCases' items, or null ONLY for an
+// empty/whitespace idea. The LLM tier shapes the idea into the structure; any
+// LLM failure degrades to the deterministic shape (routeBrief picks the
+// module, the idea becomes the title) — never to null, because the team's
+// idea is always worth keeping.
 async function shapeUserIdea(input = {}, opts = {}) {
   const args = (input && typeof input === 'object') ? input : {};
   const idea = typeof args.idea === 'string' ? args.idea.trim() : '';
   if (!idea) return null;
   const dossier = (args.dossier && typeof args.dossier === 'object') ? args.dossier : {};
   const brand = safeBrand(dossier.name);
+  const voiceSample = cleanVoiceSample(args.voiceSample);
 
   const providers = Array.isArray(opts.providers) ? opts.providers : defaultProviders();
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : TIMEOUT_MS;
 
   if (providers.length) {
-    const raw = await callFirstProvider(providers, buildShapePrompt({ brand, dossier, idea }), useCaseSchema(), timeoutMs);
+    const raw = await callFirstProvider(providers, buildShapePrompt({
+      brand, dossier, idea, voiceSample,
+    }), useCaseSchema(), timeoutMs);
     let branded = null;
     try {
       const uc = raw ? validateUseCase(raw) : null;
@@ -1290,5 +1376,5 @@ async function shapeUserIdea(input = {}, opts = {}) {
 }
 
 module.exports = {
-  proposeUseCases, shapeUserIdea, validateUseCase, USECASE_LIBRARY,
+  proposeUseCases, shapeUserIdea, validateUseCase, USECASE_LIBRARY, EXEMPLARS,
 };

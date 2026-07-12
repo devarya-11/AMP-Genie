@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.2 — proper emailers: assets, voice, exemplars (2026-07-12)
+
+- **Brand kit assets** — the Brands view gains an editor: logo URL, hero
+  image, up to 8 real products (name/price/image) and a **brand voice
+  sample**, saved once per brand (`GET/POST /brandkit/:slug`, '' clears a
+  field, absent keeps it) and consumed by every future build.
+- **Hero image band** — every module renders a full-width hero under the
+  header when one exists (kit > live og:image > manual copy precedence),
+  validator-gated; product tiles use REAL images when supplied (https-only;
+  a bad URL degrades to the placeholder, never breaks the item).
+- **Voice fingerprint** — the kit's pasted voice sample is injected into
+  both the copy LLM and the ideation LLM as "match this voice".
+- **Exemplar-tuned ideation** — the proposal prompt now carries the caliber
+  bar: 8 use-cases distilled from the team's real winning decks (reschedule
+  in-email, plan calculator, lab-report explainer, IPO one-tap bid, MTF
+  margin calculator, price-drop reveal…).
+- Real logos (shipped same day): Google favicon tier + .in domains.
+- Suite: 263 → 289 unit tests; 21 e2e green.
+
+
 ## v3.1 — refine loop + LLM tier live (2026-07-12)
 
 v3 is complete: every build can now be steered after the fact, and the

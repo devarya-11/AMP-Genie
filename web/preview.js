@@ -45,6 +45,9 @@
         el('p', { class: 'pv-muted', text: 'Use this code at checkout' }),
         el('span', { class: 'pv-code', style: `border-color:${p.accent};color:${p.primaryDark}`, text: m.code }),
         el('div', { class: 'pv-row' }, m.items.map((it) => el('div', { class: 'pv-card' }, [
+          // A real product image exists only when the brand kit / pasted
+          // brief supplied one — mirrors the AMP part exactly.
+          it.image ? el('img', { src: it.image, style: 'width:100%;display:block' }) : null,
           el('div', { class: 'pv-card-name', text: it.name }),
           it.price ? el('div', { class: 'pv-card-price', style: `color:${p.primary}`, text: it.price }) : null,
         ]))),
@@ -80,7 +83,13 @@
       if (!visible.length) { grid.appendChild(el('div', { class: 'pv-empty', text: 'No products match.' })); return; }
       visible.forEach((it) => {
         grid.appendChild(el('div', { class: 'pv-card' }, [
-          el('img', { src: it.image, style: 'width:100%;display:block' }),
+          // it.image is now the REAL product image, present only when one was
+          // supplied — synthesize the same neutral placeholder the AMP part
+          // falls back to when it is absent.
+          el('img', {
+            src: it.image || ('https://placehold.co/300x200/EDEDF2/1d1d2b?text=' + encodeURIComponent(it.name)),
+            style: 'width:100%;display:block',
+          }),
           el('div', { class: 'pv-card-name', text: it.name }),
           it.price ? el('div', { class: 'pv-card-price', style: `color:${p.primary}`, text: it.price }) : null,
         ]));
@@ -356,6 +365,15 @@
       el('h1', { text: previewModel.head }),
     ]);
     container.appendChild(header);
+    // Hero band — mirrors the AMP part's full-width hero between header and
+    // body, present on every module when a hero image was resolved/saved.
+    if (previewModel.heroUrl) {
+      container.appendChild(el('img', {
+        src: previewModel.heroUrl,
+        style: 'width:100%;display:block',
+        'data-testid': 'preview-hero',
+      }));
+    }
     const body = el('div', { class: 'pv-body', 'data-testid': 'preview-body' });
     container.appendChild(body);
     const fn = RENDERERS[moduleId];

@@ -329,6 +329,13 @@ button.sm{padding:8px 12px;font-size:13px}
 .uc-refine{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .uc-refine input{flex:1;min-width:220px}
 
+/* ---- brand kit editor ---- */
+.kit-products{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
+.kit-product-row{display:grid;grid-template-columns:2fr 90px 3fr 32px;gap:8px;align-items:center}
+.kit-product-row input{padding:9px 11px;font-size:13px}
+.kit-product-row .uc-remove{justify-self:center}
+@media(max-width:880px){.kit-product-row{grid-template-columns:1fr 80px;grid-auto-rows:auto}}
+
 /* ---- pitches list ---- */
 .pitches-list{display:flex;flex-direction:column;gap:8px;margin-top:6px}
 .pitch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);

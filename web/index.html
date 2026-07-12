@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -287,6 +287,40 @@
         </div>
       </div>
     </section>
+
+    <!-- Brand kit assets: paste once, every future build for this brand uses them -->
+    <section id="kitCard" class="card hidden">
+      <div class="wstep-hdr"><svg class="ic accent"><use href="#i-star"/></svg> Brand kit assets
+        <span class="hint">paste once &mdash; real logo, hero &amp; product images and brand voice flow into every build for this brand</span>
+      </div>
+      <div class="qgrid">
+        <div class="ctrl">
+          <label for="kLogo">Logo URL <span class="hint">auto-detected via Google if blank</span></label>
+          <input id="kLogo" type="url" placeholder="https://&hellip;/logo.png">
+        </div>
+        <div class="ctrl">
+          <label for="kHero">Hero image URL <span class="hint">banner under the header</span></label>
+          <input id="kHero" type="url" placeholder="https://&hellip;/campaign-hero.jpg">
+        </div>
+        <div class="ctrl">
+          <label for="kColor">Brand colour <span class="hint">#rrggbb &mdash; blank keeps auto</span></label>
+          <input id="kColor" type="text" maxlength="7" placeholder="#00b386">
+        </div>
+      </div>
+      <div class="ctrl" style="margin-top:12px">
+        <label>Real products <span class="hint">name &middot; price (optional) &middot; image URL (optional) &mdash; used instead of placeholders</span></label>
+        <div id="kProducts" class="kit-products"></div>
+        <button id="kAddProduct" class="ghost sm" type="button">+ add product</button>
+      </div>
+      <div class="brief-field">
+        <label class="fieldlabel" for="kVoice">Brand voice sample <span class="hint">paste a real email/caption from the brand &mdash; the genie writes copy in this voice</span></label>
+        <textarea id="kVoice" rows="4" placeholder="Paste 2&ndash;10 sentences of the brand&rsquo;s actual copy&hellip;"></textarea>
+      </div>
+      <div class="wstep-actions">
+        <span id="kMsg" class="copy-msg" style="flex:1"></span>
+        <button id="kSave" class="primary"><svg class="ic"><use href="#i-check"/></svg> Save brand kit</button>
+      </div>
+    </section>
   </section>
 
   <!-- ======================= HISTORY ======================= -->
@@ -304,7 +338,7 @@
   </main>
 </div>
 
-<script src="preview.js?v=5"></script>
-<script src="app.js?v=6"></script>
+<script src="preview.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

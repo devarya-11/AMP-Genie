@@ -193,6 +193,19 @@ function overrideItemName(base, itemNames, i) {
   return (typeof v === 'string' && v.trim()) ? v.trim() : base;
 }
 
+// An image URL destined for an amp-img src. AMP4EMAIL rejects every src
+// protocol except https (http: included — verified against the vendored
+// validator: INVALID_URL_PROTOCOL), so this is stricter than safeHttpUrl:
+// only a plain https URL of sane length survives. The character class
+// refusing whitespace, quotes and angle brackets doubles as the markup rule —
+// a URL that '<'/'>'-stripping would alter is dropped whole, never truncated
+// or repaired. Rejection means "no image", so every caller falls back to its
+// ph() placeholder (tiles) or to nothing at all (hero band).
+function validImgUrl(v) {
+  const s = (typeof v === 'string') ? v.trim() : '';
+  return (s.length <= 500 && /^https:\/\/[^\s"'<>]+$/i.test(s)) ? s : null;
+}
+
 // Real, user-supplied items pasted into the brief and threaded through as
 // copy.items — these REPLACE the vertical's synthetic placeholders so the email
 // shows the brand's actual products. Only a deterministic caller ever sets
@@ -200,18 +213,24 @@ function overrideItemName(base, itemNames, i) {
 // A non-empty name is required; a price is OPTIONAL — a finite positive price
 // is kept, anything else drops the price entirely so a name-only announcement
 // (restaurants, new stores, a featured line-up) still lays out its real items
-// without inventing a number. Capped so a runaway list can't bloat the render.
-// Returns [] when nothing valid, so callers fall back to content.items and the
-// output stays byte-identical to before when no real items were supplied.
+// without inventing a number. An image is OPTIONAL too — kept only as a
+// validImgUrl-clean https URL, so a bad image never drops the item, just its
+// picture (the tile falls back to its ph() placeholder). Capped so a runaway
+// list can't bloat the render. Returns [] when nothing valid, so callers fall
+// back to content.items and the output stays byte-identical to before when no
+// real items were supplied.
 function validItems(items) {
   if (!Array.isArray(items)) return [];
   return items
     .filter((it) => it && typeof it.name === 'string' && it.name.trim())
     .map((it) => {
       const n = Number(it.price);
-      return (Number.isFinite(n) && n > 0)
+      const out = (Number.isFinite(n) && n > 0)
         ? { name: it.name.trim(), price: Math.round(n) }
         : { name: it.name.trim() };
+      const image = validImgUrl(it.image);
+      if (image) out.image = image;
+      return out;
     })
     .slice(0, 8);
 }
@@ -230,15 +249,24 @@ function siteGuess(brand) {
 // generated placeholder image are the fallback, never the first choice.
 // `head` arrives pre-encoded (callers do enc(applyBrand(...)) before passing
 // it in, matching the existing pattern).
+// Also the mount point for the optional hero band: every module renders its
+// header through here, so a valid copy.heroUrl paints a full-width brand
+// photograph between the header and the module body on all of them at once.
+// A missing or invalid heroUrl appends the empty string, keeping the returned
+// markup byte-identical to a hero-less render.
 function headerBlock({ brand, palette: p, head, copy = {} }) {
   const site = copy.site || siteGuess(brand);
   const logo = copy.logoUrl || ph(96, 32, p.primary, '#ffffff', (brand || 'BRAND').trim().slice(0, 10));
+  const hero = validImgUrl(copy.heroUrl);
+  const heroBand = hero
+    ? `\n<div class="hero"><amp-img src="${enc(hero)}" width="600" height="240" layout="responsive" alt="${enc(brand)}"></amp-img></div>`
+    : '';
   return `<div class="hdr">
   <a class="brand-link" href="${enc(site)}" target="_blank" rel="noopener noreferrer" aria-label="${enc(brand)}">
     <amp-img class="logo" src="${logo}" width="96" height="32" layout="fixed" alt="${enc(brand)} logo"></amp-img>
   </a>
   <h1>${head}</h1>
-</div>`;
+</div>${heroBand}`;
 }
 
 // Shared footer: brand name plus either an override footer line or the
@@ -348,7 +376,7 @@ ${headerBlock({ brand, palette: p, head, copy })}
     <div class="row">
       ${items.map((it, i) => `<div class="col${i === 1 ? ' gap' : ''}">
         <div class="card">
-          <amp-img src="${ph(300, 200, p.tint, p.primary, it.name)}" width="300" height="200" layout="responsive" alt="${enc(it.name)}"></amp-img>
+          <amp-img src="${it.image ? enc(it.image) : ph(300, 200, p.tint, p.primary, it.name)}" width="300" height="200" layout="responsive" alt="${enc(it.name)}"></amp-img>
           <div class="body"><p class="name">${enc(it.name)}</p>${it.price != null ? `<p class="price">${formatPrice(it.price, currency)}</p>` : ''}</div>
         </div>
       </div>`).join('')}
@@ -360,7 +388,7 @@ ${footerBlock({ brand, defaultText: 'You received this because you opted in to o
   const previewModel = {
     type: 'reveal', head: applyBrand(headSrc, brand), code, discount,
     teaserText: teaserSrc, ctaLabel: ctaSrc,
-    items: items.map((it) => ({ name: it.name, price: it.price != null ? priceText(it.price, currency) : '' })),
+    items: items.map((it) => ({ name: it.name, price: it.price != null ? priceText(it.price, currency) : '', ...(it.image ? { image: it.image } : {}) })),
     image: img,
   };
   return { scripts: [SCRIPT_BIND], css, body, previewModel };
@@ -399,11 +427,14 @@ function buildSearch(ctx) {
     return `<span class="pill" role="button" tabindex="0" on="tap:AMP.setState({s:{cat:'${k}'}})" [class]="s.cat == '${k}' ? 'pill on' : 'pill'">${enc(label)}</span>`;
   }).join('');
 
+  // A real product image replaces the tile's ph() placeholder as a STATIC
+  // src per card — never bound, so the [hidden] filter expressions above it
+  // stay untouched and no [src] ever reaches the document.
   const cards = items.map((it, i) => {
     const hideExpr = `(s.cat != 'all' &amp;&amp; s.cat != '${it.cat}') || (s.q != '' &amp;&amp; '${jsStr(it.key)}'.indexOf(s.q) == -1)`;
     return `<div class="col${i % 2 === 1 ? ' gap' : ''}" [hidden]="${hideExpr}">
       <div class="card">
-        <amp-img src="${ph(300, 200, p.tint, p.primary, it.name)}" width="300" height="200" layout="responsive" alt="${enc(it.name)}"></amp-img>
+        <amp-img src="${it.image ? enc(it.image) : ph(300, 200, p.tint, p.primary, it.name)}" width="300" height="200" layout="responsive" alt="${enc(it.name)}"></amp-img>
         <div class="body"><p class="name">${enc(it.name)}</p>${it.price != null ? `<p class="price">${formatPrice(it.price, currency)}</p>` : ''}</div>
       </div>
     </div>`;
@@ -419,10 +450,14 @@ ${headerBlock({ brand, palette: p, head, copy })}
 </div>
 ${footerBlock({ brand, defaultText: 'Live catalogue search, right inside your inbox.', copy })}`;
 
+  // Item image is the REAL product photograph only, present only when one was
+  // supplied — synthetic ph() tiles are a render detail of the AMP part, not
+  // product data, so the fallback (and the web preview, which rebuilds its own
+  // placeholder) can trust that `image` always means real photography.
   const previewModel = {
     type: 'search', head: applyBrand(headSrc, brand),
     cats: ['all'].concat(catKeys), catLabels: ['All'].concat(cats),
-    items: items.map((it) => ({ name: it.name, price: it.price != null ? priceText(it.price, currency) : '', cat: it.cat, key: it.key, image: ph(300, 200, p.tint, p.primary, it.name) })),
+    items: items.map((it) => ({ name: it.name, price: it.price != null ? priceText(it.price, currency) : '', cat: it.cat, key: it.key, ...(it.image ? { image: it.image } : {}) })),
   };
   return { scripts: [SCRIPT_BIND, SCRIPT_FORM], css, body, previewModel };
 }
@@ -1148,8 +1183,9 @@ function generate(opts = {}) {
   if (!moduleId || !MODULES[moduleId]) {
     moduleId = RANDOM_POOL_IDS[Math.floor(rng() * RANDOM_POOL_IDS.length)];
   }
+  const copy = opts.copy || {};
   const mod = MODULES[moduleId];
-  const built = mod.build({ brand, vertical, tone, palette, content, t, currency, rng, copy: opts.copy || {} });
+  const built = mod.build({ brand, vertical, tone, palette, content, t, currency, rng, copy });
   const title = `${brand} — ${mod.name}`;
   const ampHtml = shell({ title, scripts: built.scripts, css: built.css, body: built.body });
 
@@ -1160,7 +1196,11 @@ function generate(opts = {}) {
     brand, vertical, tone, currency,
     palette,
     ampHtml,
-    previewModel: built.previewModel,
+    // The hero rides at the previewModel top level for EVERY module (raw URL
+    // or null, same validImgUrl verdict headerBlock rendered against) so the
+    // fallback and the web preview mirror the AMP part's hero band without
+    // re-deriving the sanitation rule.
+    previewModel: { ...built.previewModel, heroUrl: validImgUrl(copy.heroUrl) },
   };
 }
 

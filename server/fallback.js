@@ -96,9 +96,18 @@ function itemTable(items, p, currency) {
     const o = (it && typeof it === 'object') ? it : {};
     const name = str(o.name, 'Featured pick');
     const cat = str(o.cat);
+    // previewModel item images are real product photography only (generate.js
+    // never puts its synthetic placeholders here). Outlook blocks remote
+    // images by default, so the thumb is purely additive to the text-first
+    // row: name and price cells keep their layout, and a blocked thumb
+    // collapses to its alt text — the item name — inside a 48px box.
+    const img = safeUrl(o.image);
+    const thumb = img
+      ? `<img src="${enc(img)}" width="48" height="48" alt="${enc(name)}" style="vertical-align:middle;border:0;border-radius:6px;margin-right:10px;">`
+      : '';
     const cell = `padding:10px 2px;border-bottom:1px solid ${p.line};font-family:${FONT};font-size:14px;`;
     return `<tr>
-<td style="${cell}color:${p.ink};">${enc(name)}${cat ? `<span style="color:#6b6b7b;font-size:12px;"> &#8226; ${enc(cat)}</span>` : ''}</td>
+<td style="${cell}color:${p.ink};">${thumb}${enc(name)}${cat ? `<span style="color:#6b6b7b;font-size:12px;"> &#8226; ${enc(cat)}</span>` : ''}</td>
 <td align="right" style="${cell}font-weight:bold;color:${p.primary};">${priceHtml(o.price, currency)}</td>
 </tr>`;
   }).join('\n');
@@ -373,12 +382,23 @@ function rendererFor(moduleId, pm) {
  * Document assembly
  * ------------------------------------------------------------------ */
 
-function documentHtml({ brand, moduleName, head, logo, site, p, moduleHtml }) {
+function documentHtml({ brand, moduleName, head, logo, site, hero, p, moduleHtml }) {
   const brandEl = logo
     ? `<img src="${enc(logo)}" width="96" height="32" alt="${enc(brand)} logo" style="display:block;border:0;">`
     : `<span style="font-family:${FONT};font-size:20px;font-weight:bold;letter-spacing:0.5px;color:${p.primary};">${enc(brand)}</span>`;
   const siteLink = site
     ? ` &#8226; <a href="${enc(site)}" style="color:${p.primary};text-decoration:none;">${enc(site.replace(/^https?:\/\//i, ''))}</a>`
+    : '';
+  // The optional hero band mirrors the AMP part's: full-width after the brand
+  // header. The width attribute pins Outlook's table renderer to 600 while
+  // the style keeps it fluid elsewhere; no fixed height, so when Outlook
+  // blocks the remote image the row collapses to its alt text (the brand
+  // name) and the text-first layout below never moves.
+  const heroRow = hero
+    ? `
+<tr>
+<td><img src="${enc(hero)}" width="600" alt="${enc(brand)}" style="display:block;border:0;width:100%;max-width:600px;height:auto;"></td>
+</tr>`
     : '';
   return `<!doctype html>
 <html>
@@ -399,7 +419,7 @@ function documentHtml({ brand, moduleName, head, logo, site, p, moduleHtml }) {
 <td style="padding:12px 24px 18px;border-bottom:1px solid ${p.line};">
 <h1 style="margin:0;font-family:${FONT};font-size:21px;line-height:1.3;color:${p.primary};">${enc(head)}</h1>
 </td>
-</tr>
+</tr>${heroRow}
 <tr>
 <td style="padding:20px 24px;">
 ${moduleHtml}
@@ -454,7 +474,7 @@ function buildFallback(opts) {
     if (!mod.lines.length) mod.lines = [GENERIC_LINE];
 
     const html = documentHtml({
-      brand, moduleName, head, logo: safeUrl(o.logoUrl), site, p, moduleHtml: mod.html,
+      brand, moduleName, head, logo: safeUrl(o.logoUrl), site, hero: safeUrl(pm.heroUrl), p, moduleHtml: mod.html,
     });
     const text = [brand, head, '']
       .concat(mod.lines)

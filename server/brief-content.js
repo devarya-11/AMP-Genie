@@ -270,15 +270,21 @@ function scorePlan(plan, fields, tone) {
 }
 
 function buildPrompt({
-  moduleId, brandName, vertical, briefText, fieldList, tone,
+  moduleId, brandName, vertical, briefText, fieldList, tone, voiceSample,
 }) {
+  // Real pasted brand copy (the kit's voiceSample) steers STYLE only — capped
+  // hard so a long sample can't crowd out the instructions that follow it,
+  // and absent it the prompt stays byte-identical to before.
+  const voiceBlock = voiceSample
+    ? `\nVoice sample — match this brand voice, never copy sentences verbatim:\n"""\n${String(voiceSample).slice(0, 800)}\n"""\n`
+    : '';
   return `You are writing short marketing copy fragments for one AMP email module ("${moduleId}") for the brand "${brandName || 'the brand'}"${vertical ? ` in the "${vertical}" vertical` : ''}${tone ? `, in a ${tone} tone` : ''}.
 
 Campaign brief (context for tone/subject only — never quote it verbatim, never include HTML, markdown, or links):
 """
 ${briefText}
 """
-
+${voiceBlock}
 Write plain-text copy for any of these fields you can meaningfully improve on a generic default: ${fieldList}. Each value must be a short single sentence or phrase, under ${MAX_LEN} characters, no HTML, no markdown, no quotation marks. Omit any field you are not confident about.`;
 }
 
@@ -340,7 +346,9 @@ function defaultProviders(opts) {
 }
 
 // briefText: the free-text campaign brief (already trimmed/normalized by the
-// caller; null/empty means "skip"). ctx: { moduleId, vertical, brandName }.
+// caller; null/empty means "skip"). ctx: { moduleId, vertical, brandName,
+// tone, voiceSample } — voiceSample is optional pasted brand copy (already
+// sanitized by the caller) that steers the prompt only, never the output.
 // opts.client: an injectable Anthropic SDK client instance, for tests/back-
 // compat — folded into the default Claude provider when present.
 // opts.providers: full override — an array of { name, call } descriptors,
@@ -350,7 +358,7 @@ function defaultProviders(opts) {
 // uniformly to every provider in the fan-out.
 async function composeContent(briefText, ctx = {}, opts = {}) {
   const {
-    moduleId, vertical, brandName, tone,
+    moduleId, vertical, brandName, tone, voiceSample,
   } = ctx;
   const moduleSchema = FIELD_SCHEMAS[moduleId];
   const fields = fieldsFor(moduleId);
@@ -362,7 +370,7 @@ async function composeContent(briefText, ctx = {}, opts = {}) {
   const schema = schemaFor(moduleId);
   const fieldList = fields.map((key) => describeField(key, moduleSchema[key])).join('; ');
   const prompt = buildPrompt({
-    moduleId, brandName, vertical, briefText, fieldList, tone,
+    moduleId, brandName, vertical, briefText, fieldList, tone, voiceSample,
   });
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : TIMEOUT_MS;
 

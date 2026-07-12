@@ -16,7 +16,7 @@ const { buildDossier } = brandResearchMod;
 const { proposeUseCases, shapeUserIdea } = usecaseEngineMod;
 // normalizeBrief comes from store.js, NOT server/history.js — history touches
 // __dirname/fs at module load, which does not exist in the Workers bundle.
-const { normalizeBrief } = storeMod;
+const { normalizeBrief, brandSlug, getBrandKit } = storeMod;
 
 // The wire-shape is intentional, not a pass-through — new dossier internals
 // (hashes, cache bookkeeping) must not leak into the UI contract by accident.
@@ -46,10 +46,20 @@ export async function onRequestPost({ request, env }) {
     const dossier = await buildDossier({
       brandName, notes, kv: env.HISTORY, force: !!b.forceResearch,
     });
+    // The brand kit (if the team saved one) lends its pasted voice sample to
+    // every ideation prompt, and the response carries two boolean UI hints —
+    // never the kit record itself, which stays a server-side concern.
+    const kit = await getBrandKit(env.HISTORY, brandSlug(brandName));
+    const voiceSample = (kit && typeof kit.voiceSample === 'string') ? kit.voiceSample : null;
+    const kitFlags = {
+      hasKit: !!kit,
+      kitHasAssets: !!(kit && (kit.logoUrl || kit.heroUrl || voiceSample
+        || (Array.isArray(kit.products) && kit.products.length))),
+    };
 
     if (typeof b.idea === 'string' && b.idea.trim()) {
-      const useCase = await shapeUserIdea({ idea: b.idea, dossier });
-      return json({ useCase, dossier: publicDossier(dossier) });
+      const useCase = await shapeUserIdea({ idea: b.idea, dossier, voiceSample });
+      return json({ useCase, dossier: { ...publicDossier(dossier), ...kitFlags } });
     }
 
     const { useCases, source } = await proposeUseCases({
@@ -58,8 +68,9 @@ export async function onRequestPost({ request, env }) {
       count: b.count,
       feedback: typeof b.feedback === 'string' ? b.feedback.slice(0, 500) : null,
       prior: Array.isArray(b.prior) ? b.prior.slice(0, 16).map(String) : null,
+      voiceSample,
     });
-    return json({ useCases, source, dossier: publicDossier(dossier) });
+    return json({ useCases, source, dossier: { ...publicDossier(dossier), ...kitFlags } });
   } catch (e) {
     return json({ error: e.message }, 400);
   }

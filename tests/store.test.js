@@ -7,6 +7,7 @@ const path = require('node:path');
 const {
   newId, brandSlug,
   getBuild, putBuild, getSlate, putSlate, getBrandKit, putBrandKit,
+  sanitizeKitPatch, mergeKitPatch,
 } = require('../server/store');
 const { createFsKv, DATA_DIR } = require('../server/store-fs');
 
@@ -97,11 +98,22 @@ test('getBuild refuses a hostile id without ever touching the kv', async () => {
   assert.strictEqual(await getBuild(tripwireKv(), ''), null);
 });
 
-test('putBrandKit rejects a kit whose primary is not a #rrggbb hex', async () => {
+test('putBrandKit still rejects a kit whose PRESENT primary is not a #rrggbb hex', async () => {
   assert.strictEqual(await putBrandKit(tripwireKv(), sampleKit({ primary: 'red' })), false);
   assert.strictEqual(await putBrandKit(tripwireKv(), sampleKit({ primary: '#ff00' })), false);
   assert.strictEqual(await putBrandKit(tripwireKv(), sampleKit({ primary: '#ff00gg' })), false);
-  assert.strictEqual(await putBrandKit(tripwireKv(), sampleKit({ primary: undefined })), false);
+  assert.strictEqual(await putBrandKit(tripwireKv(), sampleKit({ primary: '' })), false,
+    "'' is a malformed value, not an absence");
+});
+
+test('putBrandKit accepts an assets-only kit with no primary (v3.2)', async () => {
+  const kv = fakeKv();
+  const kit = sampleKit({ heroUrl: 'https://www.tajhotels.com/rooms.jpg' });
+  delete kit.primary;
+  assert.strictEqual(await putBrandKit(kv, kit), true);
+  assert.deepStrictEqual(await getBrandKit(kv, kit.slug), kit);
+  assert.strictEqual(await putBrandKit(fakeKv(), sampleKit({ primary: null })), true,
+    'null counts as absent, same as undefined');
 });
 
 test('every put* returns false and every get* returns null when kv is falsy', async () => {
@@ -112,6 +124,82 @@ test('every put* returns false and every get* returns null when kv is falsy', as
   assert.strictEqual(await getBuild(null, build.id), null);
   assert.strictEqual(await getSlate(null, newId()), null);
   assert.strictEqual(await getBrandKit(null, 'tajhotels'), null);
+});
+
+// ---- sanitizeKitPatch / mergeKitPatch (v3.2 kit editor) -----------------------
+
+test('sanitizeKitPatch allowlists contract fields, strips <>, normalises hex', () => {
+  const patch = sanitizeKitPatch({
+    name: '<b>Taj</b> Hotels', primary: '#AABBCC', accent: '#B08D4C', vertical: 'Food',
+    slug: 'hostile', source: 'hax', updatedAt: 'yesterday', updatedBy: 'me', junk: 'x',
+  });
+  assert.strictEqual(patch.name, 'bTaj/b Hotels', 'angle brackets stripped, text kept');
+  assert.strictEqual(patch.primary, '#aabbcc');
+  assert.strictEqual(patch.accent, '#b08d4c');
+  assert.strictEqual(patch.vertical, 'Food');
+  assert.deepStrictEqual(Object.keys(patch).sort(), ['accent', 'name', 'primary', 'vertical'],
+    'slug/source/updatedAt/updatedBy and unknown keys must never come through a patch');
+});
+
+test('sanitizeKitPatch drops non-http(s) urls, junk verticals and bad hex; null when nothing valid remains', () => {
+  assert.strictEqual(sanitizeKitPatch({ logoUrl: 'javascript:alert(1)' }), null);
+  assert.strictEqual(sanitizeKitPatch({ site: 'javascript:alert(1)', heroUrl: 'data:text/html,x' }), null);
+  assert.strictEqual(sanitizeKitPatch({ vertical: 'Underwater', primary: 'red' }), null);
+  assert.strictEqual(sanitizeKitPatch({}), null);
+  assert.strictEqual(sanitizeKitPatch(null), null);
+  assert.strictEqual(sanitizeKitPatch([1, 2]), null);
+  const ok = sanitizeKitPatch({ heroUrl: 'https://cdn.example.com/hero.jpg', logoUrl: 'ftp://x/y' });
+  assert.deepStrictEqual(ok, { heroUrl: 'https://cdn.example.com/hero.jpg' },
+    'a valid field survives its invalid neighbours');
+});
+
+test('sanitizeKitPatch products: nameless/junk rows dropped, price -3 dropped, capped at 8', () => {
+  const nine = [];
+  for (let i = 1; i <= 9; i++) nine.push({ name: 'Item ' + i, price: i * 100 });
+  const patch = sanitizeKitPatch({ products: nine });
+  assert.strictEqual(patch.products.length, 8, '9 valid products cap to 8');
+  assert.deepStrictEqual(patch.products[0], { name: 'Item 1', price: 100 });
+
+  const messy = sanitizeKitPatch({
+    products: [
+      { name: '<i>Good</i>', price: -3, image: 'javascript:alert(1)' }, // bad price+image dropped, row kept
+      { name: '', price: 5 },   // no name -> row dropped
+      { price: 10 },            // no name -> row dropped
+      'junk',                   // not an object -> row dropped
+      { name: 'Pic', price: '499', image: 'https://cdn.example.com/p.jpg' },
+    ],
+  });
+  assert.deepStrictEqual(messy.products, [
+    { name: 'iGood/i' },
+    { name: 'Pic', price: 499, image: 'https://cdn.example.com/p.jpg' },
+  ]);
+});
+
+test('sanitizeKitPatch voiceSample: 1600 chars TRUNCATE to 1500 (documented choice), markup stripped', () => {
+  const patch = sanitizeKitPatch({ voiceSample: '<p>' + 'a'.repeat(1600) });
+  assert.strictEqual(patch.voiceSample.length, 1500);
+  assert.ok(!/[<>]/.test(patch.voiceSample), 'no angle bracket may survive');
+});
+
+test("explicit '' clears logoUrl/heroUrl/voiceSample through the merge; absent (or invalid) keeps", () => {
+  // The merge itself lives in store.js as mergeKitPatch (exported so the
+  // route handler and this test share ONE implementation of clear-vs-keep).
+  const existing = sampleKit({
+    heroUrl: 'https://www.tajhotels.com/rooms.jpg', voiceSample: 'Warm, unhurried luxury.',
+  });
+  const cleared = mergeKitPatch(existing, sanitizeKitPatch({ logoUrl: '', voiceSample: '' }));
+  assert.ok(!('logoUrl' in cleared), "'' must delete the key from the record");
+  assert.ok(!('voiceSample' in cleared));
+  assert.strictEqual(cleared.heroUrl, existing.heroUrl, 'untouched field keeps its value');
+  assert.strictEqual(cleared.primary, existing.primary);
+
+  const kept = mergeKitPatch(existing, sanitizeKitPatch({ name: 'Taj' }));
+  assert.strictEqual(kept.logoUrl, existing.logoUrl, 'absent field keeps its value');
+  assert.strictEqual(kept.voiceSample, existing.voiceSample);
+  assert.strictEqual(kept.name, 'Taj');
+
+  const typo = mergeKitPatch(existing, sanitizeKitPatch({ logoUrl: 'notaurl', name: 'Taj' }));
+  assert.strictEqual(typo.logoUrl, existing.logoUrl, 'an invalid value is dropped, not a clear');
 });
 
 // ---- store-fs: the filesystem shim -------------------------------------------

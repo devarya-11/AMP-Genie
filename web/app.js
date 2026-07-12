@@ -58,6 +58,8 @@
       $('gBrand').value = $('bSearch').value.trim();
       research();
     };
+    $('kAddProduct').onclick = () => addProductRow();
+    $('kSave').onclick = saveKit;
 
     // quick generate (v2 flow, unchanged)
     $('colorpick').oninput = () => { $('colorhex').value = $('colorpick').value; S.colorTouched = true; };
@@ -282,7 +284,81 @@
       (d.products || []).slice(0, 8).forEach((p) => chip(chips, 'product', p));
       (d.voice && d.voice.adjectives || []).slice(0, 4).forEach((a) => chip(chips, 'voice', a));
       setLine('bStatus', '');
+      // The kit editor loads alongside the dossier — assets are the part the
+      // team curates by hand.
+      try {
+        const kres = await fetch('/brandkit/' + encodeURIComponent(brandSlug(brand)));
+        const kdata = await kres.json();
+        fillKitEditor(kdata && kdata.kit);
+      } catch (e) { fillKitEditor(null); }
     } catch (e) { setLine('bStatus', 'Error: ' + e.message); }
+  }
+
+  // ---------- brand kit editor ----------
+  // Same slug rule as the server (store.js brandSlug) so the editor reads and
+  // writes the record the pipeline will actually consult.
+  function brandSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+  function addProductRow(p) {
+    const box = $('kProducts');
+    if (box.children.length >= 8) return;
+    const row = el('div', 'kit-product-row');
+    const name = el('input'); name.placeholder = 'Product name'; name.value = (p && p.name) || '';
+    const price = el('input'); price.placeholder = '₹ price'; price.value = (p && p.price != null) ? p.price : '';
+    const image = el('input'); image.placeholder = 'https://…/product.jpg'; image.value = (p && p.image) || '';
+    const rm = el('button', 'uc-remove', '✕'); rm.type = 'button'; rm.onclick = () => row.remove();
+    [name, price, image, rm].forEach((n) => row.appendChild(n));
+    box.appendChild(row);
+  }
+
+  function fillKitEditor(kit) {
+    $('kitCard').classList.remove('hidden');
+    $('kLogo').value = (kit && kit.logoUrl) || '';
+    $('kHero').value = (kit && kit.heroUrl) || '';
+    $('kColor').value = (kit && kit.primary) || '';
+    $('kVoice').value = (kit && kit.voiceSample) || '';
+    $('kProducts').innerHTML = '';
+    ((kit && kit.products) || []).forEach((p) => addProductRow(p));
+    if (!$('kProducts').children.length) addProductRow();
+    $('kMsg').textContent = '';
+  }
+
+  async function saveKit() {
+    const slug = brandSlug($('bSearch').value);
+    if (!slug) { $('kMsg').textContent = 'Look up a brand first.'; return; }
+    const products = Array.from($('kProducts').children).map((row) => {
+      const [name, price, image] = Array.from(row.querySelectorAll('input')).map((i) => i.value.trim());
+      const out = { name };
+      if (price) out.price = Number(price.replace(/[^0-9.]/g, ''));
+      if (image) out.image = image;
+      return out;
+    }).filter((p) => p.name);
+    const body = {
+      name: $('bSearch').value.trim(),
+      // '' means "clear this field" server-side; absent means keep — the
+      // editor always sends current values, so clearing a box clears the kit.
+      logoUrl: $('kLogo').value.trim(),
+      heroUrl: $('kHero').value.trim(),
+      voiceSample: $('kVoice').value.trim(),
+      products,
+      author: author(),
+    };
+    const colour = $('kColor').value.trim();
+    if (colour) body.primary = colour;
+    $('kSave').disabled = true;
+    $('kMsg').textContent = 'Saving…';
+    try {
+      const out = await api('/brandkit/' + encodeURIComponent(slug), body);
+      if (out && out.ok) {
+        $('kMsg').textContent = 'Saved — every future build for this brand uses these assets.';
+      } else {
+        $('kMsg').textContent = (out && out.error) || 'Save failed.';
+      }
+    } catch (e) {
+      $('kMsg').textContent = 'Save failed: ' + e.message;
+    } finally {
+      $('kSave').disabled = false;
+    }
   }
 
   // ---------- pitches view ----------

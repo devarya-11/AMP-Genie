@@ -23,6 +23,43 @@ const {
 } = require('./store');
 const { buildFallback } = require('./fallback');
 
+// A URL from a kit (or any KV-seeded string) is only usable if it parses as a
+// real http(s) URL and carries no markup characters; anything else is dropped,
+// never "fixed". Returns the ORIGINAL string (not URL.toString(), which can
+// normalise) so a stored asset URL round-trips byte-identical.
+function httpUrl(val) {
+  if (typeof val !== 'string' || !val.trim() || /[<>]/.test(val)) return null;
+  try {
+    const u = new URL(val);
+    return (u.protocol === 'https:' || u.protocol === 'http:') ? val : null;
+  } catch {
+    return null;
+  }
+}
+
+// The kit's curated products, mapped to the copy.items shape generate()
+// consumes ({ name, price?, image? }). putBrandKit sanitises products at save
+// time, but a KV record can be seeded by hand, so everything is re-checked
+// here: a valid name is required (markup stripped, capped), price -> positive
+// finite int or dropped, image -> http(s) URL or dropped, list capped at 8.
+function kitCopyItems(kit) {
+  if (!kit || !Array.isArray(kit.products)) return {};
+  const items = [];
+  for (const p of kit.products) {
+    if (items.length >= 8) break;
+    if (!p || typeof p.name !== 'string') continue;
+    const name = p.name.replace(/[<>]/g, '').trim().slice(0, 60);
+    if (!name) continue;
+    const item = { name };
+    const price = Number(p.price);
+    if (Number.isFinite(price) && price > 0) item.price = Math.round(price);
+    const image = httpUrl(p.image);
+    if (image) item.image = image;
+    items.push(item);
+  }
+  return items.length ? { items } : {};
+}
+
 // body: the parsed /generate request body (untrusted client JSON).
 // deps: {
 //   validate:  async (ampHtml) -> verdict — injected because the two runtimes
@@ -57,27 +94,41 @@ async function createBuild(body, deps = {}) {
   const slug = brandSlug(brand);
   const brief = normalizeBrief(b.brief);
 
-  // Brand-kit tier: a kit is the resolved-brand shape frozen at a previous
-  // build's save time (see server/store.js), so a kit hit skips BOTH live
-  // fetches entirely — no latency, no re-resolution drift. An explicit
-  // colorOverride is the user insisting on a colour, so it bypasses the kit
-  // and resolves as before (override wins inside resolveBrandColor anyway).
-  const kit = !b.colorOverride ? await getBrandKit(kv, slug) : null;
-  let colorResolved;
-  let logoResolved;
-  if (kit) {
-    colorResolved = { primary: kit.primary, accent: kit.accent || null, source: 'kit' };
-    logoResolved = kit.logoUrl ? { logoUrl: kit.logoUrl, site: kit.site || null } : null;
-  } else {
-    // Colour and logo are independent live-fetch lookups — run concurrently so
-    // a real-logo lookup never adds latency on top of the colour resolver's.
-    // Each has its own timeout budget and degrades to null/placeholder
-    // independently.
-    [colorResolved, logoResolved] = await Promise.all([
-      resolveBrandColor({ brandName: brand, hexOverride: b.colorOverride }),
-      resolveBrandLogo({ brandName: brand }),
-    ]);
-  }
+  // Brand-kit tier: a kit is no longer only a frozen colour — it is the
+  // brand's ASSETS record (logo, hero, curated products, voice sample; see
+  // server/store.js), so it is ALWAYS loaded, even under an explicit
+  // colorOverride: overriding the colour is the user insisting on a hue, not
+  // on losing the brand's real logo/products/voice.
+  const kit = await getBrandKit(kv, slug);
+  // primary is OPTIONAL on a kit now (an assets-only kit for a library-colour
+  // brand is legal), so the 'kit' colour tier only engages when the kit
+  // actually carries a usable '#rrggbb' — anything else resolves live
+  // (override/library/fetched/hash) exactly as if the kit weren't there. An
+  // explicit colorOverride still bypasses the kit colour and resolves as
+  // before (override wins inside resolveBrandColor anyway).
+  const kitPrimary = (kit && /^#[0-9a-f]{6}$/i.test(String(kit.primary || ''))) ? kit.primary : null;
+  const needsLiveColor = !!b.colorOverride || !kitPrimary;
+  // The live logo fetch is skipped only when the kit fully supplies what that
+  // fetch would win (logo + site); a partial kit still fetches, and the kit's
+  // own fields win field-by-field over whatever the fetch found.
+  const needsLiveLogo = !(kit && kit.logoUrl && kit.site);
+  // Colour and logo are independent live-fetch lookups — run concurrently so
+  // a real-logo lookup never adds latency on top of the colour resolver's.
+  // Each has its own timeout budget and degrades to null/placeholder
+  // independently.
+  const [liveColor, liveLogo] = await Promise.all([
+    needsLiveColor ? resolveBrandColor({ brandName: brand, hexOverride: b.colorOverride }) : null,
+    needsLiveLogo ? resolveBrandLogo({ brandName: brand }) : null,
+  ]);
+  const colorResolved = liveColor || { primary: kitPrimary, accent: kit.accent || null, source: 'kit' };
+  // Kit assets beat live-fetched ones field by field, and every URL is
+  // re-validated on the way out of the KV (a hand-seeded record must not be
+  // able to smuggle a non-URL into an src attribute). heroUrl layering starts
+  // here — live og:image < kit.heroUrl — and manual copy.heroUrl wins below.
+  const logoUrl = httpUrl(kit && kit.logoUrl) || (liveLogo ? liveLogo.logoUrl : null);
+  const site = httpUrl(kit && kit.site) || (liveLogo ? liveLogo.site : null);
+  const heroUrl = httpUrl(kit && kit.heroUrl) || (liveLogo ? liveLogo.heroUrl : null) || null;
+  const logoResolved = (logoUrl || site || heroUrl) ? { logoUrl, site, heroUrl } : null;
 
   // Industry and tone are no longer supplied by the UI — infer them from the
   // brand + brief so the backend understands the brand on its own. An explicit
@@ -87,13 +138,18 @@ async function createBuild(body, deps = {}) {
   const vertical = b.vertical || (kit && kit.vertical) || inferVertical(brand, brief);
   const tone = b.tone || inferTone(brief);
 
-  // Anything a live fetch actually won is worth freezing as the brand's kit so
-  // the next build skips the fetches. Best-effort and deliberately not
-  // awaited: putBrandKit validates its input and never throws (a bad kit is a
-  // false, not an exception), so a slow/failed KV write can neither block nor
-  // fail the build that triggered it.
-  if (!kit && (colorResolved.source === 'fetched' || logoResolved)) {
+  // Anything a live fetch actually won is worth freezing as the brand's kit
+  // (heroUrl included) so the next build skips the fetches. Best-effort and
+  // deliberately not awaited: putBrandKit validates its input and never
+  // throws (a bad kit is a false, not an exception), so a slow/failed KV
+  // write can neither block nor fail the build that triggered it. Spreading
+  // the existing kit first keeps curated fields (products, voiceSample) the
+  // pipeline doesn't recompute; a kit someone edited by hand (source
+  // 'manual') is NEVER auto-overwritten.
+  const liveWin = !!((liveColor && liveColor.source === 'fetched') || liveLogo);
+  if (liveWin && !(kit && kit.source === 'manual')) {
     putBrandKit(kv, {
+      ...(kit || {}),
       slug,
       name: brand,
       primary: colorResolved.primary,
@@ -101,7 +157,8 @@ async function createBuild(body, deps = {}) {
       vertical,
       logoUrl: logoResolved ? logoResolved.logoUrl : null,
       site: logoResolved ? logoResolved.site : null,
-      source: colorResolved.source,
+      heroUrl: logoResolved ? logoResolved.heroUrl : null,
+      source: liveColor ? liveColor.source : kit.source,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -124,14 +181,32 @@ async function createBuild(body, deps = {}) {
     itemBias = /\b(menu|catalog|catalogue|collection|range|dishes|products|line-?up|lineup|list)\b/i.test(brief) ? 'search' : 'reveal';
   }
   const moduleId = pickModuleId({ brand, counter: b.counter, moduleId: b.moduleId || itemBias || routedModule });
+  // The kit's pasted voice sample steers the LLM copy tier (prompt-only — it
+  // never lands in the rendered output or the build record). Markup-stripped
+  // and capped here so a hand-seeded KV record can't bloat or poison a prompt.
+  const voiceSample = (kit && typeof kit.voiceSample === 'string')
+    ? kit.voiceSample.replace(/[<>]/g, '').trim().slice(0, 1500) || null
+    : null;
   const plan = brief
     ? await composeContent(brief, {
-      moduleId, vertical, brandName: brand, tone,
+      moduleId, vertical, brandName: brand, tone, voiceSample,
     })
     : null;
-  // Real fetched logo/site is the base layer; brief-driven plan overrides it;
-  // an explicit manual copy override always wins, field by field.
-  const logoCopy = logoResolved ? { logoUrl: logoResolved.logoUrl, site: logoResolved.site } : {};
+  // Real fetched logo/site (plus any hero the kit or live fetch surfaced) is
+  // the base layer; brief-driven plan overrides it; an explicit manual copy
+  // override always wins, field by field. heroUrl joins the copy only when
+  // truthy so a brand with no kit/hero keeps byte-identical output.
+  const logoCopy = logoResolved
+    ? {
+      logoUrl: logoResolved.logoUrl,
+      site: logoResolved.site,
+      ...(logoResolved.heroUrl ? { heroUrl: logoResolved.heroUrl } : {}),
+    }
+    : {};
+  // The kit's curated products: above the fetched logo layer, below the
+  // brief's deterministic signals, the LLM plan, real brief-pasted items and
+  // any manual override — kit.products < briefProducts < copy.items.
+  const kitItems = kitCopyItems(kit);
   // Deterministic numbers the brief states outright (e.g. "40%") — the LLM
   // plan is structurally barred from setting these, so the headline it writes
   // and the big "X% OFF" the module renders would otherwise disagree.
@@ -141,7 +216,12 @@ async function createBuild(body, deps = {}) {
   // explicit manual copy override.
   const briefItems = prod.items && prod.items.length ? { items: prod.items } : {};
   const manualCopy = (b.copy && typeof b.copy === 'object' && !Array.isArray(b.copy)) ? b.copy : {};
-  const copy = { ...logoCopy, ...briefSig, ...(plan || {}), ...briefItems, ...manualCopy };
+  const copy = {
+    ...logoCopy, ...kitItems, ...briefSig, ...(plan || {}), ...briefItems, ...manualCopy,
+  };
+  // The hero channel accepts real http(s) URLs only, whichever layer supplied
+  // it — a manual override that isn't one is dropped, never rendered.
+  if (copy.heroUrl !== undefined && !httpUrl(copy.heroUrl)) delete copy.heroUrl;
   const g = generate({
     brand,
     vertical,

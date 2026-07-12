@@ -26,7 +26,10 @@ const { createSlate } = require('./slate-core');
 const { applyTweak, readVersions } = require('./tweak-engine');
 const { buildDossier } = require('./brand-research');
 const { proposeUseCases, shapeUserIdea } = require('./usecase-engine');
-const { getBuild, getSlate, readSlateIndex, normalizeBrief } = require('./store');
+const {
+  getBuild, getSlate, readSlateIndex, normalizeBrief,
+  getBrandKit, putBrandKit, sanitizeKitPatch, mergeKitPatch, brandSlug,
+} = require('./store');
 const { createFsKv } = require('./store-fs');
 const { buildPageHtml, slatePageHtml, notFoundPageHtml } = require('./share-pages');
 
@@ -115,6 +118,15 @@ app.post('/usecases', async (req, res) => {
     const brandName = (b.brand || '').trim() || 'Acme';
     const notes = typeof b.notes === 'string' ? b.notes.slice(0, 4000) : null;
     const dossier = await buildDossier({ brandName, notes, kv, force: !!b.forceResearch });
+    // The brand kit (if the team saved one) lends its pasted voice sample to
+    // every ideation prompt; the response carries boolean UI hints only.
+    const kit = await getBrandKit(kv, brandSlug(brandName));
+    const voiceSample = (kit && typeof kit.voiceSample === 'string') ? kit.voiceSample : null;
+    const kitFlags = {
+      hasKit: !!kit,
+      kitHasAssets: !!(kit && (kit.logoUrl || kit.heroUrl || voiceSample
+        || (Array.isArray(kit.products) && kit.products.length))),
+    };
     const publicDossier = {
       name: dossier.name,
       slug: dossier.slug,
@@ -130,8 +142,8 @@ app.post('/usecases', async (req, res) => {
       researchedAt: dossier.researchedAt,
     };
     if (typeof b.idea === 'string' && b.idea.trim()) {
-      const useCase = await shapeUserIdea({ idea: b.idea, dossier });
-      return res.json({ useCase, dossier: publicDossier });
+      const useCase = await shapeUserIdea({ idea: b.idea, dossier, voiceSample });
+      return res.json({ useCase, dossier: { ...publicDossier, ...kitFlags } });
     }
     const { useCases, source } = await proposeUseCases({
       dossier,
@@ -139,8 +151,9 @@ app.post('/usecases', async (req, res) => {
       count: b.count,
       feedback: typeof b.feedback === 'string' ? b.feedback.slice(0, 500) : null,
       prior: Array.isArray(b.prior) ? b.prior.slice(0, 16).map(String) : null,
+      voiceSample,
     });
-    res.json({ useCases, source, dossier: publicDossier });
+    res.json({ useCases, source, dossier: { ...publicDossier, ...kitFlags } });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -149,6 +162,32 @@ app.post('/usecases', async (req, res) => {
 // ---- slates index: the Pitches view ----------------------------------------
 app.get('/slates', async (req, res) => {
   res.json({ items: await readSlateIndex(kv) });
+});
+
+// ---- brand kit: the team-curated asset record --------------------------------
+// Wire-identical to functions/brandkit/[slug].js — GET never 404s (a null kit
+// is the empty-editor state), POST merges a sanitized patch ('' clears a
+// field, absent keeps it) and stamps source:'manual'.
+app.get('/brandkit/:slug', async (req, res) => {
+  res.json({ kit: await getBrandKit(kv, req.params.slug) });
+});
+app.post('/brandkit/:slug', async (req, res) => {
+  const body = req.body || {};
+  const patch = sanitizeKitPatch(body);
+  if (!patch) return res.status(400).json({ error: 'no valid kit fields in body' });
+  const slug = req.params.slug;
+  const existing = (await getBrandKit(kv, slug)) || { slug, name: patch.name || slug };
+  const record = mergeKitPatch(existing, patch);
+  record.slug = slug;
+  record.source = 'manual';
+  record.updatedAt = new Date().toISOString();
+  record.updatedBy = typeof body.author === 'string' && body.author.trim()
+    ? body.author.replace(/[<>]/g, '').trim().slice(0, 60)
+    : null;
+  if (!(await putBrandKit(kv, record))) {
+    return res.status(400).json({ error: 'kit failed validation or could not be saved' });
+  }
+  res.json({ ok: true, kit: record });
 });
 
 // ---- tweak: prompt-to-refine with version chains ----------------------------
