@@ -43,8 +43,47 @@ test('absUrl resolves a relative href against a base, and returns null for garba
 
 // ---- fetchBrandLogo / resolveBrandLogo (end-to-end with injected fetch) ---
 
+// fetchBrandLogo now probes Google's favicon service (t1.gstatic.com) before
+// scraping the brand site directly. Tests that exercise the direct-scrape
+// tier answer 404 to those probes so tier 1 falls through deterministically.
+const GSTATIC_RE = /^https:\/\/t1\.gstatic\.com\//;
+function siteOnlyFetch(handler) {
+  return async (url, init) => (GSTATIC_RE.test(String(url)) ? htmlResponse(404, '') : handler(url, init));
+}
+
+test('tier 1: a Google-favicon probe hit wins with a crisp square logo and the confirmed domain', async () => {
+  const fetchImpl = fakeFetch((url) => {
+    if (GSTATIC_RE.test(String(url))) {
+      return htmlResponse(String(url).includes(encodeURIComponent('https://www.acme.com')) ? 200 : 404, '');
+    }
+    return htmlResponse(200, '<meta property="og:image" content="/hero.jpg">');
+  });
+  const out = await fetchBrandLogo('acme', fetchImpl);
+  assert.match(out.logoUrl, GSTATIC_RE, 'the logo must be the gstatic favicon URL');
+  assert.ok(out.logoUrl.includes(encodeURIComponent('https://www.acme.com')));
+  assert.strictEqual(out.site, 'https://www.acme.com');
+  assert.strictEqual(out.heroUrl, 'https://www.acme.com/hero.jpg', 'og:image is kept as the hero, not the logo');
+});
+
+test('tier 1 survives a bot-walled brand site: gstatic 200 + direct fetch 403 still yields the logo', async () => {
+  const fetchImpl = fakeFetch((url) => (GSTATIC_RE.test(String(url)) ? htmlResponse(200, '') : htmlResponse(403, '')));
+  const out = await fetchBrandLogo('acme', fetchImpl);
+  assert.match(out.logoUrl, GSTATIC_RE);
+  assert.strictEqual(out.heroUrl, null, 'no hero when the site itself refuses us');
+});
+
+test('candidate domains include .in: an india-only brand resolves via its .in domain', async () => {
+  const fetchImpl = fakeFetch((url) => {
+    const u = String(url);
+    if (GSTATIC_RE.test(u)) return htmlResponse(u.includes(encodeURIComponent('https://www.acme.in')) ? 200 : 404, '');
+    return htmlResponse(404, '');
+  });
+  const out = await fetchBrandLogo('acme', fetchImpl);
+  assert.strictEqual(out.site, 'https://www.acme.in');
+});
+
 test('fetchBrandLogo prefers og:image over a favicon when both are present', async () => {
-  const fetchImpl = fakeFetch(() => htmlResponse(200,
+  const fetchImpl = siteOnlyFetch(() => htmlResponse(200,
     '<meta property="og:image" content="/hero.jpg"><link rel="icon" href="/favicon.ico">'));
   const out = await fetchBrandLogo('acme', fetchImpl);
   assert.strictEqual(out.logoUrl, 'https://www.acme.com/hero.jpg');
@@ -52,12 +91,12 @@ test('fetchBrandLogo prefers og:image over a favicon when both are present', asy
 });
 
 test('fetchBrandLogo falls back to a favicon when there is no og:image', async () => {
-  const fetchImpl = fakeFetch(() => htmlResponse(200, '<link rel="shortcut icon" href="/s.ico">'));
+  const fetchImpl = siteOnlyFetch(() => htmlResponse(200, '<link rel="shortcut icon" href="/s.ico">'));
   const out = await fetchBrandLogo('acme', fetchImpl);
   assert.strictEqual(out.logoUrl, 'https://www.acme.com/s.ico');
 });
 
-test('fetchBrandLogo falls through to the next candidate domain on a non-ok response, and to null if both fail', async () => {
+test('fetchBrandLogo falls through every candidate on non-ok responses, and to null when all fail', async () => {
   let calls = 0;
   const fetchImpl = fakeFetch(() => {
     calls += 1;
@@ -65,7 +104,9 @@ test('fetchBrandLogo falls through to the next candidate domain on a non-ok resp
   });
   const out = await fetchBrandLogo('acme', fetchImpl);
   assert.strictEqual(out, null);
-  assert.strictEqual(calls, 2, 'should try both www. and bare candidate domains before giving up');
+  // 4 candidate domains (.com/.in x www/bare) probed via gstatic (tier 1)
+  // and then scraped directly (tier 2).
+  assert.strictEqual(calls, 8, 'both tiers should try all four candidate domains before giving up');
 });
 
 test('fetchBrandLogo degrades to null (never throws) when the fetch itself rejects', async () => {
@@ -77,7 +118,7 @@ test('fetchBrandLogo degrades to null (never throws) when the fetch itself rejec
 });
 
 test('fetchBrandLogo returns null when the page has neither an og:image nor a recognised icon link', async () => {
-  const fetchImpl = fakeFetch(() => htmlResponse(200, '<title>Acme</title>'));
+  const fetchImpl = siteOnlyFetch(() => htmlResponse(200, '<title>Acme</title>'));
   const out = await fetchBrandLogo('acme', fetchImpl);
   assert.strictEqual(out, null);
 });
@@ -88,7 +129,7 @@ test('resolveBrandLogo returns null (and never calls fetch) for a blank brand na
 });
 
 test('resolveBrandLogo threads a custom fetchImpl through to a real result', async () => {
-  const fetchImpl = fakeFetch(() => htmlResponse(200, '<meta property="og:image" content="https://cdn.acme.com/hero.jpg">'));
+  const fetchImpl = siteOnlyFetch(() => htmlResponse(200, '<meta property="og:image" content="https://cdn.acme.com/hero.jpg">'));
   const out = await resolveBrandLogo({ brandName: 'Acme', fetchImpl });
-  assert.deepStrictEqual(out, { logoUrl: 'https://cdn.acme.com/hero.jpg', site: 'https://www.acme.com' });
+  assert.deepStrictEqual(out, { logoUrl: 'https://cdn.acme.com/hero.jpg', site: 'https://www.acme.com', heroUrl: 'https://cdn.acme.com/hero.jpg' });
 });

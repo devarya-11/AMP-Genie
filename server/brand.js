@@ -107,7 +107,26 @@ function dominantColor(html) {
 function candidateDomains(brandName) {
   const slug = String(brandName || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   if (!slug) return [];
-  return [`https://www.${slug}.com`, `https://${slug}.com`];
+  // .in candidates matter as much as .com for this tool's actual brands —
+  // groww.in, boat-lifestyle... many Indian brands never answer on .com, and
+  // the .com squatter that does answer poisons the colour/logo with someone
+  // else's site. .com stays first (larger namespace), .in close behind.
+  return [
+    `https://www.${slug}.com`, `https://${slug}.com`,
+    `https://www.${slug}.in`, `https://${slug}.in`,
+  ];
+}
+
+// Google's favicon service: a crisp, square, proxy-cached brand icon for any
+// domain Google has indexed — reachable even when the brand's own site
+// bot-walls our scraper, and never a squashed 1200x630 social banner like
+// og:image. With fallback_opts limited to TYPE,SIZE (no URL fallback) the
+// endpoint answers 404 for domains Google doesn't know, which makes it
+// probeable: the first candidate domain that yields a 200 is both a
+// confirmed-real domain AND a usable logo.
+function googleFaviconUrl(domainUrl, size = 128) {
+  return 'https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE&size='
+    + size + '&url=' + encodeURIComponent(domainUrl);
 }
 // Given a brand name (no URL in this UI — see spec §4), guess its domain and
 // fetch the live site for a theme-color / dominant colour. Resilient: any
@@ -191,6 +210,34 @@ function absUrl(href, base) {
 // can never meaningfully delay a /generate response.
 async function fetchBrandLogo(brandName, fetchImpl = fetch) {
   const run = async () => {
+    // Tier 1: Google's favicon service, probed per candidate domain. A 200
+    // simultaneously confirms the domain is real (Google indexed it) and
+    // hands back a crisp square icon that fits a logo slot — where og:image
+    // is routinely a 1200x630 social banner that renders squashed. Crucially
+    // this works for brands whose own sites bot-wall the direct fetch below
+    // (Google's CDN never blocks us), which was the single biggest cause of
+    // placeholder logos in real pitches.
+    for (const url of candidateDomains(brandName)) {
+      try {
+        const probe = googleFaviconUrl(url);
+        const r = await safeFetch(probe, 3000, fetchImpl);
+        if (r.ok) {
+          // og:image from the brand's own site is still worth one attempt as
+          // a HERO image (not the logo) — callers may use it later; failure
+          // here must not cost the already-won logo.
+          let heroUrl = null;
+          try {
+            const site = await safeFetch(url, 3000, fetchImpl);
+            if (site.ok) heroUrl = absUrl(ogImage(await site.text()), url);
+          } catch { /* hero is a bonus, never a blocker */ }
+          return { logoUrl: probe, site: url, heroUrl };
+        }
+      } catch {
+        // Google unreachable (offline dev) — fall through to the direct scrape.
+      }
+    }
+    // Tier 2: the original direct scrape — domains Google hasn't indexed but
+    // that do answer us directly (staging sites, very new brands).
     for (const url of candidateDomains(brandName)) {
       try {
         const r = await safeFetch(url, 4000, fetchImpl);
@@ -199,12 +246,12 @@ async function fetchBrandLogo(brandName, fetchImpl = fetch) {
         const og = ogImage(html);
         if (og) {
           const abs = absUrl(og, url);
-          if (abs) return { logoUrl: abs, site: url };
+          if (abs) return { logoUrl: abs, site: url, heroUrl: abs };
         }
         const icon = iconHref(html);
         if (icon) {
           const abs = absUrl(icon, url);
-          if (abs) return { logoUrl: abs, site: url };
+          if (abs) return { logoUrl: abs, site: url, heroUrl: null };
         }
       } catch {
         // blocked / DNS failure / timeout — try the next candidate, then fall through
@@ -212,7 +259,7 @@ async function fetchBrandLogo(brandName, fetchImpl = fetch) {
     }
     return null;
   };
-  return withTimeout(run, 5000);
+  return withTimeout(run, 6000);
 }
 // Public entry point mirroring resolveBrandColor's shape: never throws,
 // returns null (not an error) when no real logo could be found so the
