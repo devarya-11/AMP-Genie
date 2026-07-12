@@ -72,6 +72,8 @@
     $('revalidate').onclick = revalidate;
     $('resetCode').onclick = resetCode;
     $('dispatch').onclick = doDispatch;
+    $('tweakGo').onclick = doTweak;
+    $('tweakPrompt').onkeydown = (e) => { if (e.key === 'Enter') doTweak(); };
     $('code').oninput = onEdit;
     $('campaignBrief').oninput = updateBriefCounter;
     document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => switchTab(b.dataset.tab));
@@ -211,7 +213,7 @@
   }
 
   function renderUseCases(source) {
-    if (source) $('ucSource').textContent = source === 'library' ? 'library (no LLM key — set one for brand-specific ideas)' : 'LLM-proposed';
+    if (source) $('ucSource').textContent = source === 'library' ? 'library playbook (LLM idle: key missing, cooling down, or unreachable)' : 'LLM-proposed';
     const list = $('ucList'); list.innerHTML = '';
     W.useCases.forEach((u, i) => {
       const card = el('div', 'uc-card');
@@ -393,6 +395,10 @@
         if (out.error) { setStatus('Error: ' + out.error); return; }
         S.result = out;
         S.edited = null;
+        // A fresh generation starts a fresh version chain.
+        S.rootId = null;
+        $('versionsRow').classList.add('hidden');
+        $('tweakMsg').textContent = '';
         if (!S.colorTouched) { $('colorhex').value = out.palette.primary; $('colorpick').value = out.palette.primary; }
         $('slateResult').classList.add('hidden');
         $('result').classList.remove('hidden');
@@ -440,6 +446,59 @@
     });
   }
 
+  // ---------- refine: prompt-to-tweak with version chains ----------
+  // The LLM (or the deterministic parser when no key is set) turns the prompt
+  // into a parameter edit-plan; the server rebuilds through generate() and the
+  // real validator, persists the new version with parentId/rootId lineage, and
+  // an invalid result is rejected server-side — this box can never ship a
+  // broken email.
+  async function doTweak() {
+    const prompt = $('tweakPrompt').value.trim();
+    const msg = $('tweakMsg');
+    if (!prompt) { $('tweakPrompt').focus(); return; }
+    if (!S.result || !S.result.shareId) return;
+    const btn = $('tweakGo');
+    btn.disabled = true;
+    msg.className = 'dispatch-msg'; msg.innerHTML = '<span class="spinner"></span> Rebuilding&hellip;';
+    try {
+      const out = await api('/tweak', { buildId: S.result.shareId, prompt, author: author() });
+      if (!out.ok) { msg.className = 'dispatch-msg err'; msg.textContent = out.error || 'Tweak failed.'; return; }
+      S.result = out.response;
+      S.edited = null;
+      S.rootId = (out.build && (out.build.rootId || out.build.parentId)) || S.rootId || null;
+      renderResult();
+      msg.className = 'dispatch-msg ok'; msg.textContent = 'Applied — new validated version.';
+      $('tweakPrompt').value = '';
+      loadVersions();
+      loadHistory();
+    } catch (e) {
+      msg.className = 'dispatch-msg err'; msg.textContent = 'Tweak failed: ' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function loadVersions() {
+    const row = $('versionsRow');
+    if (!S.rootId) { row.classList.add('hidden'); return; }
+    try {
+      const res = await fetch('/versions/' + encodeURIComponent(S.rootId));
+      const data = await res.json();
+      const items = (data && data.items) || [];
+      row.innerHTML = '';
+      const mk = (label, id, title) => {
+        const a = el('a', 'chip', label);
+        a.href = '/b/' + id; a.target = '_blank'; a.rel = 'noopener';
+        if (title) a.title = title;
+        if (S.result && S.result.shareId === id) a.classList.add('pass');
+        row.appendChild(a);
+      };
+      mk('original', S.rootId, 'the first generation');
+      items.forEach((v, i) => mk('v' + (i + 2), v.id, v.tweakPrompt || ''));
+      row.classList.toggle('hidden', !items.length);
+    } catch (e) { /* lineage is a nicety — never an error */ }
+  }
+
   async function copyShareLink() {
     if (!S.result || !S.result.sharePath) return;
     const url = location.origin + S.result.sharePath;
@@ -461,6 +520,8 @@
     chip(chips, 'colour', r.palette.primary + ' (' + (r.colorSource || '?') + ')');
     if (r.copySource) chip(chips, 'copy', r.copySource);
     $('share').classList.toggle('hidden', !r.sharePath);
+    // Tweaking rebuilds from the persisted record, so it needs a stored build.
+    $('tweakBox').classList.toggle('hidden', !r.sharePath);
 
     const note = $('briefNote');
     if (r.brief) {

@@ -178,3 +178,40 @@ test('buildHistoryEntry derives the legacy history entry (plus shareId) from a b
     shareId: build.id,
   });
 });
+
+// ---- params: the reproduction record the tweak engine rebuilds from ---------
+
+test('params round-trips: counter, colorOverride and the FINAL merged copy persist and reproduce the build', async () => {
+  const kv = fakeKv();
+  const { build } = await createBuild(
+    // The brief contributes a deterministic signal (20% -> copy.discount) so
+    // this asserts params.copy is the MERGED copy, not the raw request copy.
+    {
+      brand: 'Groww', counter: 5, colorOverride: '#00d09c', brief: '20% off tonight', copy: { head: 'Hello Groww' },
+    },
+    { validate, kv },
+  );
+  // A fresh build carries no tweak lineage.
+  assert.strictEqual(build.parentId, null);
+  assert.strictEqual(build.rootId, null);
+  assert.strictEqual(build.tweakPrompt, null);
+  const stored = JSON.parse(kv.map.get('build:' + build.id));
+  assert.strictEqual(stored.params.counter, 5);
+  assert.strictEqual(stored.params.colorOverride, '#00d09c');
+  assert.strictEqual(stored.params.copy.head, 'Hello Groww', 'manual copy override lands in params.copy');
+  assert.strictEqual(stored.params.copy.discount, 20, 'brief-derived discount lands in params.copy');
+  // Reproduction guarantee: re-running createBuild from the persisted params
+  // (plus the record's own resolved vertical/tone/currency/moduleId, exactly
+  // as the tweak engine rebases) yields byte-identical AMP.
+  const replay = await createBuild({
+    brand: stored.brand,
+    vertical: stored.vertical,
+    tone: stored.tone,
+    currency: stored.currency,
+    moduleId: stored.moduleId,
+    counter: stored.params.counter,
+    colorOverride: stored.params.colorOverride,
+    copy: stored.params.copy,
+  }, { validate, kv: null });
+  assert.strictEqual(replay.build.ampHtml, build.ampHtml);
+});

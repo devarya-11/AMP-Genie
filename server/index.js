@@ -23,6 +23,7 @@ const { dispatch } = require('./dispatch');
 const { readHistory, appendHistory, MAX_ENTRIES } = require('./history');
 const { createBuild, buildHistoryEntry } = require('./build-pipeline');
 const { createSlate } = require('./slate-core');
+const { applyTweak, readVersions } = require('./tweak-engine');
 const { buildDossier } = require('./brand-research');
 const { proposeUseCases, shapeUserIdea } = require('./usecase-engine');
 const { getBuild, getSlate, readSlateIndex, normalizeBrief } = require('./store');
@@ -148,6 +149,27 @@ app.post('/usecases', async (req, res) => {
 // ---- slates index: the Pitches view ----------------------------------------
 app.get('/slates', async (req, res) => {
   res.json({ items: await readSlateIndex(kv) });
+});
+
+// ---- tweak: prompt-to-refine with version chains ----------------------------
+// The engine turns the prompt into a schema-validated parameter edit-plan,
+// rebuilds through generate() + the real validator, and persists the new
+// version with parentId/rootId lineage (see server/tweak-engine.js — the
+// Pages Function in functions/tweak.js must stay wire-identical).
+app.post('/tweak', async (req, res) => {
+  const b = req.body || {};
+  const result = await applyTweak({
+    buildId: b.buildId,
+    prompt: typeof b.prompt === 'string' ? b.prompt.slice(0, 500) : '',
+    author: typeof b.author === 'string' ? b.author.slice(0, 60) : null,
+    kv,
+  }, { validate });
+  if (result.ok) appendHistory(buildHistoryEntry(result.build));
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+app.get('/versions/:id', async (req, res) => {
+  res.json({ items: await readVersions(kv, req.params.id) });
 });
 
 // ---- share pages: the pitch deliverable ------------------------------------

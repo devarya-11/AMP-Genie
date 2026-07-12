@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -213,6 +213,15 @@
           <button id="share" class="ghost hidden"><svg class="ic"><use href="#i-send"/></svg> Copy share link</button>
         </div>
         <div id="copyMsg" class="copy-msg" aria-live="polite"></div>
+        <div id="tweakBox" class="tweak hidden">
+          <label class="fieldlabel" for="tweakPrompt">Refine with a prompt <span class="hint">parameters only, revalidated, every version kept</span></label>
+          <div class="dispatch-row">
+            <input id="tweakPrompt" type="text" placeholder="e.g. make it 25% off &middot; switch to the quiz &middot; #112233 &middot; more premium">
+            <button id="tweakGo" class="primary" title="Apply the tweak as a new validated version"><svg class="ic"><use href="#i-sparkle"/></svg></button>
+          </div>
+          <div id="tweakMsg" class="dispatch-msg" aria-live="polite"></div>
+          <div id="versionsRow" class="chips hidden"></div>
+        </div>
         <div class="dispatch">
           <label class="fieldlabel" for="dispatchTo">Send to your inbox <span class="hint">self-send renders AMP without Google registration</span></label>
           <div class="dispatch-row">
@@ -296,6 +305,6 @@
 </div>
 
 <script src="preview.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

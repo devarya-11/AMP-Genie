@@ -32,6 +32,11 @@ const { buildFallback } = require('./fallback');
 //              persistence", the build still generates and validates fully.
 //   author / slateId / useCase: provenance strings (or null) recorded on the
 //              build, never interpreted here.
+//   parentId / rootId / tweakPrompt: tweak-lineage provenance (or null) set by
+//              server/tweak-engine.js when this build is a rebuilt edit of an
+//              earlier one — recorded, never interpreted here. The CALLER
+//              computes rootId (the parent's root, or the parent itself), so a
+//              build with no parent can never carry a stray root.
 // }
 // Returns { response, build }: response is the wire shape the existing UI
 // already consumes (plus the new copySource/fallback/share fields), build is
@@ -39,7 +44,10 @@ const { buildFallback } = require('./fallback');
 // still derive a history entry from it).
 async function createBuild(body, deps = {}) {
   const b = (body && typeof body === 'object') ? body : {};
-  const { kv = null, author = null, slateId = null, useCase = null } = deps;
+  const {
+    kv = null, author = null, slateId = null, useCase = null,
+    parentId = null, rootId = null, tweakPrompt = null,
+  } = deps;
   const validate = deps.validate;
   if (typeof validate !== 'function') {
     throw new Error('createBuild requires a validate(ampHtml) dependency');
@@ -196,6 +204,18 @@ async function createBuild(body, deps = {}) {
     productsFromBrief,
     useCase,
     slateId,
+    parentId,
+    rootId: parentId ? rootId : null,
+    tweakPrompt,
+    // Everything needed to reproduce (or rebase) this exact build later: the
+    // tweak engine re-runs createBuild from these plus its own edits, so the
+    // record must capture the FINAL merged copy that actually reached
+    // generate(), not the raw request fields it was merged from.
+    params: {
+      counter: b.counter ?? 0,
+      colorOverride: b.colorOverride || null,
+      copy,
+    },
     validation: { pass: validation.pass, errorCount: validation.errorCount, warningCount: validation.warningCount },
     ampHtml: g.ampHtml,
     fallbackHtml: fallback.html,

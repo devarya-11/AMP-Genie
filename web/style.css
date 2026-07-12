@@ -172,6 +172,9 @@ button.sm{padding:8px 12px;font-size:13px}
 .rail-actions button{justify-content:flex-start}
 .copy-msg{font-size:12px;min-height:14px;color:var(--muted)}
 
+.tweak{border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:8px}
+.tweak .chips a.chip{text-decoration:none;cursor:pointer}
+.tweak .chips a.chip:hover{border-color:#ffffff33;color:var(--ink)}
 .dispatch{border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:8px}
 .dispatch-row{display:flex;gap:8px}
 .dispatch-row input{flex:1;min-width:0}

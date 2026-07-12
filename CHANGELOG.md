@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.1 — refine loop + LLM tier live (2026-07-12)
+
+v3 is complete: every build can now be steered after the fact, and the
+intelligence layer runs on a real key.
+
+- **Prompt-to-tweak** (`server/tweak-engine.js`, `POST /tweak`) — "make it
+  25% off · switch to the quiz · #112233 · more premium" becomes a
+  schema-validated parameter edit-plan (LLM tier, deterministic parser as the
+  zero-key floor), rebuilt through `generate()` and the real validator. An
+  invalid result persists NOTHING (dry-run gate). Every accepted tweak is a
+  new version with `parentId`/`rootId` lineage; `GET /versions/:rootId` lists
+  the chain, and the UI shows clickable version chips.
+- **Gemini tier activated** — `GEMINI_API_KEY` wired as a deployment secret;
+  `callGemini` now authenticates via the `x-goog-api-key` header (Google's
+  new `AQ.`-format keys reject the legacy `?key=` query param) and disables
+  the 2.5-family default thinking budget for structured-fill calls (measured:
+  1.3s instead of 15s+); ideation budget widened to 30s for the slow tail.
+- **e2e suite rewritten for the v3 shell** — 21 Playwright tests covering
+  nav, both create modes, the full guided wizard journey, slates + share
+  pages, calc/report interactivity, download/dispatch guards. Hermetic:
+  the webServer env blanks all provider keys so runs never consume quota.
+- Build records now carry `params` (counter/colorOverride/final copy) so any
+  build made from here on can be reproduced and tweaked byte-exactly.
+
 ## v3.0 — the intelligence layer + team shell (2026-07-11)
 
 The genie now understands the brand before it builds, proposes use-cases you

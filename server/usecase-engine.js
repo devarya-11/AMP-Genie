@@ -38,8 +38,13 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || null;
 
 // Use-case drafting is one richer call, not brief-content's best-of-N
-// fan-out, so it gets a wider budget than composeContent's 8s.
-const TIMEOUT_MS = 15000;
+// fan-out, so it gets a wider budget than composeContent's 8s. 30s, not 15:
+// the response schema is the union of every module's contentPlan fields
+// (8 modules since calc/report), and schema-constrained decoding on Gemini
+// measurably needs >15s for it even with thinking disabled. Wall-clock wait
+// on a fetch — no CPU cost on the Workers runtime, and the wizard shows a
+// spinner for the duration.
+const TIMEOUT_MS = 30000;
 
 // Caps for the descriptive fields a use-case carries (contentPlan fields are
 // capped by FIELD_SCHEMAS via validatePlan, not here).

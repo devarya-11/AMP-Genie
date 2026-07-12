@@ -103,14 +103,27 @@ function toGeminiSchema(schema) {
 async function callGemini({ apiKey, model, prompt, schema, timeoutMs, fetchImpl = fetch }) {
   if (!apiKey) return null;
   if (isCoolingDown('gemini')) return null;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  // Auth via the x-goog-api-key HEADER, not the legacy ?key= query param —
+  // Google's newer AI Studio key format (the "AQ." prefix) is only accepted
+  // in the header, while classic AIza keys work with both. Also keeps the key
+  // out of URLs (logs/traces).
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   try {
     const res = await withTimeout(() => fetchImpl(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema) },
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: toGeminiSchema(schema),
+          // 2.5-family models "think" by default, which routinely blows the
+          // caller's timeout budget on large response schemas (measured: a
+          // trivial call is ~1.3s, a schema'd use-case array times out at
+          // 15s). These are structured-fill tasks — thinking buys nothing —
+          // so it's disabled. Guarded because non-2.5 models reject the knob.
+          ...(/2\.5/.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        },
       }),
     }), timeoutMs);
     if (!res) return null;
