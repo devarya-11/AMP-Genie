@@ -97,6 +97,24 @@ test('renderDocH: a non-object doc is a 400', async () => {
   assert.strictEqual((await api.renderDocH({})).status, 400);
 });
 
+// M6: the editor's Edit/Preview toggle rides the anchors flag. Edit mode wants
+// data-bid anchors (click-to-select); Preview mode wants the clean, shippable
+// AMP so the interactive module actually plays. Default is anchored (the
+// editor preview is the common caller).
+test('renderDocH: the anchors flag toggles data-bid, and both stay valid', async () => {
+  const { api } = await freshApi();
+  const doc = validStarterDoc();
+  const anchored = await api.renderDocH({ doc, anchors: true });
+  const clean = await api.renderDocH({ doc, anchors: false });
+  const def = await api.renderDocH({ doc });
+  assert.ok(anchored.json.ampHtml.includes('data-bid'), 'anchors:true carries data-bid');
+  assert.ok(!clean.json.ampHtml.includes('data-bid'), 'anchors:false is clean AMP');
+  assert.ok(def.json.ampHtml.includes('data-bid'), 'default is anchored (editor preview)');
+  // the anchors are editor-only chrome — neither variant may break validity
+  assert.strictEqual(anchored.json.validation.pass, true, 'anchored still passes');
+  assert.strictEqual(clean.json.validation.pass, true, 'clean still passes');
+});
+
 test('renderDocH: hostile text still passes and comes back sanitized', async () => {
   const { api } = await freshApi();
   const hostile = {

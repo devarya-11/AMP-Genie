@@ -227,6 +227,7 @@ const BLOCK_SANITIZERS = {
       imageUrl: validImgUrl(props.imageUrl) || undefined,
       alt: cleanStr(props.alt, 120),
       href: safeHttpUrl(props.href) || undefined,
+      height: clampInt(props.height, 80, 600, 360),
     };
   },
   button(props = {}) {
@@ -396,11 +397,12 @@ function renderImage(props, ctx, warnings) {
   const p = ctx.palette;
   let src = props.imageUrl;
   const alt = props.alt || '';
+  const h = props.height || 360;
   if (!src) {
     warnings.push('image: missing/invalid https imageUrl — used a placeholder');
-    src = ph(600, 360, p.tint, p.primary, 'IMAGE');
+    src = ph(600, h, p.tint, p.primary, 'IMAGE');
   }
-  const img = `<amp-img src="${enc(src)}" width="600" height="360" layout="responsive" alt="${enc(alt)}"></amp-img>`;
+  const img = `<amp-img src="${enc(src)}" width="600" height="${h}" layout="responsive" alt="${enc(alt)}"></amp-img>`;
   const inner = props.href
     ? `<a href="${enc(props.href)}" target="_blank" rel="noopener noreferrer">${img}</a>`
     : img;

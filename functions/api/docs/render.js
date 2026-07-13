@@ -9,6 +9,6 @@ import { json, readJson } from '../../_lib/http.js';
 export async function onRequestPost({ request, env }) {
   applyEnv(env);
   const b = await readJson(request);
-  const out = await getPitchApi(env).renderDocH({ doc: b.doc !== undefined ? b.doc : b });
+  const out = await getPitchApi(env).renderDocH({ doc: b.doc !== undefined ? b.doc : b, anchors: b.anchors });
   return json(out.json, out.status);
 }

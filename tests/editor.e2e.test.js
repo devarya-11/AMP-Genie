@@ -52,6 +52,31 @@ async function openEditorFresh(page) {
   await expect(page.locator('#view-editor')).toBeVisible({ timeout: 30000 });
 }
 
+// Read an attribute off every canvas anchor. Each debounced re-render reloads
+// the srcdoc iframe, so a query can land mid-navigation and throw "context
+// destroyed" — swallow that transient and let the poller try again.
+async function canvasAttrs(page, attr) {
+  try {
+    return await page.frameLocator('#edFrame').locator('[data-bid]')
+      .evaluateAll((els, a) => els.map((e) => e.getAttribute(a)), attr);
+  } catch (e) {
+    if (/context was destroyed|navigation|detached/i.test(e.message)) return [];
+    throw e;
+  }
+}
+
+// The canvas anchors appear a beat before bindCanvas (the iframe onload
+// handler) injects #edg-style and wires the edit listeners. Wait for that
+// tell before scripting canvas interactions.
+async function waitCanvasBound(page) {
+  await expect
+    .poll(async () => page.evaluate(() => {
+      const cd = document.getElementById('edFrame').contentDocument;
+      return !!(cd && cd.getElementById('edg-style'));
+    }), { timeout: 20000 })
+    .toBe(true);
+}
+
 test('editor opens from the Examples tab with a live, valid AMP preview', async ({ page }) => {
   await openEditorFresh(page);
   // The preview iframe is rendered server-side and must be valid AMP4EMAIL.
@@ -92,9 +117,9 @@ test('reorder via the down button, then Save lands the email in the gallery', as
 
   // The email IS the canvas: click the first block IN the phone to select it,
   // then move it down one slot via the selection toolbar.
-  const canvasOrder = () => page.frameLocator('#edFrame').locator('[data-bid]')
-    .evaluateAll((els) => els.map((e) => e.getAttribute('data-bid')));
+  const canvasOrder = () => canvasAttrs(page, 'data-bid');
   await expect.poll(async () => (await canvasOrder()).length, { timeout: 60000 }).toBeGreaterThan(1);
+  await waitCanvasBound(page);
   const before = await canvasOrder();
   await page.frameLocator('#edFrame').locator('[data-bid]').first().click();
   await expect(page.locator('#edSelBar button[title="Move down"]')).toBeVisible();
@@ -138,23 +163,16 @@ test('M4: dragging a palette block into the phone inserts it on the canvas', asy
   await openEditorFresh(page);
   await page.fill('#edAiIdea', 'quiz with an intro');
   await page.click('#edAiGo');
-  const canvasTypes = () => page.frameLocator('#edFrame').locator('[data-bid]')
-    .evaluateAll((els) => els.map((e) => e.getAttribute('data-btype')));
+  const canvasTypes = () => canvasAttrs(page, 'data-btype');
   await expect.poll(async () => (await canvasTypes()).length, { timeout: 60000 }).toBeGreaterThan(1);
 
   // palette items are draggable
   await expect(page.locator('#edPalette .ed-add-btn').first()).toHaveAttribute('draggable', 'true');
 
-  // The canvas anchors land in the DOM a beat before bindCanvas (the iframe
-  // onload handler) attaches the drop listeners. A real user's mouse-drag is
-  // far slower than that gap; the test isn't, so wait for the tell that
-  // bindCanvas ran — it injects #edg-style into the iframe head.
-  await expect
-    .poll(async () => page.evaluate(() => {
-      const cd = document.getElementById('edFrame').contentDocument;
-      return !!(cd && cd.getElementById('edg-style'));
-    }), { timeout: 20000 })
-    .toBe(true);
+  // The canvas anchors land in the DOM a beat before bindCanvas attaches the
+  // drop listeners. A real user's mouse-drag is far slower than that gap; the
+  // test isn't, so wait for the tell that bindCanvas ran.
+  await waitCanvasBound(page);
 
   const before = await canvasTypes();
   // drop a Button block onto the first canvas anchor (real DnD across the
@@ -173,4 +191,68 @@ test('M4: dragging a palette block into the phone inserts it on the canvas', asy
   });
   await expect.poll(async () => (await canvasTypes()).includes('button'), { timeout: 20000 }).toBe(true);
   await expect.poll(async () => (await canvasTypes()).length, { timeout: 20000 }).toBe(before.length + 1);
+});
+
+test('M6: the Edit/Preview toggle swaps anchored chrome for the clean AMP', async ({ page }) => {
+  await openEditorFresh(page);
+  // Draft an interactive doc so Preview mode has a real module to play.
+  await page.fill('#edAiIdea', 'quiz customers on their favourite');
+  await page.click('#edAiGo');
+  const anchorCount = async () => (await canvasAttrs(page, 'data-bid')).length;
+  await expect.poll(anchorCount, { timeout: 60000 }).toBeGreaterThan(0);
+  await waitCanvasBound(page);
+
+  // Edit mode (default) carries the editor anchors.
+  await expect(page.locator('#edModeToggle button[data-mode="edit"]')).toHaveClass(/on/);
+  const edited = await anchorCount();
+
+  // Flip to Preview: the canvas re-renders to the shippable AMP — no data-bid
+  // chrome — and the module (amp-state) is still present, i.e. playable.
+  await page.click('#edModeToggle button[data-mode="preview"]');
+  await expect(page.locator('#edModeToggle button[data-mode="preview"]')).toHaveClass(/on/);
+  await expect.poll(anchorCount, { timeout: 20000 }).toBe(0);
+  await expect
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
+    .toContain('amp-state');
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+
+  // Back to Edit: the anchors return so blocks are addressable again.
+  await page.click('#edModeToggle button[data-mode="edit"]');
+  await expect.poll(anchorCount, { timeout: 20000 }).toBe(edited);
+});
+
+test('M6: dragging the resize handle changes a hero block height and stays valid', async ({ page }) => {
+  await openEditorFresh(page);
+  // Add a Hero from the palette; it auto-selects and mounts a resize handle.
+  await page.locator('#edPalette .ed-add-btn', { hasText: 'Hero' }).first().click();
+  await expect
+    .poll(async () => page.frameLocator('#edFrame').locator('[data-btype="hero"]').count(), { timeout: 60000 })
+    .toBeGreaterThan(0);
+  await waitCanvasBound(page);
+
+  // The Properties panel exposes the hero height; capture the starting value.
+  const heightInput = page.locator('#edProps .ctrl', { hasText: 'Height' }).locator('input');
+  await expect(heightInput).toBeVisible({ timeout: 20000 });
+  const startH = Number(await heightInput.inputValue()) || 240;
+
+  // Drag the handle down ~120px — dispatch the pointer sequence in the iframe
+  // realm (the handle lives inside the srcdoc document).
+  const moved = await page.evaluate(() => {
+    const win = document.getElementById('edFrame').contentWindow;
+    const cd = win.document;
+    const handle = cd.querySelector('.edg-resize');
+    if (!handle) return false;
+    const r = handle.getBoundingClientRect();
+    const at = (y) => ({ bubbles: true, cancelable: true, clientX: r.left + 20, clientY: y, pointerId: 1 });
+    handle.dispatchEvent(new win.PointerEvent('pointerdown', at(r.top)));
+    handle.dispatchEvent(new win.PointerEvent('pointermove', at(r.top + 120)));
+    handle.dispatchEvent(new win.PointerEvent('pointerup', at(r.top + 120)));
+    return true;
+  });
+  expect(moved, 'the resize handle was present').toBe(true);
+
+  // The new height commits to the panel (taller than we started) and the
+  // re-rendered email is still valid AMP.
+  await expect.poll(async () => Number(await heightInput.inputValue()), { timeout: 20000 }).toBeGreaterThan(startH);
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
 });

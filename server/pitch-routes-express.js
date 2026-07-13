@@ -112,7 +112,7 @@ function registerPitchRoutes(app, ctx) {
   // save-new + save-edit for doc examples, and an AI starter-doc drafter.
   app.post('/api/docs/render', async (req, res) => {
     const b = body(req);
-    send(res, await api.renderDocH({ doc: b.doc !== undefined ? b.doc : b }));
+    send(res, await api.renderDocH({ doc: b.doc !== undefined ? b.doc : b, anchors: b.anchors }));
   });
   app.post('/api/pitches/:id/doc-examples', async (req, res) => {
     const b = body(req);

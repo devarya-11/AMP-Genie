@@ -494,6 +494,11 @@ a.linkbtn{color:var(--ink-2)}
 .ed-selbar-tag.inter{background:#4c88f818;border-color:#4c88f855}
 .ed-selbar-tag .ed-block-ic{width:20px;height:20px}
 .ed-selbar-acts{display:flex;gap:3px}
+/* M6: Edit / Preview segmented toggle */
+.ed-mode-toggle{display:inline-flex;background:var(--panel2,#241d29);border:1px solid var(--line,#3a3040);border-radius:9px;padding:2px}
+.ed-mode-toggle button{border:0;background:transparent;color:var(--faint);font:600 12px/1 inherit;padding:5px 12px;border-radius:7px;cursor:pointer}
+.ed-mode-toggle button.on{background:#e78129;color:#1a1420}
+.ed-canvas.previewing #edSelBar{opacity:.4;pointer-events:none}
 
 /* M5: the "Draft with AI" drawer inside the editor's left column */
 .ed-ai{display:flex;flex-direction:column;gap:8px}

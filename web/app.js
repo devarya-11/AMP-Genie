@@ -848,13 +848,13 @@
       make: () => ({ brandName: (S.brand && S.brand.name) || 'Brand', logoUrl: (S.brand && S.brand.logo_url) || '', link: '' }),
       summary: (p) => p.brandName || 'Header' },
     { type: 'hero',     label: 'Hero image', glyph: '▦',
-      make: () => ({ imageUrl: (S.brand && S.brand.hero_url) || '', alt: '', height: '' }),
+      make: () => ({ imageUrl: (S.brand && S.brand.hero_url) || '', alt: '', height: 240 }),
       summary: (p) => p.imageUrl ? shortUrl(p.imageUrl) : 'No image yet' },
     { type: 'text',     label: 'Text',     glyph: 'T',
       make: () => ({ heading: 'Heading', body: 'Body copy goes here.' }),
       summary: (p) => p.heading || p.body || 'Text' },
     { type: 'image',    label: 'Image',    glyph: '▤',
-      make: () => ({ imageUrl: '', alt: '', href: '' }),
+      make: () => ({ imageUrl: '', alt: '', href: '', height: 360 }),
       summary: (p) => p.imageUrl ? shortUrl(p.imageUrl) : 'No image yet' },
     { type: 'button',   label: 'Button',   glyph: '⬢',
       make: () => ({ label: 'Shop now', href: '', align: 'center' }),
@@ -1039,6 +1039,12 @@
     S.editingExampleId = exampleId || null;
     S.edSelId = S.doc.blocks.length ? S.doc.blocks[0].id : null;
     S.edDirty = false;
+    S.editMode = true; // always open in Edit mode
+    document.querySelectorAll('#edModeToggle button[data-mode]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.mode === 'edit');
+    });
+    const center = document.querySelector('#view-editor .ed-canvas');
+    if (center) center.classList.remove('previewing');
     $('edTitle').value = title || '';
     setLine('edSaveErr', '');
     switchView('editor');
@@ -1363,6 +1369,7 @@
         box.appendChild(urlField('Image URL', blk.props.imageUrl || '', (v) => set('imageUrl', v)));
         box.appendChild(field('Alt text', blk.props.alt || '', (v) => set('alt', v)));
         box.appendChild(field('Link (href)', blk.props.href || '', (v) => set('href', v)));
+        box.appendChild(field('Height (px)', blk.props.height || '', (v) => set('height', v)));
         break;
       case 'button':
         box.appendChild(field('Label', blk.props.label || '', (v) => set('label', v)));
@@ -1538,6 +1545,22 @@
     bar.appendChild(acts);
   }
 
+  // ---- M6: Edit / Preview toggle. Edit mode = click-to-select + resize
+  // handles (renders with data-bid anchors). Preview mode = the clean,
+  // shippable AMP, fully interactive so the quiz/spin actually plays. ----
+  function setEditMode(on) {
+    const next = !!on;
+    if (S.editMode === next) return;
+    S.editMode = next;
+    document.querySelectorAll('#edModeToggle button[data-mode]').forEach((b) => {
+      b.classList.toggle('on', (b.dataset.mode === 'edit') === next);
+    });
+    const center = document.querySelector('#view-editor .ed-canvas');
+    if (center) center.classList.toggle('previewing', !next);
+    if (!next) { S.edSelId = null; renderSelBar(); renderProps(); }
+    renderPreview(); // re-render with/without anchors for the new mode
+  }
+
   // ---- M2: edit INSIDE the phone. The rendered AMP carries data-bid anchors
   // (server adds them for the editor preview only); clicking a block in the
   // iframe selects it and opens its settings. The iframe is srcdoc + same
@@ -1560,6 +1583,49 @@
       const sel = cd.querySelector('[data-bid="' + String(S.edSelId).replace(/"/g, '') + '"]');
       if (sel) sel.classList.add('edg-sel');
     }
+    mountResizeHandles(cd);
+  }
+  // M6: a drag handle on the bottom edge of the selected hero/image block.
+  // amp-img is layout="responsive", so the height attribute sets the aspect
+  // ratio scaled to the container — convert the on-screen pixel drag back to
+  // that attribute using the current rendered width.
+  const RESIZABLE = /^(hero|image)$/;
+  function mountResizeHandles(cd) {
+    cd.querySelectorAll('.edg-resize,.edg-resize-badge').forEach((n) => n.remove());
+    if (S.editMode === false || !S.edSelId) return;
+    const blk = S.doc && S.doc.blocks.find((b) => b.id === S.edSelId);
+    if (!blk || !RESIZABLE.test(blk.type)) return;
+    const sel = cd.querySelector('[data-bid="' + String(S.edSelId).replace(/"/g, '') + '"]');
+    if (!sel) return;
+    const handle = cd.createElement('div');
+    handle.className = 'edg-resize';
+    handle.title = 'Drag to resize';
+    sel.appendChild(handle);
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const target = sel.querySelector('amp-img') || sel;
+      const rect = target.getBoundingClientRect();
+      const startY = e.clientY, startH = rect.height;
+      const scale = 600 / (rect.width || 600);
+      const badge = cd.createElement('div'); badge.className = 'edg-resize-badge';
+      sel.appendChild(badge);
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      const move = (ev) => {
+        const px = Math.max(40, startH + (ev.clientY - startY));
+        const attr = Math.max(80, Math.min(600, Math.round(px * scale)));
+        blk.props.height = attr;
+        badge.textContent = attr + ' px';
+        scheduleRender();
+      };
+      const up = () => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', up);
+        badge.remove();
+        renderProps(); // reflect the committed height in the panel
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up);
+    });
   }
   function clearDropMarks(cd) {
     cd.querySelectorAll('.edg-drop-before,.edg-drop-after,.edg-drop-asset')
@@ -1570,15 +1636,19 @@
     const cd = canvasDoc(); if (!cd || !cd.body) return;
     if (!cd.getElementById('edg-style')) {
       const st = cd.createElement('style'); st.id = 'edg-style';
-      st.textContent = '.edg-a{cursor:pointer;transition:outline .1s}'
+      st.textContent = '.edg-a{cursor:pointer;transition:outline .1s;position:relative}'
         + '.edg-a.edg-hover{outline:2px dashed #e78129;outline-offset:-2px}'
         + '.edg-a.edg-sel{outline:2px solid #e78129;outline-offset:-2px}'
         + '.edg-a.edg-drop-before{box-shadow:inset 0 4px 0 #e78129}'
         + '.edg-a.edg-drop-after{box-shadow:inset 0 -4px 0 #e78129}'
-        + '.edg-a.edg-drop-asset{outline:3px dashed #34d27b;outline-offset:-3px}';
+        + '.edg-a.edg-drop-asset{outline:3px dashed #34d27b;outline-offset:-3px}'
+        + '.edg-resize{position:absolute;left:0;right:0;bottom:-5px;height:11px;cursor:ns-resize;z-index:9}'
+        + '.edg-resize::after{content:"";position:absolute;left:50%;bottom:3px;transform:translateX(-50%);width:44px;height:5px;border-radius:3px;background:#e78129;box-shadow:0 0 0 2px #fff}'
+        + '.edg-resize-badge{position:absolute;right:6px;bottom:8px;z-index:10;background:#28202c;color:#fff;font:600 11px/1.4 system-ui,sans-serif;padding:2px 7px;border-radius:6px;pointer-events:none}';
       (cd.head || cd.documentElement).appendChild(st);
     }
     cd.addEventListener('mouseover', (e) => {
+      if (S.editMode === false) return; // preview mode: no edit affordances
       const a = anchorOf(cd, e.target);
       cd.querySelectorAll('.edg-hover').forEach((n) => n.classList.remove('edg-hover'));
       if (a && a.dataset.bid !== S.edSelId) a.classList.add('edg-hover');
@@ -1596,6 +1666,7 @@
 
     // M4: drop a palette block, or a library image, INTO the phone.
     cd.addEventListener('dragover', (e) => {
+      if (S.editMode === false) return; // preview mode: no drop target
       const t = e.dataTransfer.types || [];
       const isNew = t.indexOf && t.indexOf('text/ed-newblock') >= 0;
       const isAsset = t.indexOf && t.indexOf('text/asset-url') >= 0;
@@ -1640,7 +1711,9 @@
     if (!S.doc) return;
     const chip0 = $('edChip'); chip0.className = 'chip rendering'; chip0.textContent = 'rendering…';
     try {
-      const out = await api('/api/docs/render', { doc: S.doc });
+      // Edit mode renders with data-bid anchors (click-to-select); Preview mode
+      // renders the clean, shippable AMP so the module is actually playable.
+      const out = await api('/api/docs/render', { doc: S.doc, anchors: S.editMode !== false });
       if (out && out.error && !out.ampHtml) { chip0.className = 'chip fail'; chip0.textContent = 'render error'; $('edWarn').textContent = out.error; return; }
       // Re-bind the canvas each time the iframe reloads (srcdoc wipes it).
       $('edFrame').onload = bindCanvas;
@@ -1830,6 +1903,9 @@
     $('edBack').onclick = leaveEditor;
     $('edSave').onclick = saveDoc;
     $('edTitle').oninput = () => { S.edDirty = true; setSaved(); };
+    document.querySelectorAll('#edModeToggle button[data-mode]').forEach((b) => {
+      b.onclick = () => setEditMode(b.dataset.mode === 'edit');
+    });
 
     // assets + contacts
     wireDropzone($('assetDrop'), $('assetFile'), assetsUpload);

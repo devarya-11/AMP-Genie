@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -385,6 +385,10 @@
       <div class="ed-center ed-canvas card">
         <div class="ed-canvas-bar">
           <div id="edSelBar" class="ed-selbar"><span class="ed-selbar-empty">Click a block in the email to edit it</span></div>
+          <div id="edModeToggle" class="ed-mode-toggle" role="group" aria-label="Edit or preview">
+            <button type="button" data-mode="edit" class="on">Edit</button>
+            <button type="button" data-mode="preview">Preview</button>
+          </div>
           <span id="edChip" class="chip">rendering…</span>
         </div>
         <div id="edWarn" class="ed-warn"></div>
@@ -438,6 +442,6 @@
   </main>
 </div>
 
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
