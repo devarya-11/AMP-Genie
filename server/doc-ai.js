@@ -34,11 +34,22 @@ const {
 // module still loads (and generateDoc still degrades to the static fallback)
 // if it is imported before those exports land. Each call site guards on the
 // function's presence rather than assuming it — the never-throw charter.
-const interactiveDocForModule = emailDoc.interactiveDocForModule;
-const fieldsForModule = emailDoc.fieldsForModule;
-const INTERACTIVE_TYPES = emailDoc.INTERACTIVE_TYPES instanceof Set
-  ? emailDoc.INTERACTIVE_TYPES
-  : new Set();
+// Resolved at CALL time from the live email-doc module object, NEVER captured
+// into a const at load. On the Workers esbuild bundle, email-doc's exports may
+// not be populated when THIS module initializes (module init order differs
+// from Node's), which froze INTERACTIVE_TYPES as an empty Set and made every
+// interactive check fail — so the deployment produced static docs while local
+// (Node's load order) worked. Reading emailDoc.* per call is load-order-proof.
+const EMPTY_SET = new Set();
+function interactiveDocForModule(args) {
+  return typeof emailDoc.interactiveDocForModule === 'function' ? emailDoc.interactiveDocForModule(args) : null;
+}
+function fieldsForModule(id) {
+  return typeof emailDoc.fieldsForModule === 'function' ? emailDoc.fieldsForModule(id) : [];
+}
+function interactiveTypes() {
+  return emailDoc.INTERACTIVE_TYPES instanceof Set ? emailDoc.INTERACTIVE_TYPES : EMPTY_SET;
+}
 
 // The module a brief with no interactive signal defaults to. 'quiz' when the
 // brief/use-case reads as engagement (a two-way interaction), else 'reveal'
@@ -54,16 +65,16 @@ const DEFAULT_INTERACTIVE_ID = 'reveal';
 // module id the renderer does not know.
 function resolveModuleId({ moduleId, brief, useCase } = {}) {
   const explicit = typeof moduleId === 'string' ? moduleId.trim() : '';
-  if (explicit && INTERACTIVE_TYPES.has(explicit)) return explicit;
+  if (explicit && interactiveTypes().has(explicit)) return explicit;
   const routed = routeBrief(brief, undefined);
-  if (routed && routed.moduleId && INTERACTIVE_TYPES.has(routed.moduleId)) {
+  if (routed && routed.moduleId && interactiveTypes().has(routed.moduleId)) {
     return routed.moduleId;
   }
   const hay = `${cleanStr(useCase, 200)} ${cleanStr(brief, 400)}`;
-  if (ENGAGEMENT_RE.test(hay) && INTERACTIVE_TYPES.has('quiz')) return 'quiz';
-  return INTERACTIVE_TYPES.has(DEFAULT_INTERACTIVE_ID)
+  if (ENGAGEMENT_RE.test(hay) && interactiveTypes().has('quiz')) return 'quiz';
+  return interactiveTypes().has(DEFAULT_INTERACTIVE_ID)
     ? DEFAULT_INTERACTIVE_ID
-    : (INTERACTIVE_TYPES.size ? [...INTERACTIVE_TYPES][0] : DEFAULT_INTERACTIVE_ID);
+    : (interactiveTypes().size ? [...interactiveTypes()][0] : DEFAULT_INTERACTIVE_ID);
 }
 
 // Same models + opt-in gates as brief-content / usecase-engine, restated here
@@ -362,12 +373,7 @@ function interactiveBase({
   brand, moduleId, brief, useCase, currency,
 }) {
   const head = headlineFrom({ brief, useCase, brandName: brand.name });
-  if (typeof interactiveDocForModule !== 'function') {
-    // Defensive floor: email-doc's interactive export has not landed yet.
-    const v = validateDoc(assembleDoc({ brand, currency, blocks: [] }));
-    return v.ok ? v.doc : { version: 1, blocks: [] };
-  }
-  return interactiveDocForModule({
+  const doc = interactiveDocForModule({
     brand: {
       name: brand.name,
       primaryHex: brand.primaryHex,
@@ -377,6 +383,14 @@ function interactiveBase({
     copy: head ? { head } : {},
     currency,
   });
+  // interactiveDocForModule returns null (or an interactive-less doc) only if
+  // email-doc's export is genuinely unavailable — degrade to an empty valid
+  // doc rather than fabricating an unrenderable one.
+  if (doc && Array.isArray(doc.blocks) && doc.blocks.some((b) => interactiveTypes().has(b.type))) {
+    return doc;
+  }
+  const v = validateDoc(assembleDoc({ brand, currency, blocks: [] }));
+  return v.ok ? v.doc : { version: 1, blocks: [] };
 }
 
 // Map ONE raw LLM framing block — ONLY hero / text / footer are allowed around
@@ -406,9 +420,9 @@ function mergeInteractive({
 
   // The interactive block from the base doc (its props are the deterministic
   // floor's copy, e.g. { head }); overlay the LLM copy for this module's fields.
-  const baseBlock = (base.blocks || []).find((b) => INTERACTIVE_TYPES.has(b.type))
+  const baseBlock = (base.blocks || []).find((b) => interactiveTypes().has(b.type))
     || { type: moduleId, props: {} };
-  const fields = (typeof fieldsForModule === 'function') ? fieldsForModule(moduleId) : [];
+  const fields = fieldsForModule(moduleId);
   const llmCopy = (obj.copy && typeof obj.copy === 'object' && !Array.isArray(obj.copy)) ? obj.copy : {};
   const mergedProps = { ...(baseBlock.props || {}) };
   for (const key of fields) {
@@ -428,7 +442,7 @@ function mergeInteractive({
   // trust boundary (validateDoc keeps at most one interactive block; a doc that
   // somehow lost it is not a valid interactive doc — fall back to the base).
   if (!v.ok) return null;
-  const hasInteractive = (v.doc.blocks || []).some((b) => INTERACTIVE_TYPES.has(b.type));
+  const hasInteractive = (v.doc.blocks || []).some((b) => interactiveTypes().has(b.type));
   return hasInteractive ? v.doc : null;
 }
 
@@ -456,7 +470,7 @@ function buildFallbackDoc(input) {
   const base = interactiveBase({
     brand: b, moduleId: modId, brief, useCase, currency: cur,
   });
-  const interactiveBlock = (base.blocks || []).find((bl) => INTERACTIVE_TYPES.has(bl.type));
+  const interactiveBlock = (base.blocks || []).find((bl) => interactiveTypes().has(bl.type));
   // If the interactive export has not landed, base carries no interactive block;
   // return it (an empty valid doc) rather than fabricating an unrenderable one.
   if (!interactiveBlock) return base;
@@ -477,7 +491,7 @@ function buildFallbackDoc(input) {
   // assembled shape above never is — but honour the never-throw contract, and
   // ALWAYS keep the interactive block: the base doc (which is already validated
   // and carries the module) is the floor beneath the floor.
-  if (v.ok && (v.doc.blocks || []).some((bl) => INTERACTIVE_TYPES.has(bl.type))) return v.doc;
+  if (v.ok && (v.doc.blocks || []).some((bl) => interactiveTypes().has(bl.type))) return v.doc;
   return base;
 }
 
@@ -616,9 +630,9 @@ async function generateDoc(input = {}, opts = {}) {
     // Only run the LLM tier when the base actually carries the interactive
     // block (i.e. email-doc's interactive export is present); otherwise there
     // is nothing to enrich and the fallback path owns it.
-    const hasInteractive = (base.blocks || []).some((bl) => INTERACTIVE_TYPES.has(bl.type));
+    const hasInteractive = (base.blocks || []).some((bl) => interactiveTypes().has(bl.type));
     if (provider && hasInteractive) {
-      const fields = (typeof fieldsForModule === 'function') ? fieldsForModule(modId) : [];
+      const fields = fieldsForModule(modId);
       const schema = interactiveDocSchema(fields);
       const prompt = buildInteractivePrompt({
         brand: b, brief, useCase, moduleId: modId, fields,

@@ -45,10 +45,17 @@ const { validateDoc, renderDoc } = emailDoc;
 // email-doc's interactive helpers. Required defensively (they land in the same
 // phase) so pitch-api still loads if they are absent — exampleToDocH guards on
 // interactiveDocForModule's presence and reports honestly rather than throwing.
-const interactiveDocForModule = emailDoc.interactiveDocForModule;
-const INTERACTIVE_TYPES = emailDoc.INTERACTIVE_TYPES instanceof Set
-  ? emailDoc.INTERACTIVE_TYPES
-  : new Set();
+// Resolved at CALL time, NOT captured at load: on the Workers esbuild bundle
+// email-doc's exports may be unpopulated when pitch-api initializes, which
+// would freeze INTERACTIVE_TYPES empty and make exampleToDocH synthesize
+// static (non-interactive) docs on the deployment. Same fix as doc-ai.js.
+const EMPTY_SET = new Set();
+function interactiveDocForModule(args) {
+  return typeof emailDoc.interactiveDocForModule === 'function' ? emailDoc.interactiveDocForModule(args) : null;
+}
+function interactiveTypes() {
+  return emailDoc.INTERACTIVE_TYPES instanceof Set ? emailDoc.INTERACTIVE_TYPES : EMPTY_SET;
+}
 const { generateDoc } = require('./doc-ai');
 
 // Local mirrors of the shapes repo.js/store.js enforce (kept private there —
@@ -489,7 +496,7 @@ function createPitchApi(ctx = {}) {
 
     // Case 2: a legacy interactive example -> synthesize an interactive doc.
     const moduleId = example.module_id;
-    if (moduleId && INTERACTIVE_TYPES.has(moduleId) && typeof interactiveDocForModule === 'function') {
+    if (moduleId && interactiveTypes().has(moduleId)) {
       const brand = await repo.getBrandById(example.brand_id);
       const params = parseJson(example.params_json) || {};
       // The build pipeline stores copy at params.body.copy; be liberal about
