@@ -1204,7 +1204,61 @@ function generate(opts = {}) {
   };
 }
 
+// ---- fragment API (Genie 2.0 editor: interactive modules AS blocks) ---------
+// Each module builder already returns a { scripts, css, body, previewModel }
+// FRAGMENT — generate() just wraps it in shell(). This exposes that fragment
+// so server/email-doc.js can compose an interactive module inline with static
+// layout blocks in ONE document. ADDITIVE: generate() is untouched, so the
+// 56/56 validator matrix and byte-determinism are unchanged (a test asserts
+// buildModuleFragment + shell === generate().ampHtml for every module).
+//
+// Constraint the caller must enforce: every module uses the SAME amp-state id
+// ('s'), so at most ONE interactive block per document — two would collide.
+// The fragment's `fields` lists the copy.* keys the editor may expose for this
+// module (mirrors brief-content's FIELD_SCHEMAS, kept here so email-doc needs
+// no cross-module import).
+const MODULE_FIELDS = {
+  reveal: ['head', 'teaserText', 'ctaLabel', 'footerText'],
+  search: ['head', 'footerText'],
+  quiz: ['head', 'question', 'footerText'],
+  rating: ['head', 'prompt', 'footerText'],
+  spin: ['head', 'teaserText', 'footerText'],
+  poll: ['head', 'question', 'optionA', 'optionB', 'footerText'],
+  calc: ['head', 'promptText', 'ctaLabel', 'assumptionText', 'footerText'],
+  report: ['head', 'verdictText', 'ctaLabel', 'footerText'],
+};
+
+function buildModuleFragment(moduleId, opts = {}) {
+  const mod = MODULES[moduleId];
+  if (!mod) return null;
+  // Same deterministic context generate() builds — mirrored, not shared, to
+  // keep generate() byte-identical; the equivalence test guards against drift.
+  const brand = (opts.brand || 'Acme').trim() || 'Acme';
+  const vertical = VERTICALS.includes(opts.vertical) ? opts.vertical : 'Generic';
+  const tone = TONES[opts.tone] ? opts.tone : 'Playful';
+  const currency = CURRENCIES[opts.currency] ? opts.currency : 'INR';
+  const counter = Number.isFinite(opts.counter) ? opts.counter : 0;
+  const fallbackColor = hslToHex({ h: hashSeed(brand) % 360, s: 0.6, l: 0.47 });
+  const palette = opts.palette || derivePalette(opts.color || fallbackColor);
+  const content = getContent(vertical);
+  const t = TONES[tone];
+  const rng = mulberry32(hashSeed(brand + ':' + counter));
+  const copy = opts.copy || {};
+  const built = mod.build({ brand, vertical, tone, palette, content, t, currency, rng, copy });
+  return {
+    moduleId,
+    moduleName: mod.name,
+    kind: mod.kind,
+    scripts: built.scripts,
+    css: built.css,
+    body: built.body,
+    previewModel: built.previewModel,
+    fields: MODULE_FIELDS[moduleId] || [],
+  };
+}
+
 module.exports = {
   generate, derivePalette, MODULES, MODULE_IDS, pickModuleId,
   enc, formatPrice, CURRENCIES, VERTICALS,
+  buildModuleFragment, MODULE_FIELDS, shell,
 };
