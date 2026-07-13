@@ -41,6 +41,7 @@ const {
   getBrandKit, putBrandKit, sanitizeKitPatch, mergeKitPatch, brandSlug,
 } = require('./store');
 const { createFsKv } = require('./store-fs');
+const { registerPitchRoutes } = require('./pitch-routes-express');
 const { buildPageHtml, slatePageHtml, notFoundPageHtml } = require('./share-pages');
 
 // Local persistence for builds/slates/brand-kits: the same store interface the
@@ -412,6 +413,14 @@ app.post('/tweak', async (req, res) => {
 
 app.get('/versions/:id', async (req, res) => {
   res.json({ items: await readVersions(kv, req.params.id) });
+});
+
+// ---- Genie 2.0 pitch workspace API -------------------------------------------
+// The whole /api/* surface lives once in server/pitch-api.js (shared with
+// functions/api/* via functions/_lib/pitch.js); this registrar only maps
+// Express paths onto those runtime-agnostic handlers.
+registerPitchRoutes(app, {
+  repo, storage, kv, validate, llmProviders,
 });
 
 // ---- share pages: the pitch deliverable ------------------------------------
