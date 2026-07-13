@@ -31,13 +31,13 @@ function makeBuild(overrides = {}, genOpts = {}) {
 
 // ---- buildPageHtml -----------------------------------------------------------
 
-test('buildPageHtml carries the brand, phone frame, preview script and footer row', () => {
+test('buildPageHtml carries the brand, phone frame, embedded AMP and footer row', () => {
   const html = buildPageHtml(makeBuild());
   assert.ok(html.includes('Zomato'), 'brand name must appear');
-  assert.ok(html.includes('id="demo"'), 'the preview container must exist');
   assert.ok(html.includes('class="phone"') && html.includes('phone-screen'), 'phone frame markup must exist');
-  assert.ok(html.includes('<script src="/preview.js"></script>'), 'must load the shared preview renderer');
-  assert.ok(html.includes('AmpGeniePreview.render'), 'must invoke the renderer');
+  assert.ok(html.includes('iframe class="amp-frame"'), 'the exact AMP email must embed in an iframe');
+  assert.ok(html.includes('src="/build/abc123def456?format=embed"'), "the iframe must embed this build's real AMP");
+  assert.ok(html.includes('sandbox="allow-scripts allow-same-origin"'), 'the frame must be sandboxed so the AMP runtime can boot');
   assert.ok(html.includes('/build/abc123def456?format=amp'), 'Download AMP must point at the build route');
   assert.ok(html.includes('badge pass'), 'a passing validation must show the green badge');
   assert.ok(html.includes('Built with AMP Genie'), 'credit line must exist');
@@ -46,19 +46,16 @@ test('buildPageHtml carries the brand, phone frame, preview script and footer ro
   assert.ok(html.includes('Tap-to-reveal offer'), 'the use-case label must appear');
 });
 
-test('inline JSON is the light subset with every "<" escaped as \\u003c', () => {
-  const build = makeBuild();
-  // Force the worst case: a previewModel string that would otherwise close
-  // the inline <script> element and start injecting markup.
-  build.previewModel = { ...build.previewModel, head: 'Deal </script><img src=x onerror=alert(1)>' };
-  const html = buildPageHtml(build);
-  assert.ok(html.indexOf('</script><img') === -1, 'a raw </script> breakout must never survive');
-  assert.ok(html.includes('\\u003c/script'), 'JSON "<" must be emitted as \\u003c');
-  assert.ok(html.includes('"moduleId"') && html.includes('"previewModel"') && html.includes('"palette"'),
-    'the inline payload carries exactly what preview.js needs');
-  assert.ok(!html.includes('"ampHtml"') && !html.includes('amp4email'), 'ampHtml must never be inlined');
+test('the AMP is embedded by URL, never inlined, and the page ships no inline script', () => {
+  const html = buildPageHtml(makeBuild());
+  // The exact AMP is referenced (an <iframe src>), so the multi-KB ampHtml and
+  // fallback fields never bloat the share page — and there is no inline <script>
+  // payload for a hostile record field to break out of in the first place.
+  assert.ok(html.includes('?format=embed'), 'the AMP must be embedded by URL reference');
+  assert.ok(!html.includes('amp4email'), 'the raw AMP document must never be inlined');
   assert.ok(!html.includes('FALLBACK_MARKER') && !html.includes('FALLBACK_TEXT_MARKER'),
     'fallback parts must never be inlined');
+  assert.ok(!html.includes('<script'), 'the share page carries no inline or external script');
 });
 
 test('a hostile brand name is escaped everywhere on the page', () => {
@@ -109,17 +106,17 @@ function makeSlate() {
   return { slate, builds };
 }
 
-test('slatePageHtml renders one phone container and open link per build', () => {
+test('slatePageHtml renders one embedded AMP frame and open link per build', () => {
   const { slate, builds } = makeSlate();
   const html = slatePageHtml(slate, builds);
   for (const b of builds) {
-    assert.ok(html.includes(`id="demo-${b.id}"`), `container for ${b.id} must exist`);
+    assert.ok(html.includes(`src="/build/${b.id}?format=embed"`), `embedded AMP frame for ${b.id} must exist`);
     assert.ok(html.includes(`href="/b/${b.id}"`), `open link for ${b.id} must exist`);
     assert.ok(html.includes(`Use case ${b.moduleId}`), `use-case label for ${b.moduleId} must exist`);
   }
-  const scriptTags = html.split('<script src="/preview.js"></script>').length - 1;
-  assert.strictEqual(scriptTags, 1, 'preview.js must load exactly once for the whole grid');
-  assert.ok(html.includes('const BUILDS = ['), 'all builds render from one inline array');
+  const frames = html.split('iframe class="amp-frame"').length - 1;
+  assert.strictEqual(frames, builds.length, 'exactly one embedded AMP frame per build');
+  assert.ok(!html.includes('/preview.js'), 'the retired mirror renderer must never load');
   assert.ok(html.includes('Zomato &#8212; monsoon pitch'), 'the slate title must appear (entity-encoded dash)');
 });
 
@@ -136,7 +133,7 @@ test('slatePageHtml tolerates an empty build list', () => {
   const { slate } = makeSlate();
   const html = slatePageHtml(slate, []);
   assert.ok(html.includes('0 interactive concepts'), 'still renders a coherent page');
-  assert.ok(!html.includes('id="demo-'), 'no phantom containers');
+  assert.ok(!html.includes('?format=embed'), 'no phantom embedded frames');
 });
 
 // ---- notFoundPageHtml --------------------------------------------------------

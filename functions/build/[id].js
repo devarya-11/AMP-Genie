@@ -1,7 +1,8 @@
 // GET /build/:id — the persisted build as data. Plain JSON strips the three
 // bulky markup fields (ampHtml/fallbackHtml/fallbackText) so metadata reads
 // stay light; ?format=amp / ?format=fallback serve the real file as a
-// download (the share page's "Download AMP" link).
+// download (the share page's "Download AMP" link); ?format=embed serves the
+// AMP inline so a share-page <iframe> renders the exact interactive email.
 
 import storeMod from '../../server/store.js';
 import { json } from '../_lib/http.js';
@@ -22,12 +23,23 @@ function attachment(markup, build) {
   });
 }
 
+// Same AMP bytes as ?format=amp, but INLINE (no attachment disposition) so a
+// share page's <iframe src> renders the real interactive email instead of
+// downloading it (directive 7). Same-origin, so framing is allowed; no-store so
+// an edited/rebuilt id never renders stale.
+function embed(markup) {
+  return new Response(markup || '', {
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+  });
+}
+
 export async function onRequestGet({ params, env, request }) {
   const build = await getBuild(env.HISTORY, params.id);
   if (!build) return json({ error: 'build not found' }, 404);
   const format = new URL(request.url).searchParams.get('format');
   if (format === 'amp') return attachment(build.ampHtml, build);
   if (format === 'fallback') return attachment(build.fallbackHtml, build);
+  if (format === 'embed') return embed(build.ampHtml);
   const { ampHtml, fallbackHtml, fallbackText, ...meta } = build;
   return json(meta);
 }

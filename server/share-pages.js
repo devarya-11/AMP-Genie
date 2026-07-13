@@ -3,9 +3,10 @@
 // Server-rendered public share pages: /b/<id> for a persisted build, /s/<id>
 // for a slate. These are the pitch deliverable a client opens with nothing
 // but the link, so unlike the app they use a light, presentation-neutral
-// theme, and each page is fully self-contained except for /preview.js — the
-// same renderer the app's Live Preview tab uses, so a shared page and the
-// in-app preview can never drift.
+// theme. Each phone frame embeds the build's real AMP email via
+// <iframe src="/build/<id>?format=embed"> — the exact interactive markup the
+// recipient's inbox renders, so a shared page and the real email can never
+// drift (and the app's Live Preview tab embeds the same bytes the same way).
 //
 // Pure string builders, no I/O: the /b, /s and /build Pages Functions fetch
 // the KV records and pass them in. Every record field that reaches the markup
@@ -51,12 +52,14 @@ function safeUrl(v) {
   return /^https?:\/\/[^\s"'<>]+$/i.test(s) ? s : '';
 }
 
-// Inline <script> JSON: JSON.stringify never emits an unescaped quote, but a
-// '</script' inside a string value would close the element itself — escaping
-// every '<' as the backslash-u003c sequence removes that whole class
-// (JSON and JS both accept it).
-function safeJson(value) {
-  return JSON.stringify(value).replace(/</g, '\\u003c');
+// The phone frame's payload is the build's real AMP email, embedded by URL
+// rather than inlined: /build/<id>?format=embed serves the exact ampHtml bytes
+// inline (no attachment disposition) so the iframe renders the interactive
+// email. The same-origin sandbox lets the AMP runtime boot and its scripts run
+// while still isolating the frame's layout from the host page.
+function ampFrame(id, title) {
+  return `<iframe class="amp-frame" src="/build/${escapeHtml(id)}?format=embed"`
+    + ` sandbox="allow-scripts allow-same-origin" title="${escapeHtml(title)}"></iframe>`;
 }
 
 // Only the date part of the record's ISO timestamp matters on a share page;
@@ -66,42 +69,14 @@ function fmtDate(ts) {
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : '';
 }
 
-// The .phone / .phone-screen frame and the pv-* module rules are copied from
-// web/style.css (the styling preview.js targets) rather than linking
-// /style.css, which would drag the whole dark app theme onto a client-facing
-// page. Keep them byte-close to the source so preview parity holds.
+// The .phone / .phone-screen bezel is copied from web/style.css rather than
+// linking /style.css, which would drag the whole dark app theme onto a
+// client-facing page. The amp-frame rule sizes the embedded AMP iframe to fill
+// the screen; the AMP document inside the iframe brings its own styling.
 const PHONE_CSS = `
-.hidden{display:none !important}
 .phone{margin:0 auto;width:360px;max-width:100%;background:#0d0806;border:11px solid #2b1f19;border-radius:38px;padding:11px;box-shadow:0 24px 70px -28px #00000059,0 0 0 1px #00000012}
-.phone-screen{background:#fff;color:#1d1d2b;border-radius:24px;overflow:hidden;min-height:540px;max-height:600px;overflow-y:auto}
-.pv-hdr{padding:22px 20px;color:#fff}
-.pv-hdr h1{margin:0;font-size:19px;line-height:1.3;font-weight:700}
-.pv-body{padding:0}
-.pv-muted{color:#6b6b7b;font-size:13px;line-height:1.5;margin:0}
-.pv-btn{display:inline-block;border:0;color:#fff;padding:13px 24px;border-radius:8px;font-size:15px;font-weight:700;text-align:center;cursor:pointer;margin-top:14px}
-.pv-code{display:inline-block;border:2px dashed;color:inherit;font-size:18px;font-weight:700;letter-spacing:2px;padding:10px 18px;border-radius:8px;margin:14px 0}
-.pv-row{font-size:0;padding:0 16px 16px;display:flex;gap:4%}
-.pv-card{flex:1;min-width:0;border:1px solid #e6e6ec;border-radius:10px;overflow:hidden}
-.pv-card-name{font-size:14px;font-weight:700;margin:8px 12px 4px;color:#1d1d2b}
-.pv-card-price{font-size:15px;font-weight:700;margin:0 12px 12px}
-.pv-search{box-sizing:border-box;margin:16px 16px 4px;width:calc(100% - 32px);background:#fff;color:#1d1d2b;border:1px solid #e6e6ec;border-radius:8px;padding:13px 14px;font-size:15px;outline:none}
-.pv-search::placeholder{color:#9a9aa8}
-.pv-pills{font-size:0;padding:0 16px;margin:8px 0}
-.pv-pill{display:inline-block;font-size:13px;padding:8px 14px;border:1px solid #e6e6ec;border-radius:20px;margin:0 6px 6px 0;cursor:pointer;color:#1d1d2b}
-.pv-pill.on{color:#fff}
-.pv-grid{padding:8px 16px 20px;display:flex;flex-wrap:wrap;gap:12px}
-.pv-grid .pv-card{flex:1 1 45%}
-.pv-empty{text-align:center;color:#9a9aa8;font-size:14px;padding:20px;width:100%}
-.pv-qtitle{font-size:18px;font-weight:700;margin:0 0 16px;padding:20px 20px 0;color:#1d1d2b}
-.pv-opt{display:block;border:1px solid #e6e6ec;border-radius:10px;padding:15px 16px;margin:0 16px 12px;font-size:15px;cursor:pointer;color:#1d1d2b}
-.pv-opt.on{border-color:currentColor}
-.pv-result{border-radius:10px;padding:18px;margin:6px 16px 20px;font-size:14px;line-height:1.5}
-.pv-stars{font-size:0;text-align:center;margin:10px 0}
-.pv-star{width:38px;height:38px;display:inline-block;padding:0 4px;cursor:pointer;color:#d8d8e2}
-.pv-conf{text-align:center;font-size:15px;font-weight:700;min-height:20px;margin:8px 0 20px}
-.pv-reward{border-radius:12px;padding:22px;margin:16px}
-.pv-vote{display:inline-block;flex:1;text-align:center;border:2px solid #e6e6ec;border-radius:12px;padding:22px 8px;cursor:pointer;font-size:16px;font-weight:700;color:#1d1d2b}
-.pv-vote.on{border-color:currentColor}
+.phone-screen{background:#fff;color:#1d1d2b;border-radius:24px;overflow:hidden;min-height:540px;max-height:600px}
+.phone-screen iframe.amp-frame{display:block;width:100%;height:598px;border:0;background:#fff}
 `;
 
 // Light client-facing theme — deliberately not the app's dark dev chrome.
@@ -186,26 +161,17 @@ function buildPageHtml(build) {
   const useCase = str(b.useCase);
   const p = safePalette(b.palette);
   const id = str(b.id);
-  // Inline ONLY what preview.js needs — never ampHtml/fallbackHtml, which
-  // would triple the page weight for markup the page never renders. The
-  // palette is re-sanitised because preview.js splices it into style strings.
-  const inline = safeJson({ moduleId: b.moduleId, previewModel: b.previewModel, palette: p });
   const metaHtml = `<p class="module-name">${escapeHtml(moduleName)}</p>`
     + (useCase ? `<p class="usecase">${escapeHtml(useCase)}</p>` : '');
   const body = `${brandHeader({ brand, logoUrl: b.logoUrl, primary: p.primary, metaHtml })}
 <main class="stage">
-  <div class="phone"><div id="demo" class="phone-screen"></div></div>
+  <div class="phone"><div class="phone-screen">${ampFrame(id, `${brand} — ${moduleName}`)}</div></div>
 </main>
 <footer class="foot">
   ${validationBadge(b.validation)}
   <a class="dl" href="/build/${escapeHtml(id)}?format=amp" download>Download AMP</a>
   ${creditLine(b)}
-</footer>
-<script src="/preview.js"></script>
-<script>
-const BUILD = ${inline};
-AmpGeniePreview.render(document.getElementById('demo'), { moduleId: BUILD.moduleId, previewModel: BUILD.previewModel, palette: BUILD.palette });
-</script>`;
+</footer>`;
   return pageShell({ title: `${brand} — ${moduleName} | AMP Genie`, body });
 }
 
@@ -226,17 +192,9 @@ function slatePageHtml(slate, builds) {
     <p class="usecase">${escapeHtml(label)}</p>
     <a class="open" href="/b/${escapeHtml(id)}">open &#8599;</a>
   </div>
-  <div class="phone"><div id="demo-${escapeHtml(id)}" class="phone-screen"></div></div>
+  <div class="phone"><div class="phone-screen">${ampFrame(id, label)}</div></div>
 </section>`;
   }).join('\n');
-  const inline = safeJson(list.map((b) => ({
-    id: str(b.id),
-    moduleId: b.moduleId,
-    previewModel: b.previewModel,
-    palette: safePalette(b.palette),
-    useCase: b.useCase,
-    moduleName: b.moduleName,
-  })));
   const metaHtml = `<p class="slate-title">${escapeHtml(title)}</p>`
     + `<p class="usecase">${list.length} interactive concept${list.length === 1 ? '' : 's'}</p>`;
   const briefBlock = brief
@@ -248,15 +206,7 @@ ${cells}
 </main>
 <footer class="foot">
   ${creditLine(s)}
-</footer>
-<script src="/preview.js"></script>
-<script>
-const BUILDS = ${inline};
-for (const b of BUILDS) {
-  const c = document.getElementById('demo-' + b.id);
-  if (c) AmpGeniePreview.render(c, { moduleId: b.moduleId, previewModel: b.previewModel, palette: b.palette });
-}
-</script>`;
+</footer>`;
   return pageShell({ title: `${title} | AMP Genie`, body });
 }
 

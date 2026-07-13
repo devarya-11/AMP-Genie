@@ -620,9 +620,33 @@
     renderValidation(r.validation);
   }
 
+  // Directive 7: the preview IS the email. Render the exact generated AMP inside
+  // a sandboxed iframe that boots the real AMP runtime (amp-bind / amp-form /
+  // amp-img, the amp4email boilerplate reveal) — not a hand-written JS mirror
+  // that can drift from what actually ships. The iframe is created once and
+  // reused; srcdoc carries the doc verbatim so no extra route or request is
+  // involved and the bytes shown are byte-identical to the download.
+  //
+  // sandbox: allow-scripts (the AMP runtime + every interaction needs JS) and
+  // allow-same-origin (the runtime refuses to boot in a sandboxed frame without
+  // it). That pair is normally powerful, but the content here is our OWN
+  // validator-passed AMP, not third-party HTML — the iframe is a rendering
+  // surface, never a trust boundary for untrusted code.
   function renderPreview() {
     const area = $('previewArea');
-    window.AmpGeniePreview.render(area, { moduleId: S.result.moduleId, previewModel: S.result.previewModel, palette: S.result.palette });
+    let frame = area.querySelector('iframe.amp-frame');
+    if (!frame) {
+      area.textContent = '';
+      frame = document.createElement('iframe');
+      frame.className = 'amp-frame';
+      frame.title = 'Interactive AMP email preview';
+      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+      area.appendChild(frame);
+    }
+    // Always the last SUCCESSFULLY generated (validator-passed) AMP — never the
+    // live-edited textarea, which may be mid-edit invalid; edits stay flagged by
+    // the stale badge (updateEditedIndicator) exactly as before.
+    frame.srcdoc = S.result.ampHtml;
   }
 
   function chip(box, k, v) { const c = el('span', 'chip'); c.innerHTML = '<b>' + escapeHtml(String(k)) + '</b> ' + escapeHtml(String(v)); box.appendChild(c); }
@@ -693,7 +717,10 @@
 
   // ---------- code editing ----------
   function currentCode() { return S.edited != null ? S.edited : S.result.ampHtml; }
-  function onEdit() { S.edited = $('code').value; updateEditedIndicator(); renderPreview(); }
+  // The preview mirrors the last GENERATED build, so a keystroke in the code box
+  // only flips the stale badge — it does not (and must not) reload the AMP iframe
+  // on every character (that would refetch the runtime and flash the frame).
+  function onEdit() { S.edited = $('code').value; updateEditedIndicator(); }
   function updateEditedIndicator() {
     const edited = S.edited != null && S.edited !== S.result.ampHtml;
     $('editedDot').classList.toggle('hidden', !edited);
