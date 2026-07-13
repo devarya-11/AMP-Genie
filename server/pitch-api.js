@@ -38,7 +38,9 @@ const { buildDossier } = require('./brand-research');
 const { resolveBrandColor, resolveBrandLogo } = require('./brand');
 const { createBuild } = require('./build-pipeline');
 const { applyTweak } = require('./tweak-engine');
-const { brandSlug, putBrandKit } = require('./store');
+const { brandSlug, putBrandKit, putBuild } = require('./store');
+const { validateDoc, renderDoc } = require('./email-doc');
+const { generateDoc } = require('./doc-ai');
 
 // Local mirrors of the shapes repo.js/store.js enforce (kept private there —
 // the regex is the contract, same restatement server/tweak-engine.js makes).
@@ -495,6 +497,228 @@ function createPitchApi(ctx = {}) {
     return ok({ example: next, build: { sharePath: result.response.sharePath || null } });
   }
 
+  // ---- doc editor (phase 4): the visual block-email editor's backend --------------
+  //
+  // A doc is server/email-doc.js's block document; renderDoc turns it into ONE
+  // AMP4EMAIL document that passes the real validator. These handlers are the
+  // editor's live-preview (pure), save-new, save-edit and AI-draft endpoints.
+  //
+  // SHARE-PAGE DECISION: option (a). A doc example does NOT go through
+  // createBuild, so it has no KV build record and /b/<id> would 404. We
+  // therefore persist a MINIMAL build record (the flat fields buildPageHtml +
+  // /build/:id?format=amp actually read: id, brand, moduleName, useCase,
+  // palette, logoUrl, validation, ts, author, ampHtml, fallbackHtml) under
+  // build:<id> via putBuild, and hand back sharePath '/b/<id>'. Best-effort by
+  // putBuild's own contract (false, never a throw) — a failed/absent kv just
+  // means sharePath:null and the editor uses its in-app preview, never a
+  // failed save.
+
+  // Validate + render a doc to one AMP document and run the injected validator.
+  // Pure and never throws (validateDoc/renderDoc/validate are all safe); shape
+  // errors surface as { ok:false }. Shared by every doc handler below.
+  async function renderDocResult(doc) {
+    const v = validateDoc(doc);
+    if (!v.ok) return { ok: false, error: v.error };
+    const r = renderDoc(v.doc);
+    const verdict = await validate(r.ampHtml);
+    return {
+      ok: true,
+      doc: v.doc,
+      ampHtml: r.ampHtml,
+      warnings: r.warnings || [],
+      validation: {
+        pass: !!(verdict && verdict.pass),
+        errorCount: (verdict && Math.max(0, Math.round(Number(verdict.errorCount)) || 0)) || 0,
+      },
+    };
+  }
+
+  // The minimal KV build record a doc example needs for its /b/<id> share page
+  // (see the option-(a) note above). buildId is the caller's chosen id (the
+  // example id, so the share link is stable across edits). Returns buildId when
+  // it persisted, else null — putBuild is best-effort and never throws.
+  async function putDocBuild({ buildId, brand, title, doc, ampHtml, validation }) {
+    const palette = derivePaletteSafe(doc);
+    const record = {
+      id: buildId,
+      ts: nowIso(),
+      brand: (brand && brand.name) || 'Brand',
+      moduleName: 'Block email',
+      useCase: title || undefined,
+      palette,
+      logoUrl: (brand && brand.logo_url) || undefined,
+      validation: { pass: !!validation.pass, errorCount: validation.errorCount, warningCount: 0 },
+      ampHtml,
+      // The download/preview siblings the share page's amp part uses; a doc has
+      // no static-html twin, so the AMP doubles as both — buildPageHtml only
+      // reads fallbackHtml for the ?format=html download, which a doc email
+      // does not offer, so the AMP is the honest content for both formats.
+      fallbackHtml: ampHtml,
+    };
+    try {
+      return (await putBuild(kv, record)) ? buildId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // A doc carries its own brand.primaryHex; derive the share page's palette
+  // from it the way build records do, defaulting when absent. Kept local +
+  // guarded so a doc without a colour never breaks the share record.
+  function derivePaletteSafe(doc) {
+    try {
+      // eslint-disable-next-line global-require
+      const { derivePalette } = require('./generate');
+      const hex = (doc && doc.brand && doc.brand.primaryHex) || '#4f46e5';
+      return derivePalette(hex);
+    } catch {
+      return undefined;
+    }
+  }
+
+  // POST /api/docs/render — the editor's live-preview endpoint. Pure: no
+  // persistence, no id. A non-object doc is a 400; anything else validates,
+  // renders and reports the verdict + the sanitized doc (so the editor can
+  // reconcile what survived the trust boundary, e.g. a hostile string that was
+  // stripped or a bad block that was dropped).
+  async function renderDocH({ doc } = {}) {
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return bad('doc must be an object');
+    const r = await renderDocResult(doc);
+    if (!r.ok) return bad(r.error || 'invalid doc');
+    return ok({
+      ampHtml: r.ampHtml,
+      validation: r.validation,
+      warnings: r.warnings,
+      doc: r.doc,
+    });
+  }
+
+  // POST /api/pitches/:id/doc-examples — save a NEW doc example into a pitch.
+  // Validates + renders; a doc that does not pass the validator is a 400 (the
+  // editor should never be able to persist a broken email). Stores the example
+  // with module_id 'doc' + doc_json + amp_html + validation_pass 1, seeds the
+  // KV share record (option a), and logs example-created.
+  async function createDocExampleH({
+    pitchId, title, doc, author,
+  } = {}) {
+    if (!ID_SHAPE.test(String(pitchId || ''))) return bad('bad pitch id');
+    const pitch = await repo.getPitch(pitchId);
+    if (!pitch) return missing('no such pitch');
+    const brand = await repo.getBrandById(pitch.brand_id);
+    if (!brand) return missing('the pitch has lost its brand row');
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return bad('doc must be an object');
+
+    const r = await renderDocResult(doc);
+    if (!r.ok) return bad(r.error || 'invalid doc');
+    if (!r.validation.pass) {
+      return { status: 400, json: { error: 'the email did not pass AMP validation', validation: r.validation } };
+    }
+
+    const actor = cleanAuthor(author);
+    const exTitle = typeof title === 'string' ? cleanStr(title).slice(0, TITLE_MAX) : '';
+    const example = await repo.createExample({
+      pitchId: pitch.id,
+      title: exTitle || 'Block email',
+      moduleId: 'doc',
+      doc: r.doc,
+      ampHtml: r.ampHtml,
+      validationPass: 1,
+      createdBy: actor,
+    });
+    if (!example) return { status: 500, json: { error: 'could not record the example' } };
+
+    // Share record keyed by the example id, so the link is stable across edits.
+    const shareId = await putDocBuild({
+      buildId: example.id, brand, title: exTitle, doc: r.doc, ampHtml: r.ampHtml, validation: r.validation,
+    });
+    await repo.logActivity({
+      actor, brandId: pitch.brand_id, pitchId: pitch.id, verb: 'example-created', detail: example.title,
+    });
+    return ok({
+      example,
+      build: {
+        sharePath: shareId ? '/b/' + shareId : null,
+        moduleId: 'doc',
+        moduleName: 'Block email',
+        validation: r.validation,
+      },
+    });
+  }
+
+  // PATCH /api/examples/:id/doc — save an EDIT to an existing doc example in
+  // place (no new row — an edit is the same example, unlike a tweak). Re-renders
+  // + re-validates; a doc that fails the validator is a 400; refreshes the KV
+  // share record keyed to the example id; logs example-edited.
+  async function updateDocExampleH({ id, doc, author } = {}) {
+    if (!ID_SHAPE.test(String(id || ''))) return bad('bad example id');
+    const existing = await repo.getExample(id);
+    if (!existing) return missing('no such example');
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return bad('doc must be an object');
+
+    const r = await renderDocResult(doc);
+    if (!r.ok) return bad(r.error || 'invalid doc');
+    if (!r.validation.pass) {
+      return { status: 400, json: { error: 'the email did not pass AMP validation', validation: r.validation } };
+    }
+
+    const example = await repo.updateExampleDoc(id, {
+      doc: r.doc, ampHtml: r.ampHtml, validationPass: 1,
+    });
+    if (!example) return { status: 500, json: { error: 'could not update the example' } };
+
+    // Refresh the same-id share record so /b/<id> reflects the edit.
+    const brand = await repo.getBrandById(example.brand_id);
+    const shareId = await putDocBuild({
+      buildId: example.id, brand, title: example.title, doc: r.doc, ampHtml: r.ampHtml, validation: r.validation,
+    });
+    await repo.logActivity({
+      actor: cleanAuthor(author),
+      brandId: example.brand_id,
+      pitchId: example.pitch_id,
+      verb: 'example-edited',
+      detail: example.title,
+    });
+    return ok({
+      example,
+      build: { sharePath: shareId ? '/b/' + shareId : null, validation: r.validation },
+    });
+  }
+
+  // POST /api/pitches/:id/ai-doc — AI-draft a starter doc for the editor to
+  // open. NOT saved: the editor opens it, edits, then createDocExample saves.
+  // generateDoc always returns a validated doc (fallback offline), so this
+  // never fails once the pitch exists.
+  async function aiDocH({
+    pitchId, brief, useCase, author,
+  } = {}) {
+    if (!ID_SHAPE.test(String(pitchId || ''))) return bad('bad pitch id');
+    const pitch = await repo.getPitch(pitchId);
+    if (!pitch) return missing('no such pitch');
+    const brand = await repo.getBrandById(pitch.brand_id);
+    if (!brand) return missing('the pitch has lost its brand row');
+    const products = await repo.listProducts(brand.id);
+
+    const briefText = (typeof brief === 'string' && brief.trim()) ? brief : (pitch.brief || '');
+    const doc = await generateDoc({
+      brand: {
+        name: brand.name,
+        primaryHex: brand.primary_hex || undefined,
+        logoUrl: brand.logo_url || undefined,
+        site: brand.site || undefined,
+        voice: brand.voice_sample || undefined,
+        items: products.map((p) => ({
+          name: p.name, price: p.price ?? undefined, imageUrl: p.image_url || undefined,
+        })),
+      },
+      brief: briefText,
+      useCase,
+    }, { providers: await providers() });
+    // author is accepted for wire-symmetry with the other doc handlers (the
+    // draft is unsaved, so it is not logged) — referenced to satisfy lint.
+    void author;
+    return ok({ doc });
+  }
+
   // ---- activity -----------------------------------------------------------------
 
   async function brandActivityH({ brandId } = {}) {
@@ -518,6 +742,10 @@ function createPitchApi(ctx = {}) {
     createExampleH: guarded(createExampleH),
     getExampleH: guarded(getExampleH),
     tweakExampleH: guarded(tweakExampleH),
+    renderDocH: guarded(renderDocH),
+    createDocExampleH: guarded(createDocExampleH),
+    updateDocExampleH: guarded(updateDocExampleH),
+    aiDocH: guarded(aiDocH),
     brandActivityH: guarded(brandActivityH),
   };
 }

@@ -438,6 +438,22 @@ async function getExample(db, id) {
   return db.first('SELECT * FROM examples WHERE id = ?', [String(id)]);
 }
 
+// updateExampleDoc(db, id, { doc, ampHtml, validationPass }) -> updated row |
+// null (unknown/bad id). The editor's save path: re-render then persist the
+// doc + its AMP + verdict IN PLACE (no new row, unlike a tweak — an edit is
+// the same example, not a version). doc rides toJsonOrNull like createExample;
+// amp_html is pipeline/render output stored verbatim (stripping '<' would
+// destroy it), never client-typed. Null-on-failure, never a throw.
+async function updateExampleDoc(db, id, input) {
+  if (!ID_SHAPE.test(String(id || ''))) return null;
+  const i = (input && typeof input === 'object') ? input : {};
+  const ampHtml = typeof i.ampHtml === 'string' && i.ampHtml ? i.ampHtml : null;
+  const { changes } = await db.run(
+    'UPDATE examples SET doc_json = ?, amp_html = ?, validation_pass = ? WHERE id = ?',
+    [toJsonOrNull(i.doc), ampHtml, i.validationPass ? 1 : 0, String(id)]);
+  return changes ? getExample(db, id) : null;
+}
+
 async function listExamplesForPitch(db, pitchId) {
   if (!ID_SHAPE.test(String(pitchId || ''))) return [];
   return db.all(
@@ -607,7 +623,7 @@ module.exports = {
   createPitch, getPitch, listPitchesForBrand, listAllPitches, updatePitch, archivePitch,
   PITCH_STATUSES,
   // examples
-  createExample, getExample, listExamplesForPitch, listVersions, latestExamplesPerRoot,
+  createExample, getExample, updateExampleDoc, listExamplesForPitch, listVersions, latestExamplesPerRoot,
   // assets
   insertAsset, listAssets, getAsset, deleteAsset,
   // settings

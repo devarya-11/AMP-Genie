@@ -100,6 +100,32 @@ function registerPitchRoutes(app, ctx) {
       id: req.params.id, prompt: b.prompt, author: b.author,
     }));
   });
+
+  // ---- doc editor (phase 4) ---------------------------------------------------
+  // The visual block-email editor's backend: a pure live-preview renderer, a
+  // save-new + save-edit for doc examples, and an AI starter-doc drafter.
+  app.post('/api/docs/render', async (req, res) => {
+    const b = body(req);
+    send(res, await api.renderDocH({ doc: b.doc !== undefined ? b.doc : b }));
+  });
+  app.post('/api/pitches/:id/doc-examples', async (req, res) => {
+    const b = body(req);
+    send(res, await api.createDocExampleH({
+      pitchId: req.params.id, title: b.title, doc: b.doc, author: b.author,
+    }));
+  });
+  app.patch('/api/examples/:id/doc', async (req, res) => {
+    const b = body(req);
+    send(res, await api.updateDocExampleH({
+      id: req.params.id, doc: b.doc, author: b.author,
+    }));
+  });
+  app.post('/api/pitches/:id/ai-doc', async (req, res) => {
+    const b = body(req);
+    send(res, await api.aiDocH({
+      pitchId: req.params.id, brief: b.brief, useCase: b.useCase, author: b.author,
+    }));
+  });
 }
 
 module.exports = { registerPitchRoutes };

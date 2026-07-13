@@ -394,6 +394,25 @@ function createSupabaseRepo({ url, secretKey, fetchImpl = fetch } = {}) {
     return one(await call('examples', { method: 'POST', body: row, prefer: 'return=representation' }));
   }
 
+  // The PostgREST twin of repo.js:updateExampleDoc — PATCH the doc + AMP +
+  // verdict in place, return=representation to hand the row back (one() is
+  // null when the id matched nothing, same null-on-failure voice). Same
+  // sanitizers (toJsonOrNull, id-shape) as the local path so the two cannot
+  // drift on what a valid update looks like.
+  async function updateExampleDoc(id, input) {
+    if (!ID_SHAPE.test(String(id || ''))) return null;
+    const i = (input && typeof input === 'object') ? input : {};
+    const ampHtml = typeof i.ampHtml === 'string' && i.ampHtml ? i.ampHtml : null;
+    const sets = {
+      doc_json: toJsonOrNull(i.doc),
+      amp_html: ampHtml,
+      validation_pass: i.validationPass ? 1 : 0,
+    };
+    return one(await call('examples?id=eq.' + enc(String(id)), {
+      method: 'PATCH', body: sets, prefer: 'return=representation',
+    }));
+  }
+
   async function listExamplesForPitch(pitchId) {
     if (!ID_SHAPE.test(String(pitchId || ''))) return [];
     const rows = await call('examples?pitch_id=eq.' + enc(String(pitchId))
@@ -556,6 +575,7 @@ function createSupabaseRepo({ url, secretKey, fetchImpl = fetch } = {}) {
     archivePitch,
     createExample,
     getExample,
+    updateExampleDoc,
     listExamplesForPitch,
     listVersions,
     latestExamplesPerRoot,
