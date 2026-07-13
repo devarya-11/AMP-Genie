@@ -11,6 +11,7 @@ delete process.env.OLLAMA_BASE_URL;
 const {
   validateDoc, renderDoc, docToAmp, exampleDocForBrand, BLOCK_TYPES,
   interactiveDocForModule, fieldsForModule, INTERACTIVE_TYPES,
+  sanitizeCustomHtml,
 } = require('../server/email-doc');
 const { validate } = require('../server/validator');
 
@@ -84,6 +85,35 @@ test('BLOCK_TYPES registers the eight static types plus the eight interactive mo
     const v = await validate(ampHtml);
     assert.strictEqual(v.pass, true, `${type}-only doc failed: ${JSON.stringify(v.errors, null, 2)}`);
   }
+});
+
+// ---- custom-AMP sanitizer: the same-origin-iframe safety gate ----------------
+test('sanitizeCustomHtml neutralizes every script/handler/url evasion', () => {
+  const cases = [
+    '<script>evil()</script>', '<SCRIPT>evil()</SCRIPT>', '<script/xss>evil()</script>', '<script >e()</script>',
+    '<img src=x onerror=alert(1)>', '<img/onerror=alert(1) src=x>', '<img src=x\nonerror=alert(1)>',
+    '<svg/onload=alert(1)>', '<div onclick="e()">x</div>',
+    '<iframe src="javascript:evil()"></iframe>', '<object data="x"></object>', '<embed src="x">',
+    '<meta http-equiv=refresh content="0;url=http://evil">', '<link rel=stylesheet href="http://evil.css">',
+    '<a href="javascript:evil()">x</a>', '<a href="  javascript:evil()">x</a>',
+    '<div style="background:url(javascript:evil())">x</div>', '<div style="width:expression(alert(1))">x</div>',
+  ];
+  for (const c of cases) {
+    const out = sanitizeCustomHtml(c);
+    assert.ok(!/<script(?![^>]*application\/(ld\+)?json)/i.test(out), `executable script survived: ${c} -> ${out}`);
+    assert.ok(!/<(iframe|object|embed|meta|link)\b/i.test(out), `embedding tag survived: ${c} -> ${out}`);
+    assert.ok(!/\son[a-z]+\s*=|\/on[a-z]+\s*=/i.test(out), `on-handler survived: ${c} -> ${out}`);
+    assert.ok(!/(javascript|vbscript)\s*:|expression\s*\(/i.test(out), `active url/expression survived: ${c} -> ${out}`);
+  }
+});
+
+test('sanitizeCustomHtml preserves AMP’s own on= binding, JSON data and amp-img', () => {
+  const src = '<amp-img src="https://x/a.jpg" width="300" height="200" layout="responsive" on="tap:AMP.setState({x:1})"></amp-img>'
+    + '<amp-state id="q"><script type="application/json">{"a":1}</script></amp-state>';
+  const out = sanitizeCustomHtml(src);
+  assert.match(out, /on="tap:AMP\.setState/, 'AMP on= binding kept');
+  assert.match(out, /<script type="application\/json">\{"a":1\}<\/script>/, 'JSON data block kept');
+  assert.match(out, /<amp-img /, 'amp-img kept');
 });
 
 // ---- determinism -------------------------------------------------------------

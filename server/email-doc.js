@@ -210,13 +210,22 @@ function sanitizeBox(props = {}) {
 function sanitizeCustomHtml(html) {
   let s = String(html == null ? '' : html).slice(0, 20000);
   const isJsonScript = (attrs) => /type\s*=\s*['"]?application\/(ld\+)?json/i.test(attrs);
+  // executable scripts out (keep <script type="application/json"> data blocks
+  // that amp-state / amp-list legitimately use in the body).
   s = s.replace(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi, (m, attrs) => (isJsonScript(attrs) ? m : ''));
-  // strip any REMAINING stray/self-closing script open tag, but keep a JSON one
-  s = s.replace(/<script\b([^>]*)\/?>/gi, (m, attrs) => (isJsonScript(attrs) ? m : ''));
-  s = s.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '');           // onX="…"
-  s = s.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');           // onX='…'
-  s = s.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');           // onX=unquoted
-  s = s.replace(/(href|src|xlink:href)\s*=\s*(['"])\s*(?:javascript|vbscript):[^'"]*\2/gi, '$1=$2#$2');
+  s = s.replace(/<script\b([^>]*?)\/?>/gi, (m, attrs) => (isJsonScript(attrs) ? m : '')); // stray/unclosed opens
+  // embedding / head tags never belong in an email BODY fragment and are the
+  // classic redirect/resource-load vectors — drop them (amp-form's <form> and
+  // amp-img stay; the amp-* equivalents are how AMP does these safely).
+  s = s.replace(/<\/?(iframe|object|embed|base|meta|link|noscript)\b[^>]*>/gi, '');
+  // Event-handler attributes: "on…=" preceded by whitespace OR "/" (both act as
+  // attribute separators in the HTML tokenizer, so <img/onerror=…> must die too).
+  // AMP's own `on="tap:…"` has no letters after "on", so it is left untouched.
+  s = s.replace(/[\s/]on[a-z][a-z-]*\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
+  // Defuse script URLs and IE's css expression() ANYWHERE (href/src/style/etc.),
+  // tolerating whitespace/entities the tokenizer would ignore.
+  s = s.replace(/(javascript|vbscript)\s*:/gi, 'blocked:');
+  s = s.replace(/expression\s*\(/gi, 'blocked(');
   return s;
 }
 function customScriptTags(names) {
