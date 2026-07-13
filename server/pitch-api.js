@@ -56,7 +56,7 @@ function interactiveDocForModule(args) {
 function interactiveTypes() {
   return emailDoc.INTERACTIVE_TYPES instanceof Set ? emailDoc.INTERACTIVE_TYPES : EMPTY_SET;
 }
-const { generateDoc } = require('./doc-ai');
+const { generateDoc, adaptCustomAmp } = require('./doc-ai');
 
 // Local mirrors of the shapes repo.js/store.js enforce (kept private there —
 // the regex is the contract, same restatement server/tweak-engine.js makes).
@@ -799,6 +799,47 @@ function createPitchApi(ctx = {}) {
     return ok({ doc });
   }
 
+  // POST /api/docs/custom-amp — adapt pasted HTML/AMP into a validator-clean
+  // AMP4EMAIL body fragment for a custom block. The LLM rewrites the paste; we
+  // render + run the REAL validator; on failure we feed the errors back and
+  // retry (up to 3). Returns a PASSing fragment, or the best attempt + the
+  // errors so the client can show them and NOT apply a breaking fragment.
+  async function customAmpH({ raw } = {}) {
+    if (typeof raw !== 'string' || !raw.trim()) return bad('Paste some AMP or HTML first.');
+    const pool = (await providers()) || []; // [] -> deterministic, never touches env
+    const hasLlm = Array.isArray(pool) && pool.some((p) => p && typeof p.call === 'function');
+    let best = { compiled: '', components: [] };
+    let errors = null;
+    let validation = { pass: false, errorCount: 0 };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const proposal = await adaptCustomAmp({ raw, errors }, { providers: pool });
+      if (!proposal || typeof proposal.compiled !== 'string') break;
+      best = { compiled: proposal.compiled, components: proposal.components || [] };
+      // Validate the fragment in a minimal doc: the block, sanitized, rendered
+      // through the real validator.
+      const v = validateDoc({ version: 1, blocks: [{ id: 'c', type: 'custom', props: best }] });
+      const r = renderDoc(v.doc, {});
+      const verdict = await validate(r.ampHtml);
+      validation = { pass: !!(verdict && verdict.pass), errorCount: (verdict && verdict.errorCount) || 0 };
+      if (validation.pass) {
+        const clean = v.doc.blocks[0].props; // the sanitized compiled/components
+        return ok({ compiled: clean.compiled, components: clean.components, validation, warnings: r.warnings || [] });
+      }
+      errors = (verdict.errors || []).filter((e) => e.severity === 'ERROR');
+      if (!hasLlm) break; // deterministic path can't improve on a retry
+    }
+    return ok({
+      ok: false,
+      compiled: best.compiled,
+      components: best.components,
+      validation,
+      error: hasLlm
+        ? 'Could not make this valid AMP4EMAIL automatically — review the errors below.'
+        : 'No AI key configured — pasted as-is. Add a key in Settings for automatic fixing.',
+      errors: (errors || []).slice(0, 8).map((e) => e.message),
+    });
+  }
+
   // ---- activity -----------------------------------------------------------------
 
   async function brandActivityH({ brandId } = {}) {
@@ -827,6 +868,7 @@ function createPitchApi(ctx = {}) {
     createDocExampleH: guarded(createDocExampleH),
     updateDocExampleH: guarded(updateDocExampleH),
     aiDocH: guarded(aiDocH),
+    customAmpH: guarded(customAmpH),
     brandActivityH: guarded(brandActivityH),
   };
 }

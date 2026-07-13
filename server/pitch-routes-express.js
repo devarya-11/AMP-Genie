@@ -114,6 +114,10 @@ function registerPitchRoutes(app, ctx) {
     const b = body(req);
     send(res, await api.renderDocH({ doc: b.doc !== undefined ? b.doc : b, anchors: b.anchors }));
   });
+  app.post('/api/docs/custom-amp', async (req, res) => {
+    const b = body(req);
+    send(res, await api.customAmpH({ raw: b.raw }));
+  });
   app.post('/api/pitches/:id/doc-examples', async (req, res) => {
     const b = body(req);
     send(res, await api.createDocExampleH({

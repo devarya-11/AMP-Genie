@@ -663,4 +663,66 @@ async function generateDoc(input = {}, opts = {}) {
   });
 }
 
-module.exports = { generateDoc, buildFallbackDoc };
+// ---- custom-AMP adapter: pasted HTML/AMP -> a valid AMP4EMAIL body fragment --
+// The FIRST configured provider rewrites the paste into a body fragment + the
+// list of AMP extensions it needs. NO validation here (runtime-agnostic, no
+// validator) — the pitch-api handler renders + validates and feeds errors back
+// for a retry. With no provider, the deterministic fallback passes the paste
+// through (email-doc sanitizes it) and auto-detects <amp-*> components.
+const CUSTOM_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['compiled', 'components'],
+  properties: {
+    compiled: { type: 'string', description: 'A valid AMP4EMAIL BODY fragment only — no <html>/<head>/<body>, no <style amp-custom>, no <link>, no executable <script>. Inline style="" is allowed.' },
+    components: { type: 'array', items: { type: 'string' }, description: 'AMP extension component names used, e.g. amp-carousel, amp-accordion.' },
+  },
+};
+function customComponentsList() {
+  const map = emailDoc.AMP_EMAIL_COMPONENTS || {};
+  return Object.keys(map).join(', ');
+}
+function detectComponents(html) {
+  const found = new Set();
+  const re = /<(amp-[a-z0-9-]+)/gi;
+  let m;
+  while ((m = re.exec(String(html || '')))) found.add(m[1].toLowerCase());
+  return Array.from(found);
+}
+function buildCustomPrompt({ raw, errors }) {
+  let p = 'You convert pasted HTML/AMP into a VALID AMP4EMAIL body fragment for a marketing email.\n'
+    + 'RULES:\n'
+    + '- Output ONLY the body fragment: no <html>, <head>, <body>, <style amp-custom>, <link>, or executable <script>.\n'
+    + '- Use only AMP4EMAIL-allowed tags. Allowed extensions: ' + customComponentsList() + '.\n'
+    + '- Replace <img> with <amp-img> (with width, height and layout). Convert CSS-background images to <amp-img> where possible.\n'
+    + '- No inline event handlers (onclick, onload, …). No external CSS or JS. Inline style="" IS allowed.\n'
+    + '- Do NOT use the amp-state id "s" (it is reserved). List every AMP extension you used in "components".\n\n'
+    + 'PASTED SOURCE:\n' + String(raw || '').slice(0, 8000);
+  if (errors && errors.length) {
+    p += '\n\nYour previous attempt FAILED the AMP4EMAIL validator with these errors:\n'
+      + errors.slice(0, 8).map((e) => '- ' + (typeof e === 'string' ? e : e.message)).join('\n')
+      + '\nReturn corrected JSON that fixes them.';
+  }
+  return p;
+}
+async function adaptCustomAmp(input = {}, opts = {}) {
+  const raw = typeof input.raw === 'string' ? input.raw : '';
+  const providers = Array.isArray(opts.providers) ? opts.providers : detectProviders();
+  const provider = providers.find((p) => p && typeof p.call === 'function');
+  if (provider) {
+    try {
+      const out = await withTimeout(
+        () => Promise.resolve().then(() => provider.call(buildCustomPrompt({ raw, errors: input.errors }), CUSTOM_SCHEMA, TIMEOUT_MS)),
+        TIMEOUT_MS,
+      );
+      if (out && typeof out.compiled === 'string' && out.compiled.trim()) {
+        return { compiled: out.compiled, components: Array.isArray(out.components) ? out.components : [], usedLlm: true };
+      }
+    } catch (e) {
+      console.error('[doc-ai] adaptCustomAmp provider failed:', e && e.message);
+    }
+  }
+  return { compiled: raw, components: detectComponents(raw), usedLlm: false };
+}
+
+module.exports = { generateDoc, buildFallbackDoc, adaptCustomAmp };

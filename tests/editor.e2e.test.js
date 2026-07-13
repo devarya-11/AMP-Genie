@@ -367,6 +367,43 @@ test('AMP code viewer: the </> modal and the left panel show the live source', a
   await expect.poll(async () => await page.locator('#edCodeText').inputValue(), { timeout: 10000 }).toContain('<html amp4email');
 });
 
+test('Custom AMP block: paste + Fix with AI compiles a valid fragment onto the canvas', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.locator('#edPalette .ed-add-btn', { hasText: 'Custom AMP' }).first().click();
+  await waitCanvasBound(page);
+  // the empty placeholder renders on the canvas
+  await expect
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
+    .toContain('Fix with AI');
+
+  // paste a valid fragment and adapt it (hermetic env -> deterministic path)
+  await page.locator('#edProps .ed-custom-raw').fill('<p style="font-size:18px">Hello from a custom AMP block</p>');
+  await page.locator('#edProps button', { hasText: 'Fix with AI' }).click();
+  await expect(page.locator('#edCustomStatus')).toContainText(/valid|applied/i, { timeout: 30000 });
+
+  // the compiled fragment lands on the canvas and the email still PASSes
+  await expect
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
+    .toContain('Hello from a custom AMP block');
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+});
+
+test('Custom AMP block: an executable script in the paste is stripped', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.locator('#edPalette .ed-add-btn', { hasText: 'Custom AMP' }).first().click();
+  await waitCanvasBound(page);
+  await page.locator('#edProps .ed-custom-raw').fill('<div><script>window.__pwned=1</script><p>safe copy</p></div>');
+  await page.locator('#edProps button', { hasText: 'Fix with AI' }).click();
+  await expect(page.locator('#edCustomStatus')).toContainText(/valid|applied/i, { timeout: 30000 });
+  // wait for the debounced re-render to land the sanitized fragment
+  await expect
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
+    .toContain('safe copy');
+  const src = (await page.locator('#edFrame').getAttribute('srcdoc')) || '';
+  expect(src).not.toContain('__pwned'); // the executable script never reaches the iframe
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+});
+
 test('M14: Delete removes the selected block; Backspace in a field does not', async ({ page }) => {
   await openEditorFresh(page);
   await page.fill('#edAiIdea', 'quiz customers with a short intro');

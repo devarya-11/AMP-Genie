@@ -139,7 +139,16 @@ const BTN_SIZES = ['S', 'M', 'L']; // allowed button sizes (M === base default)
 
 // The supported STATIC block types (v1). Order here is the palette order the
 // editor can show; it does not constrain block order in a doc.
-const STATIC_BLOCK_TYPES = ['header', 'hero', 'text', 'image', 'button', 'products', 'divider', 'footer'];
+const STATIC_BLOCK_TYPES = ['header', 'hero', 'text', 'image', 'button', 'products', 'divider', 'footer', 'custom'];
+// AMP4EMAIL-allowed extension components → the CDN script version to load. The
+// custom-AMP block may only pull scripts from this whitelist (the AI proposes
+// names; we build the tags), so no arbitrary <script src> ever reaches the head.
+const AMP_EMAIL_COMPONENTS = {
+  'amp-accordion': '0.1', 'amp-carousel': '0.1', 'amp-fit-text': '0.1',
+  'amp-image-lightbox': '0.1', 'amp-selector': '0.1', 'amp-sidebar': '0.1',
+  'amp-timeago': '0.1', 'amp-anim': '0.1', 'amp-bind': '0.1',
+  'amp-form': '0.1', 'amp-list': '0.1', 'amp-layout': '0.1',
+};
 
 // The INTERACTIVE block types (Genie 2.0 phase 4): the 8 interactive modules
 // from server/generate.js, each addressable AS a block whose `type` is EXACTLY
@@ -189,6 +198,35 @@ function sanitizeBox(props = {}) {
   const bg = coerceHex(props.backgroundColor);
   if (bg) o.backgroundColor = bg;
   return o;
+}
+
+// ---- custom-AMP block (paste arbitrary AMP; AI adapts it) -------------------
+// SAFETY GATE (independent of the validator): the compiled fragment is injected
+// into the same-origin preview iframe, so strip anything executable BEFORE it
+// renders — even if the whole doc later fails validation. Executable <script>
+// go (but <script type="application/json"> data for amp-state/amp-list stays),
+// on*= handlers go (AMP's own `on="tap:…"` attribute is left untouched since it
+// has no letters after "on"), and javascript:/vbscript: URLs are defused.
+function sanitizeCustomHtml(html) {
+  let s = String(html == null ? '' : html).slice(0, 20000);
+  const isJsonScript = (attrs) => /type\s*=\s*['"]?application\/(ld\+)?json/i.test(attrs);
+  s = s.replace(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi, (m, attrs) => (isJsonScript(attrs) ? m : ''));
+  // strip any REMAINING stray/self-closing script open tag, but keep a JSON one
+  s = s.replace(/<script\b([^>]*)\/?>/gi, (m, attrs) => (isJsonScript(attrs) ? m : ''));
+  s = s.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '');           // onX="…"
+  s = s.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');           // onX='…'
+  s = s.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');           // onX=unquoted
+  s = s.replace(/(href|src|xlink:href)\s*=\s*(['"])\s*(?:javascript|vbscript):[^'"]*\2/gi, '$1=$2#$2');
+  return s;
+}
+function customScriptTags(names) {
+  const out = [];
+  for (const n of (Array.isArray(names) ? names : [])) {
+    const ver = AMP_EMAIL_COMPONENTS[n];
+    if (!ver) continue;
+    out.push(`<script async custom-element="${n}" src="https://cdn.ampproject.org/v0/${n}-${ver}.js"></script>`);
+  }
+  return out;
 }
 
 // M12: whole-email settings — the page background colour and the content
@@ -317,6 +355,18 @@ const BLOCK_SANITIZERS = {
       brandName: cleanStr(props.brandName, 80),
       text: cleanStr(props.text, 300),
     };
+  },
+  // Custom-AMP block: `raw` is the user's pasted source (kept for re-editing);
+  // `compiled` is the AI-adapted, validator-checked body fragment (sanitized
+  // again at render); `components` is a whitelist-filtered list of extension
+  // names whose scripts we build ourselves.
+  custom(props = {}) {
+    const raw = typeof props.raw === 'string' ? props.raw.slice(0, 8000) : '';
+    const compiled = typeof props.compiled === 'string' ? sanitizeCustomHtml(props.compiled) : '';
+    const components = Array.isArray(props.components)
+      ? props.components.filter((n) => Object.prototype.hasOwnProperty.call(AMP_EMAIL_COMPONENTS, n)).slice(0, 8)
+      : [];
+    return { raw, compiled, components };
   },
 };
 
@@ -621,6 +671,23 @@ function renderInteractive(block, ctx, warnings) {
   };
 }
 
+// Custom-AMP: emit the (re-sanitized) compiled fragment + its whitelisted
+// extension scripts. Empty/unset -> a valid placeholder note so the block is
+// never invalid. Sanitized a SECOND time here (renderDoc trusts pre-sanitized
+// docs) so no executable markup can reach the iframe even via a raw doc.
+function renderCustom(props, ctx, warnings, id) {
+  const frag = sanitizeCustomHtml(props.compiled || '');
+  const scripts = customScriptTags(props.components);
+  if (!frag) {
+    const html = `<div class="pad"><p class="muted">Custom AMP block — paste your AMP and “Fix with AI”.</p></div>`;
+    return styled(id, props, html, [once('base', baseCss(ctx.palette))]);
+  }
+  const html = `<div class="pad custom-amp">${frag}</div>`;
+  const out = styled(id, props, html, [once('base', baseCss(ctx.palette))]);
+  out.scripts = scripts;
+  return out;
+}
+
 const BLOCK_RENDERERS = {
   header: renderHeader,
   hero: renderHero,
@@ -630,6 +697,7 @@ const BLOCK_RENDERERS = {
   products: renderProducts,
   divider: renderDivider,
   footer: renderFooter,
+  custom: renderCustom,
 };
 
 /* ------------------------------------------------------------------ *
@@ -747,6 +815,7 @@ function renderDoc(doc, opts = {}) {
     const out = render(block.props || {}, ctx, warnings, block.id);
     bodies.push(anchors ? wrapAnchor(block, out.html, index) : out.html);
     for (const c of out.css) cssParts.push(c);
+    if (out.scripts) for (const s of out.scripts) addScript(s); // custom-AMP extension scripts
   });
 
   // M12: whole-email overrides go LAST so they win over base body/.wrap. Ensure
@@ -871,4 +940,5 @@ function fieldsForModule(moduleId) {
 module.exports = {
   validateDoc, renderDoc, docToAmp, exampleDocForBrand, BLOCK_TYPES,
   interactiveDocForModule, fieldsForModule, INTERACTIVE_TYPES,
+  sanitizeCustomHtml, AMP_EMAIL_COMPONENTS,
 };

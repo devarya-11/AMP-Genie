@@ -795,6 +795,9 @@
     { type: 'footer',   label: 'Footer',   glyph: 'F',
       make: () => ({ brandName: (S.brand && S.brand.name) || 'Brand', text: 'You are receiving this because you subscribed.' }),
       summary: (p) => p.text || p.brandName || 'Footer' },
+    { type: 'custom',   label: 'Custom AMP', glyph: '</>',
+      make: () => ({ raw: '', compiled: '', components: [] }),
+      summary: (p) => (p.compiled ? 'Custom AMP' : 'Empty — paste AMP') },
   ];
   // ---- INTERACTIVE (amp-state) modules. block.type === module id. A doc may
   //      hold only ONE of these (they share amp-state). Copy fields per module
@@ -1453,6 +1456,9 @@
         box.appendChild(field('Brand name', blk.props.brandName || '', (v) => set('brandName', v)));
         box.appendChild(areaField('Text', blk.props.text || '', (v) => set('text', v)));
         break;
+      case 'custom':
+        box.appendChild(customEditor(blk));
+        break;
       case 'divider':
         box.appendChild(el('div', 'ed-props-empty', 'A divider has no settings — reorder or delete it.'));
         break;
@@ -1462,6 +1468,48 @@
     // M9: every static block (except the divider spacer) carries the shared
     // spacing + background controls.
     if (blk.type !== 'divider') appendBoxFields(box, blk, set);
+  }
+  // Custom-AMP editor: paste source + "Fix with AI" (server adapts + validates
+  // + retries; a failing result is NOT applied so the email never breaks).
+  function customEditor(blk) {
+    const wrap = ctrl('Custom AMP');
+    wrap.appendChild(el('div', 'ed-props-note', 'Paste AMP/HTML, then let the genie adapt it into a valid fragment.'));
+    const ta = el('textarea', 'ed-custom-raw'); ta.rows = 8; ta.spellcheck = false;
+    ta.placeholder = 'Paste your AMP or HTML here…';
+    ta.value = blk.props.raw || '';
+    ta.oninput = () => { blk.props.raw = ta.value; markDirty(); };
+    wrap.appendChild(ta);
+    const go = el('button', 'primary sm', ''); go.type = 'button';
+    go.innerHTML = '<svg class="ic"><use href="#i-sparkle"/></svg> Fix with AI';
+    const status = el('div', 'statusline'); status.id = 'edCustomStatus'; status.style.marginTop = '0';
+    go.onclick = async () => {
+      const raw = (blk.props.raw || '').trim();
+      if (!raw) { setLine('edCustomStatus', 'Paste some AMP first.'); ta.focus(); return; }
+      busy(go, true, 'Fixing…');
+      setLine('edCustomStatus', 'Adapting your AMP to a valid fragment…', true);
+      try {
+        const out = await api('/api/docs/custom-amp', { raw });
+        if (!out || out.error) {
+          const first = out && out.errors && out.errors.length ? ' — ' + out.errors[0] : '';
+          setLine('edCustomStatus', 'Error: ' + ((out && out.error) || 'could not adapt') + first);
+          return; // apply nothing that would break the email
+        }
+        blk.props.compiled = out.compiled || '';
+        blk.props.components = out.components || [];
+        renderProps(); renderBlocks(); markDirty();
+        setLine('edCustomStatus', (out.validation && out.validation.pass) ? 'Applied — valid AMP4EMAIL.' : 'Applied.');
+      } catch (e) { setLine('edCustomStatus', 'Error: ' + e.message); }
+      finally { busy(go, false); }
+    };
+    wrap.appendChild(go);
+    wrap.appendChild(status);
+    if (blk.props.compiled) {
+      const applied = el('div', 'ed-custom-applied');
+      applied.textContent = '✓ Fragment applied'
+        + ((blk.props.components && blk.props.components.length) ? ' · uses ' + blk.props.components.join(', ') : '');
+      wrap.appendChild(applied);
+    }
+    return wrap;
   }
   // property-field builders (label + input, live oninput)
   // camelCase field key -> human label, e.g. "footerText" -> "Footer text".

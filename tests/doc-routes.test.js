@@ -115,6 +115,28 @@ test('renderDocH: the anchors flag toggles data-bid, and both stay valid', async
   assert.strictEqual(clean.json.validation.pass, true, 'clean still passes');
 });
 
+// ---- custom-AMP block: paste -> validator-clean fragment ----
+test('customAmpH: a valid pasted fragment validates and echoes it sanitized', async () => {
+  const { api } = await freshApi();
+  const res = await api.customAmpH({ raw: '<p style="font-size:20px">Hello <b>custom</b> AMP</p>' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.validation.pass, true, 'a plain fragment validates on the deterministic path');
+  assert.ok(res.json.compiled.includes('Hello'), 'the fragment is returned');
+});
+
+test('customAmpH: an executable script in the paste is stripped from the result', async () => {
+  const { api } = await freshApi();
+  const res = await api.customAmpH({ raw: '<div><script>steal(document.cookie)</script><p>ok</p></div>' });
+  assert.strictEqual(res.status, 200);
+  assert.ok(!res.json.compiled.includes('steal('), 'the executable script is removed');
+  assert.ok(res.json.compiled.includes('ok'), 'the safe content survives');
+});
+
+test('customAmpH: an empty paste is a 400', async () => {
+  const { api } = await freshApi();
+  assert.strictEqual((await api.customAmpH({ raw: '   ' })).status, 400);
+});
+
 // M12: global email settings flow through the render endpoint and echo back
 // sanitized, and the rendered AMP carries the overrides.
 test('renderDocH: doc.settings render the global overrides and echo sanitized', async () => {

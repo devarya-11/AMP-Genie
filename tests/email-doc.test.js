@@ -69,7 +69,7 @@ test('a doc using EVERY block type renders and passes the validator', async () =
   assert.strictEqual(v.errorCount, 0);
 });
 
-const STATIC_TYPES = ['button', 'divider', 'footer', 'header', 'hero', 'image', 'products', 'text'];
+const STATIC_TYPES = ['button', 'custom', 'divider', 'footer', 'header', 'hero', 'image', 'products', 'text'];
 
 test('BLOCK_TYPES registers the eight static types plus the eight interactive modules; each renders valid alone', async () => {
   // The static layout blocks are all present...
