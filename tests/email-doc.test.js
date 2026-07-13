@@ -205,6 +205,35 @@ test('M11: a hostile buttonColor and non-enum size are rejected', () => {
   assert.ok(!/x:y/.test(out) && !/blk-bh/.test(out), 'invalid size + colour yield no instance rule');
 });
 
+// ---- M12: global email settings ----
+test('M12: settings emit body/.wrap overrides AFTER base and still PASS', async () => {
+  const doc = { version: 1, settings: { backgroundColor: '#101014', contentWidth: 640 },
+    blocks: [{ id: 'b1', type: 'text', props: { heading: 'H', body: 'x' } }] };
+  const out = renderDoc(doc);
+  const amp = out.ampHtml;
+  assert.ok(amp.indexOf('body{background:#101014;}') > amp.indexOf('body{margin:0;background:#f3f3f6'),
+    'global body override comes after the base body rule');
+  assert.match(amp, /\.wrap\{max-width:640px;\}/);
+  const v = await validate(amp);
+  assert.strictEqual(v.pass, true, `settings must pass: ${JSON.stringify(v.errors)}`);
+});
+
+test('M12: a doc without settings is unchanged; hostile settings are sanitized', () => {
+  const plain = renderDoc({ version: 1, blocks: [{ id: 'b1', type: 'text', props: { heading: 'H', body: 'x' } }] }).ampHtml;
+  assert.ok(!/body\{background:#101014/.test(plain), 'no settings → no global override');
+  const hostile = renderDoc({ version: 1, settings: { backgroundColor: '#fff;} x{y:z', contentWidth: 99999 },
+    blocks: [{ id: 'b1', type: 'text', props: { heading: 'H', body: 'x' } }] }).ampHtml;
+  assert.ok(!/y:z/.test(hostile), 'hostile bg dropped');
+  assert.match(hostile, /\.wrap\{max-width:700px\}|\.wrap\{max-width:700px;\}/, 'width clamps to 700');
+});
+
+test('M12: validateDoc keeps only sanitized settings', () => {
+  const v = validateDoc({ version: 1, settings: { backgroundColor: '#abcdef', contentWidth: 500, junk: 'x' }, blocks: [] });
+  assert.deepStrictEqual(v.doc.settings, { backgroundColor: '#abcdef', contentWidth: 500 });
+  const v2 = validateDoc({ version: 1, settings: { nope: 1 }, blocks: [] });
+  assert.strictEqual(v2.doc.settings, undefined, 'empty settings are omitted');
+});
+
 // ---- structural rules (mirrors tests/validator.test.js) ----------------------
 
 test('AMP4EMAIL structural rules are honoured', () => {

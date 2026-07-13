@@ -191,6 +191,27 @@ function sanitizeBox(props = {}) {
   return o;
 }
 
+// M12: whole-email settings — the page background colour and the content
+// column width. coerceHex + clampInt only, so nothing user-typed reaches CSS.
+function sanitizeSettings(s) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return undefined;
+  const o = {};
+  const bg = coerceHex(s.backgroundColor); if (bg) o.backgroundColor = bg;
+  const cw = clampInt(s.contentWidth, 480, 700, undefined); if (cw !== undefined) o.contentWidth = cw;
+  return Object.keys(o).length ? o : undefined;
+}
+// Global CSS overriding the base body/.wrap rules; emitted AFTER once('base')
+// so it wins at equal specificity. Re-sanitises (renderDoc trusts pre-sanitized
+// docs). Empty settings emit nothing → byte-identical to before.
+function globalCss(settings) {
+  const clean = sanitizeSettings(settings);
+  if (!clean) return '';
+  let out = '';
+  if (clean.backgroundColor) out += '\nbody{background:' + clean.backgroundColor + ';}\n';
+  if (clean.contentWidth !== undefined) out += '.wrap{max-width:' + clean.contentWidth + 'px;}\n';
+  return out;
+}
+
 /* ------------------------------------------------------------------ *
  * validateDoc — the trust boundary.
  * Coerces version/currency/brand and EACH block into a normalized doc the
@@ -331,6 +352,8 @@ function validateDoc(doc) {
     if (brand) out.brand = brand;
     const currency = coerceCurrency(doc.currency);
     if (currency) out.currency = currency;
+    const settings = sanitizeSettings(doc.settings); // M12 global email settings
+    if (settings) out.settings = settings;
 
     const notes = [];
     const blocks = [];
@@ -725,6 +748,12 @@ function renderDoc(doc, opts = {}) {
     bodies.push(anchors ? wrapAnchor(block, out.html, index) : out.html);
     for (const c of out.css) cssParts.push(c);
   });
+
+  // M12: whole-email overrides go LAST so they win over base body/.wrap. Ensure
+  // base is present first (deduped if a block already emitted it) so an empty
+  // doc with settings still has its base rules.
+  const gCss = globalCss(d.settings);
+  if (gCss) { cssParts.push(once('base', baseCss(palette))); cssParts.push(once('global', gCss)); }
 
   const css = mergeCss(cssParts);
   // The head carries v0.js (always, added by shell) + the deduped

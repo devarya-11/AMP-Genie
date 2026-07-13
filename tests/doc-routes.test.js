@@ -115,6 +115,20 @@ test('renderDocH: the anchors flag toggles data-bid, and both stay valid', async
   assert.strictEqual(clean.json.validation.pass, true, 'clean still passes');
 });
 
+// M12: global email settings flow through the render endpoint and echo back
+// sanitized, and the rendered AMP carries the overrides.
+test('renderDocH: doc.settings render the global overrides and echo sanitized', async () => {
+  const { api } = await freshApi();
+  const doc = { version: 1, settings: { backgroundColor: '#0a0a12', contentWidth: 560 },
+    blocks: [{ id: 'b1', type: 'text', props: { heading: 'Hi', body: 'x' } }] };
+  const res = await api.renderDocH({ doc });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.validation.pass, true);
+  assert.ok(res.json.ampHtml.includes('body{background:#0a0a12;}'), 'global bg applied');
+  assert.ok(res.json.ampHtml.includes('.wrap{max-width:560px;}'), 'content width applied');
+  assert.deepStrictEqual(res.json.doc.settings, { backgroundColor: '#0a0a12', contentWidth: 560 });
+});
+
 test('renderDocH: hostile text still passes and comes back sanitized', async () => {
   const { api } = await freshApi();
   const hostile = {

@@ -98,7 +98,9 @@ test('adding a text block and editing its heading re-renders the preview', async
   await expect(page.locator('#edBlocks .ed-block')).toHaveCount(before + 1);
 
   // The newly-added block is auto-selected; its Heading field is in Properties.
-  const heading = page.locator('#edProps .ctrl', { hasText: 'Heading' }).locator('input');
+  // (M10 added "Heading size/align/colour" too, so match the exact label.)
+  const heading = page.locator('#edProps .ctrl')
+    .filter({ has: page.getByText('Heading', { exact: true }) }).locator('input');
   await heading.fill(HEADING);
 
   // Debounced render (~400ms) should land the new heading in the preview.
@@ -289,5 +291,81 @@ test('M8: dragging a block onto another reorders the canvas and stays valid', as
   // the moved block (was first) is now last, and the email is still valid
   await expect.poll(async () => (await order()).indexOf(before[0]), { timeout: 20000 })
     .toBe((await order()).length - 1);
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+});
+
+test('M9/M10: block styling controls re-render valid AMP with a scoped rule', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.locator('#edPalette .ed-add-btn', { hasText: 'Text' }).first().click();
+  await waitCanvasBound(page);
+  // set a background colour on the block via the Spacing & background swatch
+  await page.locator('#edProps .ctrl').filter({ hasText: 'Background' }).locator('input[type=color]').fill('#123456');
+  // the re-rendered AMP carries the scoped instance rule and still PASSes
+  await expect
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
+    .toContain('background:#123456;');
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+});
+
+test('M12: email settings apply a global background when nothing is selected', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.fill('#edAiIdea', 'quiz with an intro');
+  await page.click('#edAiGo');
+  await expect.poll(async () => (await canvasAttrs(page, 'data-bid')).length, { timeout: 60000 }).toBeGreaterThan(0);
+  await waitCanvasBound(page);
+  // deselect (Escape) -> the Email settings panel shows
+  await page.frameLocator('#edFrame').locator('[data-bid]').first().click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#edProps')).toContainText('Email settings', { timeout: 10000 });
+  await page.locator('#edProps .ctrl').filter({ hasText: 'Background' }).locator('input[type=color]').fill('#0a0a12');
+  await expect
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
+    .toContain('body{background:#0a0a12;}');
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+});
+
+test('M13: undo/redo add a block via keyboard and toolbar', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.fill('#edAiIdea', 'quiz with an intro');
+  await page.click('#edAiGo');
+  const count = async () => (await canvasAttrs(page, 'data-bid')).length;
+  await expect.poll(count, { timeout: 60000 }).toBeGreaterThan(0);
+  await waitCanvasBound(page);
+  const base = await count();
+
+  await page.locator('#edPalette .ed-add-btn', { hasText: 'Text' }).first().click();
+  await expect.poll(count, { timeout: 20000 }).toBe(base + 1);
+
+  // undo via keyboard removes it; canvas re-renders valid
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(count, { timeout: 20000 }).toBe(base);
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+
+  // redo via toolbar button brings it back
+  await expect(page.locator('#edRedo')).toBeEnabled();
+  await page.click('#edRedo');
+  await expect.poll(count, { timeout: 20000 }).toBe(base + 1);
+});
+
+test('M14: Delete removes the selected block; Backspace in a field does not', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.fill('#edAiIdea', 'quiz customers with a short intro');
+  await page.click('#edAiGo');
+  const count = async () => (await canvasAttrs(page, 'data-bid')).length;
+  await expect.poll(count, { timeout: 60000 }).toBeGreaterThan(1);
+  await waitCanvasBound(page);
+  const base = await count();
+
+  // Backspace while a property field holds focus must NOT delete a block
+  await page.frameLocator('#edFrame').locator('[data-bid]').first().click();
+  await page.locator('#edProps input[type=text], #edProps textarea').first().click();
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(300);
+  expect(await count()).toBe(base);
+
+  // Delete with the canvas focused removes the selected block
+  await page.frameLocator('#edFrame').locator('[data-bid]').first().click();
+  await page.keyboard.press('Delete');
+  await expect.poll(count, { timeout: 20000 }).toBe(base - 1);
   await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
 });

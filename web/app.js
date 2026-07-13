@@ -19,6 +19,9 @@
     edSelId: null,         // id of the selected block
     edDirty: false,        // unsaved changes since last save/load
     edIdSeq: 1,            // client-side block-id counter (Date.now-free)
+    // ---- M13 undo/redo: two-stack history over whole-doc snapshots ----
+    edUndo: [], edRedo: [], edHistMax: 60,
+    edResizing: false,     // true during a drag-resize; blocks undo/redo mid-drag
   };
 
   // ---------- identity: attribution, not auth ----------
@@ -866,6 +869,7 @@
     if (title) $('edTitle').value = title;
     renderPalette(); renderLibrary(); renderBlocks(); renderProps(); renderPreview();
     markDirty();
+    histReset(); // an AI draft is a fresh history baseline
   }
   async function edAiFromIdea() {
     const text = $('edAiIdea').value.trim();
@@ -961,6 +965,7 @@
     renderProps();
     setSaved();
     renderPreview();
+    histReset(); // opening the editor seeds a clean history baseline
     // Pull the freshest shared brand library (teammates upload via Supabase);
     // don't trust stale S.assets. Best-effort — the editor works without it.
     refreshBrandAssets().catch(() => {});
@@ -990,7 +995,87 @@
   }
 
   // ---- dirty tracking + save indicator ----
-  function markDirty() { S.edDirty = true; setSaved(); scheduleRender(); }
+  function markDirty() { S.edDirty = true; setSaved(); scheduleRender(); histSchedule(); }
+
+  // ---- M13 undo/redo (baseline two-stack model) ----------------------------
+  // Every mutation ends in markDirty(); a debounced commit records the previous
+  // committed state onto the undo stack whenever the serialized doc changed, so
+  // a burst of keystrokes coalesces into ONE undo step while structural edits
+  // land as their own. undo/redo flush any pending commit first, then swap the
+  // whole doc — a re-render through the real validator re-validates the result.
+  let _histTimer = null;
+  function histSerialize(d) { try { return JSON.stringify(d); } catch (e) { return ''; } }
+  function histReset() {
+    S.edUndo = []; S.edRedo = [];
+    S._histBaseline = S.doc ? JSON.parse(JSON.stringify(S.doc)) : null;
+    S._histBaselineStr = histSerialize(S.doc);
+    clearTimeout(_histTimer); _histTimer = null;
+    renderHistoryBar();
+  }
+  function histCommitNow() {
+    clearTimeout(_histTimer); _histTimer = null;
+    if (!S.doc) return;
+    const cur = histSerialize(S.doc);
+    if (cur === S._histBaselineStr) return; // nothing changed since last commit
+    if (S._histBaseline) {
+      S.edUndo.push(S._histBaseline);
+      if (S.edUndo.length > S.edHistMax) S.edUndo.shift();
+    }
+    S.edRedo = [];
+    S._histBaseline = JSON.parse(cur);
+    S._histBaselineStr = cur;
+    renderHistoryBar();
+  }
+  function histSchedule() { clearTimeout(_histTimer); _histTimer = setTimeout(histCommitNow, 500); }
+  function histRestore(snap) {
+    S.doc = JSON.parse(JSON.stringify(snap));
+    S._histBaseline = JSON.parse(JSON.stringify(snap));
+    S._histBaselineStr = histSerialize(snap);
+    if (S.edSelId != null && !S.doc.blocks.some((b) => b.id === S.edSelId)) S.edSelId = null;
+    S.edDirty = true; setSaved();
+    renderPalette(); renderBlocks(); renderProps(); highlightCanvas(); renderHistoryBar(); scheduleRender();
+  }
+  function undo() {
+    if (S.edResizing) return;
+    histCommitNow();
+    if (!S.edUndo.length) return;
+    S.edRedo.push(JSON.parse(JSON.stringify(S.doc)));
+    histRestore(S.edUndo.pop());
+  }
+  function redo() {
+    if (S.edResizing) return;
+    histCommitNow();
+    if (!S.edRedo.length) return;
+    S.edUndo.push(JSON.parse(JSON.stringify(S.doc)));
+    histRestore(S.edRedo.pop());
+  }
+  function renderHistoryBar() {
+    const u = $('edUndo'), r = $('edRedo');
+    if (u) u.disabled = !(S.edUndo && S.edUndo.length);
+    if (r) r.disabled = !(S.edRedo && S.edRedo.length);
+  }
+  // True when a text field owns focus — the guard that keeps Backspace/Delete
+  // from nuking a block while the user is editing copy (M14).
+  function isTextEntryFocused() {
+    const a = document.activeElement;
+    return !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable));
+  }
+  // ONE editor-scoped keyboard handler (M13 undo/redo + M14 delete/escape).
+  function editorKeydown(e) {
+    const ed = document.getElementById('view-editor');
+    if (!ed || !ed.classList.contains('on')) return;
+    const meta = e.metaKey || e.ctrlKey;
+    const k = (e.key || '').toLowerCase();
+    if (meta && !e.shiftKey && k === 'z') { e.preventDefault(); undo(); return; }
+    if (meta && ((e.shiftKey && k === 'z') || k === 'y')) { e.preventDefault(); redo(); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && S.edSelId && !isTextEntryFocused()) {
+      e.preventDefault(); deleteBlock(S.edSelId); return;
+    }
+    if (e.key === 'Escape') {
+      if (_assetPickCb) { _assetPickCb = null; }          // cancel an armed library pick
+      else if (S.edSelId != null) { selectBlock(null); }  // deselect -> email settings
+    }
+  }
   function setSaved() {
     const el0 = $('edSaved');
     if (S.edDirty) { el0.textContent = '• unsaved'; el0.className = 'ed-saved unsaved'; }
@@ -1239,10 +1324,28 @@
 
   // ---- RIGHT: properties for the selected block ----
   function selectedBlock() { return S.doc.blocks.find((b) => b.id === S.edSelId) || null; }
+  // M12: whole-email settings, shown in the Properties panel when no block is
+  // selected (click empty canvas or press Escape to reach it).
+  function setSetting(key, val) {
+    if (!S.doc.settings) S.doc.settings = {};
+    if (val === undefined || val === '') delete S.doc.settings[key]; else S.doc.settings[key] = val;
+    if (!Object.keys(S.doc.settings).length) delete S.doc.settings;
+    markDirty();
+  }
+  function renderGlobalSettings(box) {
+    const s = (S.doc && S.doc.settings) || {};
+    const hdr = el('div', 'ed-props-hdr');
+    hdr.appendChild(el('span', 'ed-props-hdr-ic', '⚙'));
+    hdr.appendChild(el('span', 'ed-props-hdr-name', 'Email settings'));
+    box.appendChild(hdr);
+    box.appendChild(el('div', 'ed-props-note', 'No block selected — these apply to the whole email. Click a block to edit it.'));
+    box.appendChild(colorField('Background', s.backgroundColor, (v) => setSetting('backgroundColor', v)));
+    box.appendChild(numberField('Content width (px)', s.contentWidth, (v) => setSetting('contentWidth', v), 480, 700));
+  }
   function renderProps() {
     const box = $('edProps'); box.innerHTML = '';
     const blk = selectedBlock();
-    if (!blk) { box.appendChild(el('div', 'ed-props-empty', 'Select a block to edit its content, or add one from the left.')); return; }
+    if (!blk) { renderGlobalSettings(box); return; }
     const def = blockDef(blk.type);
     // header: icon + type name
     const hdr = el('div', 'ed-props-hdr');
@@ -1585,6 +1688,7 @@
       const scale = 600 / (rect.width || 600);
       const badge = cd.createElement('div'); badge.className = 'edg-resize-badge';
       sel.appendChild(badge);
+      S.edResizing = true; // block undo/redo while dragging
       try { handle.setPointerCapture(e.pointerId); } catch (_) {}
       const move = (ev) => {
         const px = Math.max(40, startH + (ev.clientY - startY));
@@ -1597,7 +1701,9 @@
         handle.removeEventListener('pointermove', move);
         handle.removeEventListener('pointerup', up);
         badge.remove();
+        S.edResizing = false;
         renderProps(); // reflect the committed height in the panel
+        markDirty();   // one undo step per resize (also flips the dirty flag)
       };
       handle.addEventListener('pointermove', move);
       handle.addEventListener('pointerup', up);
@@ -1643,12 +1749,17 @@
     cd.addEventListener('mouseout', () => {
       cd.querySelectorAll('.edg-hover').forEach((n) => n.classList.remove('edg-hover'));
     });
+    // Keyboard shortcuts (M13/M14) when focus is INSIDE the canvas iframe:
+    // those keydowns fire on the iframe document and never bubble to the parent
+    // listener, so mirror the handler here (re-added each srcdoc reload).
+    cd.addEventListener('keydown', editorKeydown);
     // Capture phase so a click SELECTS (edit mode) rather than triggering the
     // module's amp-bind tap.
     cd.addEventListener('click', (e) => {
       if (S.editMode === false) return; // interact mode (M6): let AMP handle it
       const a = anchorOf(cd, e.target);
       if (a) { e.preventDefault(); e.stopPropagation(); selectBlock(a.dataset.bid); }
+      else if (S.edSelId != null) { selectBlock(null); } // M12: click empty space -> email settings
     }, true);
 
     // M4: drop a palette block, or a library image, INTO the phone.
@@ -1903,6 +2014,9 @@
     document.querySelectorAll('#edModeToggle button[data-mode]').forEach((b) => {
       b.onclick = () => setEditMode(b.dataset.mode === 'edit');
     });
+    $('edUndo').onclick = undo;   // M13
+    $('edRedo').onclick = redo;
+    document.addEventListener('keydown', editorKeydown); // M13 + M14
 
     // assets + contacts
     wireDropzone($('assetDrop'), $('assetFile'), assetsUpload);
