@@ -50,6 +50,11 @@ module.exports = defineConfig({
       // Genie 2.0 team gate: unset means OPEN (server/auth.js) — the suite
       // tests the app, not the login wall; the gate has its own unit tests.
       TEAM_PASSWORD: '',
+      // Blank Supabase creds pin the run to the LOCAL sqlite repo + KV/fs
+      // byte store: hermetic, and the shared team database never collects
+      // test brands.
+      SUPABASE_URL: '',
+      SUPABASE_SECRET_KEY: '',
     },
   },
 });

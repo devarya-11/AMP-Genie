@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -19,16 +19,21 @@
   </symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2l3 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.9 21l1.2-6.8-5-4.9 6.9-1z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.5" d="M4 12.5l5 5 11-11"/></symbol>
-  <symbol id="i-cross" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.5" d="M5 5l14 14M19 5L5 19"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 9h10v10H9zM5 15V5h10"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 3v12m-5-5l5 5 5-5M4 20h16"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M20 11a8 8 0 10-2 5m2 4v-5h-5"/></symbol>
-  <symbol id="i-send" viewBox="0 0 24 24"><path fill="currentColor" d="M3 11l18-8-8 18-2-7z"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" d="M16 16l4 4"/></symbol>
-  <symbol id="i-chevron" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
   <symbol id="i-brand" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M12 7a2.5 2.5 0 110 5 2.5 2.5 0 010-5zm0 6c2.8 0 5 1.3 5 3v1H7v-1c0-1.7 2.2-3 5-3z"/></symbol>
-  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="M12 7v5l3.5 2"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h9M17 7h3M4 17h3M11 17h9M13 4.5v5M7 14.5v5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 16V4m-5 5l5-5 5 5M4 20h16"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M7 17L17 7M9 7h8v8"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M6 3h8l4 4v14H6z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M9 12h6M9 16h6"/></symbol>
+  <symbol id="i-calc" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="M8 7.5h8"/><circle cx="8.6" cy="12.5" r="1.1" fill="currentColor"/><circle cx="12" cy="12.5" r="1.1" fill="currentColor"/><circle cx="15.4" cy="12.5" r="1.1" fill="currentColor"/><circle cx="8.6" cy="16.5" r="1.1" fill="currentColor"/><circle cx="12" cy="16.5" r="1.1" fill="currentColor"/><circle cx="15.4" cy="16.5" r="1.1" fill="currentColor"/></symbol>
+  <symbol id="i-poll" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" d="M5 20v-8M12 20V4M19 20v-5"/></symbol>
+  <symbol id="i-quiz" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M8.8 9a3.2 3.2 0 115.4 2.3c-1 .9-2.2 1.5-2.2 3.2"/><circle cx="12" cy="18.4" r="1.3" fill="currentColor"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="M12 12h9m-3 0v4m-3-4v3"/></symbol>
 </svg>
 
 <!-- ============ SaaS shell: left nav + view container ============ -->
@@ -36,15 +41,13 @@
   <aside class="sidenav">
     <div class="brandmark"><svg class="ic lampic"><use href="#i-lamp"/></svg><span>AMP&nbsp;Genie</span></div>
     <nav class="nav">
-      <button data-view="create" class="nav-item on"><svg class="ic"><use href="#i-sparkle"/></svg> Create</button>
-      <button data-view="pitches" class="nav-item"><svg class="ic"><use href="#i-folder"/></svg> Pitches</button>
-      <button data-view="brands" class="nav-item"><svg class="ic"><use href="#i-brand"/></svg> Brands</button>
-      <button data-view="history" class="nav-item"><svg class="ic"><use href="#i-clock"/></svg> History</button>
+      <button data-view="pitches" class="nav-item on"><svg class="ic"><use href="#i-folder"/></svg> Pitches</button>
+      <button data-view="settings" class="nav-item"><svg class="ic"><use href="#i-sliders"/></svg> Settings</button>
     </nav>
     <div class="nav-foot">
       <input id="authorName" class="author-input" type="text" placeholder="Your name" maxlength="60"
-             title="Shown on the builds you create so the team knows whose demo is whose">
-      <label class="devtoggle" title="Show the AMP code &amp; Validation tabs for debugging">
+             title="Shown on everything you research, upload and build so the team knows whose work is whose">
+      <label class="devtoggle" title="Show the AMP code tab on example details, for debugging">
         <input type="checkbox" id="devToggle" class="devtoggle-input">
         <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
         <span class="devtoggle-text">Developer view</span>
@@ -54,53 +57,105 @@
 
   <main class="content">
 
-  <!-- ======================= CREATE ======================= -->
-  <section id="view-create" class="view on">
-    <div class="mode-tabs">
-      <button id="modeGuided" class="mode-tab on" type="button">Guided pitch <span class="hint">research &rarr; propose &rarr; build</span></button>
-      <button id="modeQuick" class="mode-tab" type="button">Quick generate <span class="hint">one email, one click</span></button>
+  <!-- ======================= PITCHES HOME ======================= -->
+  <section id="view-pitches" class="view on">
+    <div class="view-hdr">
+      <div>
+        <h1 class="view-title">Pitches</h1>
+        <p class="view-sub">Every pitch the team is building — research a brand once, generate interactive AMP examples, share the lot.</p>
+      </div>
+      <button id="newPitchBtn" class="primary big"><svg class="ic"><use href="#i-plus"/></svg> New Pitch</button>
     </div>
+    <div id="pitchesStatus" class="statusline"></div>
+    <div id="pitchesList" class="pitch-cards"></div>
+  </section>
 
-    <!-- ---- GUIDED WIZARD ---- -->
-    <div id="guided" class="wizard">
+  <!-- ======================= NEW PITCH WIZARD ======================= -->
+  <section id="view-newpitch" class="view">
+    <button id="npBack" class="backlink" type="button">&larr; All pitches</button>
+    <div class="wizard">
+
       <!-- Step 1: brand + research -->
-      <section id="wstep1" class="card wstep on">
+      <section id="npStep1" class="card wstep">
         <div class="wstep-hdr"><span class="wstep-num">1</span> Who are we pitching?</div>
-        <label class="fieldlabel" for="gBrand">Brand name</label>
+        <label class="fieldlabel" for="npBrand">Brand name</label>
         <div class="hero-input-row">
-          <input id="gBrand" type="text" placeholder="e.g. Groww, Nykaa, Practo&hellip;" autocomplete="off">
-          <button id="gResearch" class="primary big"><svg class="ic"><use href="#i-search"/></svg> Research brand</button>
-        </div>
-        <div class="controls">
-          <div class="ctrl">
-            <label for="gColorhex">Brand colour <span class="hint">auto-detected &mdash; override optional</span></label>
-            <div class="colorwrap">
-              <input id="gColorpick" type="color" value="#6c2bd9">
-              <input id="gColorhex" type="text" placeholder="auto" maxlength="7">
-            </div>
-          </div>
+          <input id="npBrand" type="text" placeholder="e.g. Groww, Nykaa, Practo&hellip;" autocomplete="off">
+          <button id="npResearch" class="primary big"><svg class="ic"><use href="#i-search"/></svg> Research brand</button>
         </div>
         <div class="brief-field">
-          <label class="fieldlabel" for="gNotes">Brand guidelines / notes <span class="hint">optional &mdash; paste anything you know: positioning, voice, campaign calendar. Pasted truth outranks scraped guesses.</span></label>
-          <textarea id="gNotes" rows="3" placeholder="e.g. India&rsquo;s largest investment app, voice is simple-jargon-free-reassuring, big Diwali gold push this quarter&hellip;"></textarea>
+          <label class="fieldlabel" for="npNotes">Notes for the genie <span class="hint">optional &mdash; positioning, voice, campaign calendar. Pasted truth outranks scraped guesses.</span></label>
+          <textarea id="npNotes" rows="3" placeholder="e.g. India&rsquo;s largest investment app, voice is simple-jargon-free-reassuring, big Diwali gold push this quarter&hellip;"></textarea>
         </div>
-        <div id="gStatus1" class="statusline"></div>
+        <div id="npStatus1" class="statusline"></div>
       </section>
 
       <!-- Dossier: what the genie learned -->
-      <section id="dossierCard" class="card dossier hidden">
-        <div class="wstep-hdr"><svg class="ic accent"><use href="#i-brand"/></svg> What the genie learned <span id="dossierConf" class="chip"></span></div>
-        <p id="dossierSummary" class="dossier-summary"></p>
-        <div id="dossierChips" class="chips"></div>
+      <section id="npDossier" class="card dossier hidden">
+        <div class="wstep-hdr">
+          <img id="npLogo" class="brand-logo hidden" alt="Brand logo">
+          <svg class="ic accent"><use href="#i-brand"/></svg> What the genie learned
+          <span id="npConf" class="chip"></span>
+        </div>
+        <p id="npSummary" class="dossier-summary"></p>
+        <div id="npChips" class="chips"></div>
       </section>
 
-      <!-- Step 2: questionnaire -->
-      <section id="wstep2" class="card wstep hidden">
-        <div class="wstep-hdr"><span class="wstep-num">2</span> Point the genie <span class="hint">30 seconds &mdash; every answer is optional</span></div>
+      <!-- Step 2: assets — every field optional, whole step skippable -->
+      <section id="npStep2" class="card wstep hidden">
+        <div class="wstep-hdr"><span class="wstep-num">2</span> Brand assets <span class="hint">all optional &mdash; real logos and products beat placeholders, but you can skip and add them later</span></div>
         <div class="qgrid">
           <div class="ctrl">
-            <label for="qGoal">Campaign goal</label>
-            <select id="qGoal">
+            <label for="npLogoUrl">Logo URL</label>
+            <input id="npLogoUrl" type="url" placeholder="https://&hellip;/logo.png">
+          </div>
+          <div class="ctrl">
+            <label for="npHeroUrl">Hero image URL</label>
+            <input id="npHeroUrl" type="url" placeholder="https://&hellip;/campaign-hero.jpg">
+          </div>
+          <div class="ctrl">
+            <label for="npColor">Brand colour <span class="hint">#rrggbb</span></label>
+            <input id="npColor" type="text" maxlength="7" placeholder="#e78129">
+          </div>
+        </div>
+        <div class="ctrl" style="margin-top:14px">
+          <label>Products <span class="hint">name &middot; price &middot; image URL &mdash; Upload fills the image field for you</span></label>
+          <div id="npProducts" class="kit-products"></div>
+          <button id="npAddProduct" class="ghost sm" type="button">+ add product</button>
+        </div>
+        <div id="npDrop" class="dropzone" tabindex="0" role="button" aria-label="Upload images to the brand gallery">
+          <svg class="ic"><use href="#i-upload"/></svg>
+          Drop images here or <b>browse</b> <span class="hint">&mdash; they land in the brand gallery for any example</span>
+          <input id="npFile" class="dz-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
+        </div>
+        <div id="npUploads" class="chips" style="margin-top:10px"></div>
+        <div class="brief-field">
+          <label class="fieldlabel" for="npVoice">Brand voice sample <span class="hint">paste a real email/caption &mdash; the genie writes copy in this voice</span></label>
+          <textarea id="npVoice" rows="3" placeholder="Paste 2&ndash;10 sentences of the brand&rsquo;s actual copy&hellip;"></textarea>
+        </div>
+        <div class="ctrl" style="margin-top:14px">
+          <label>Quick contacts <span class="hint">who we&rsquo;re pitching to &mdash; name &middot; role &middot; email</span></label>
+          <div id="npContacts" class="contact-rows"></div>
+          <button id="npAddContact" class="ghost sm" type="button">+ add contact</button>
+        </div>
+        <div class="wstep-actions">
+          <button id="npSkip2" class="ghost" type="button">Skip for now</button>
+          <button id="npSave2" class="primary"><svg class="ic"><use href="#i-check"/></svg> Save &amp; continue</button>
+        </div>
+        <div id="npStatus2" class="statusline"></div>
+      </section>
+
+      <!-- Step 3: the pitch itself -->
+      <section id="npStep3" class="card wstep hidden">
+        <div class="wstep-hdr"><span class="wstep-num">3</span> The pitch</div>
+        <div class="qgrid">
+          <div class="ctrl np-title-ctrl">
+            <label for="npTitle">Pitch title <span class="hint">required</span></label>
+            <input id="npTitle" type="text" maxlength="200" placeholder="e.g. Diwali reactivation pitch">
+          </div>
+          <div class="ctrl">
+            <label for="npGoal">Campaign goal</label>
+            <select id="npGoal">
               <option value="">Not sure yet</option>
               <option>Acquisition — win new customers</option>
               <option>Activation — get signups to act</option>
@@ -109,235 +164,221 @@
               <option>Announcement — launch or festive push</option>
             </select>
           </div>
-          <div class="ctrl">
-            <label for="qAudience">Audience</label>
-            <input id="qAudience" type="text" placeholder="e.g. dormant SIP investors, first-time buyers">
-          </div>
-          <div class="ctrl">
-            <label for="qMoment">Campaign moment</label>
-            <input id="qMoment" type="text" placeholder="e.g. Diwali sale, IPO week, monsoon checkups">
-          </div>
-        </div>
-        <div class="ctrl" style="margin-top:12px">
-          <label>Products to feature <span class="hint">from the research &mdash; tap to include</span></label>
-          <div id="qProducts" class="chips picky"></div>
         </div>
         <div class="brief-field">
-          <label class="fieldlabel" for="qMustHave">Anything this pitch must include?</label>
-          <textarea id="qMustHave" rows="2" placeholder="e.g. a lab-report style opener like the Practo pitch; must mention the loyalty API"></textarea>
+          <label class="fieldlabel" for="npBrief">Brief <span class="hint">what&rsquo;s the story? Audience, moment, offer &mdash; the genie grounds every example in this</span></label>
+          <textarea id="npBrief" rows="4" placeholder="e.g. Win back dormant SIP investors before Diwali with a gold-themed push&hellip;"></textarea>
         </div>
         <div class="wstep-actions">
-          <button id="gPropose" class="primary big"><svg class="ic"><use href="#i-sparkle"/></svg> Propose use-cases</button>
+          <button id="npCreate" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Create pitch</button>
         </div>
-        <div id="gStatus2" class="statusline"></div>
+        <div id="npStatus3" class="statusline"></div>
       </section>
 
-      <!-- Step 3: the proposal — see it before it's built -->
-      <section id="wstep3" class="card wstep hidden">
-        <div class="wstep-hdr"><span class="wstep-num">3</span> Here&rsquo;s what the genie will build <span id="ucSource" class="chip"></span></div>
-        <div id="ucList" class="uc-list"></div>
-        <div class="uc-refine">
-          <input id="ucFeedback" type="text" placeholder="Steer it: &lsquo;go deeper on retention&rsquo; &middot; or describe a use-case you want added&hellip;">
-          <button id="ucReroll" class="ghost" title="Regenerate the proposal using this feedback"><svg class="ic"><use href="#i-refresh"/></svg> Reroll</button>
-          <button id="ucAddIdea" class="ghost" title="Shape this text into one extra use-case"><svg class="ic"><use href="#i-sparkle"/></svg> Add as use-case</button>
-        </div>
-        <div class="wstep-actions">
-          <button id="ucBuild" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Build these <span id="ucCount"></span></button>
-        </div>
-        <div id="gStatus3" class="statusline"></div>
-      </section>
     </div>
+  </section>
 
-    <!-- ---- QUICK GENERATE (the one-click v2 flow, unchanged IDs) ---- -->
-    <div id="quick" class="hidden">
-      <section class="hero card">
-        <label class="fieldlabel" for="brand">Brand name</label>
-        <div class="hero-input-row">
-          <input id="brand" type="text" placeholder="e.g. Zomato, Nykaa, Groww&hellip;" autocomplete="off">
-          <button id="rub" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Rub the <span class="cursive-l">l</span>AMP</button>
+  <!-- ======================= PITCH WORKSPACE ======================= -->
+  <section id="view-pitch" class="view">
+    <button id="pwBack" class="backlink" type="button">&larr; All pitches</button>
+
+    <header class="pw-hdr card">
+      <img id="pwLogo" class="brand-logo hidden" alt="Brand logo">
+      <div class="pw-names">
+        <span id="pwBrand" class="pw-brand"></span>
+        <span id="pwTitle" class="pw-title" title="Click to rename"></span>
+        <input id="pwTitleInput" class="pw-title-input hidden" type="text" maxlength="200" aria-label="Pitch title">
+      </div>
+      <span id="pwStatus" class="chip hidden"></span>
+    </header>
+
+    <div class="panel card">
+      <nav class="tabs">
+        <button data-wtab="examples" class="on" type="button">Examples</button>
+        <button data-wtab="assets" type="button">Assets</button>
+        <button data-wtab="details" type="button">Details</button>
+      </nav>
+
+      <!-- ---- EXAMPLES ---- -->
+      <div data-wpane="examples" class="pane on">
+        <div id="exToolbar" class="ex-toolbar">
+          <button id="exNew" class="primary" type="button"><svg class="ic"><use href="#i-plus"/></svg> New example</button>
+          <div id="exStatus" class="statusline" style="margin:0"></div>
         </div>
-        <div class="controls">
-          <div class="ctrl">
-            <label for="colorhex">Brand colour <span class="hint">auto-detected &mdash; override optional</span></label>
-            <div class="colorwrap">
-              <input id="colorpick" type="color" value="#6c2bd9">
-              <input id="colorhex" type="text" placeholder="auto" maxlength="7">
+
+        <div id="genPanel" class="gen-panel hidden">
+          <div class="gen-col">
+            <div class="gen-hdr"><svg class="ic accent"><use href="#i-lamp"/></svg> Genie proposals <span id="genSource" class="chip hidden"></span></div>
+            <button id="genPropose" class="primary sm" type="button" style="align-self:flex-start"><svg class="ic"><use href="#i-lamp"/></svg> Propose use-cases</button>
+            <div id="genStatus" class="statusline" style="margin-top:0"></div>
+            <div id="genList" class="uc-list"></div>
+            <button id="genReroll" class="ghost sm hidden" type="button" style="align-self:flex-start"><svg class="ic"><use href="#i-refresh"/></svg> Fresh ideas</button>
+          </div>
+          <div class="gen-col">
+            <div class="gen-hdr"><svg class="ic accent"><use href="#i-sparkle"/></svg> Your idea</div>
+            <div class="dispatch-row">
+              <input id="ideaInput" type="text" placeholder="Describe the email you want &mdash; e.g. spin-the-wheel Diwali reward&hellip;">
+              <button id="ideaGo" class="primary" type="button" title="Build your idea as a validated AMP example"><svg class="ic"><use href="#i-sparkle"/></svg></button>
+            </div>
+            <div id="ideaStatus" class="statusline"></div>
+          </div>
+        </div>
+
+        <div id="exGrid" class="ex-grid"></div>
+
+        <!-- Example detail: the full email, its lineage and its levers -->
+        <div id="exDetail" class="hidden">
+          <div class="ex-detail-top">
+            <button id="exBackBtn" class="ghost sm" type="button">&larr; All examples</button>
+            <div id="exVersions" class="chips hidden"></div>
+          </div>
+          <div id="exTitle" class="conjured"></div>
+          <div id="exMeta" class="chips"></div>
+          <div class="ex-actions">
+            <button id="exShare" class="ghost sm" type="button"><svg class="ic"><use href="#i-copy"/></svg> Copy share link</button>
+            <a id="exOpenShare" class="ghost sm linkbtn" target="_blank" rel="noopener"><svg class="ic"><use href="#i-open"/></svg> Open share page</a>
+            <button id="exDownload" class="ghost sm" type="button"><svg class="ic"><use href="#i-download"/></svg> Download AMP</button>
+            <button id="exCopyAmp" class="ghost sm" type="button"><svg class="ic"><use href="#i-copy"/></svg> Copy AMP</button>
+            <span id="exMsg" class="copy-msg" aria-live="polite"></span>
+          </div>
+          <div class="tweak">
+            <label class="fieldlabel" for="exTweak">Refine with a prompt <span class="hint">parameters only, revalidated, every version kept</span></label>
+            <div class="dispatch-row">
+              <input id="exTweak" type="text" placeholder="e.g. make it 25% off &middot; switch to the quiz &middot; #112233 &middot; more premium">
+              <button id="exTweakGo" class="primary" type="button" title="Apply the tweak as a new validated version"><svg class="ic"><use href="#i-sparkle"/></svg></button>
+            </div>
+            <div id="exTweakMsg" class="dispatch-msg" aria-live="polite"></div>
+          </div>
+          <nav class="tabs subtabs">
+            <button data-dtab="preview" class="on" type="button">Live preview</button>
+            <button data-dtab="code" class="advanced-only" type="button">AMP code</button>
+          </nav>
+          <div data-dpane="preview" class="pane on">
+            <div class="stage">
+              <div class="phone">
+                <div class="phone-screen">
+                  <iframe id="exFrame" class="amp-frame" sandbox="allow-scripts allow-same-origin" title="Interactive AMP email preview"></iframe>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="ctrl slate-ctrl">
-            <label>Pitch slate <span class="hint">every module, one shareable page</span></label>
-            <label class="devtoggle slate-toggle" title="One brief &rarr; all interactive modules, grouped on a single shareable pitch page">
-              <input type="checkbox" id="slateToggle" class="devtoggle-input">
-              <span class="devtoggle-track"><span class="devtoggle-thumb"></span></span>
-              <span class="devtoggle-text">Full slate</span>
-            </label>
+          <div data-dpane="code" class="pane advanced-only">
+            <textarea id="exCode" readonly spellcheck="false"></textarea>
           </div>
         </div>
-        <div class="brief-field">
-          <label class="fieldlabel" for="campaignBrief">Tell us about this campaign <span class="hint">optional</span></label>
-          <textarea id="campaignBrief" rows="5" placeholder="What&rsquo;s this campaign for? Include the use case and how the flow should work. To put your REAL products in the email, paste them with prices &mdash; e.g. Vitamin C Serum &#8377;899, Rose Face Mist &#8377;499 &mdash; and state the offer (e.g. 40% off). The genie lays out exactly what you paste."></textarea>
-          <div class="brief-meta">
-            <span id="briefCount" class="brief-count">0/2000</span>
-            <span id="briefWarn" class="brief-warn hidden">Over 2000 characters &mdash; trim it down to Rub the lAMP. Nothing you&rsquo;ve typed is lost.</span>
+      </div>
+
+      <!-- ---- ASSETS ---- -->
+      <div data-wpane="assets" class="pane">
+        <div class="asset-uploader">
+          <div class="ctrl asset-kind">
+            <label for="assetKind">Kind</label>
+            <select id="assetKind">
+              <option value="image">image</option>
+              <option value="logo">logo</option>
+              <option value="hero">hero</option>
+              <option value="product">product</option>
+            </select>
+          </div>
+          <div id="assetDrop" class="dropzone" tabindex="0" role="button" aria-label="Upload images to this brand">
+            <svg class="ic"><use href="#i-upload"/></svg>
+            Drop images here or <b>browse</b>
+            <input id="assetFile" class="dz-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
           </div>
         </div>
-        <div id="status" class="statusline"></div>
-      </section>
+        <div id="assetStatus" class="statusline"></div>
+        <div id="assetGrid" class="asset-grid"></div>
+
+        <div class="contacts-block">
+          <div class="gen-hdr"><svg class="ic accent"><use href="#i-brand"/></svg> Contacts</div>
+          <div class="contact-add">
+            <input id="ctName" type="text" placeholder="Name">
+            <input id="ctRole" type="text" placeholder="Role">
+            <input id="ctEmail" type="email" placeholder="Email">
+            <button id="ctAdd" class="ghost" type="button">+ Add contact</button>
+          </div>
+          <div id="ctStatus" class="statusline"></div>
+          <div id="ctList" class="contact-list"></div>
+        </div>
+      </div>
+
+      <!-- ---- DETAILS ---- -->
+      <div data-wpane="details" class="pane">
+        <div class="details-grid">
+          <section>
+            <div class="gen-hdr"><svg class="ic accent"><use href="#i-brand"/></svg> Brand dossier <span id="dtConf" class="chip hidden"></span></div>
+            <p id="dtSummary" class="dossier-summary"></p>
+            <div id="dtChips" class="chips"></div>
+            <div class="brief-field">
+              <label class="fieldlabel" for="dtVoice">Brand voice sample <span class="hint">the genie writes copy in this voice</span></label>
+              <textarea id="dtVoice" rows="4" placeholder="Paste 2&ndash;10 sentences of the brand&rsquo;s actual copy&hellip;"></textarea>
+            </div>
+            <div class="wstep-actions">
+              <span id="dtVoiceMsg" class="copy-msg" style="flex:1" aria-live="polite"></span>
+              <button id="dtVoiceSave" class="ghost sm" type="button"><svg class="ic"><use href="#i-check"/></svg> Save voice</button>
+            </div>
+
+            <div class="gen-hdr details-sub"><svg class="ic accent"><use href="#i-folder"/></svg> Pitch</div>
+            <div class="ctrl">
+              <label for="dtGoal">Campaign goal</label>
+              <select id="dtGoal">
+                <option value="">Not sure yet</option>
+                <option>Acquisition — win new customers</option>
+                <option>Activation — get signups to act</option>
+                <option>Retention — keep customers engaged</option>
+                <option>Reactivation — win back dormant users</option>
+                <option>Announcement — launch or festive push</option>
+              </select>
+            </div>
+            <div class="brief-field">
+              <label class="fieldlabel" for="dtBrief">Brief</label>
+              <textarea id="dtBrief" rows="4" placeholder="What&rsquo;s this pitch about?"></textarea>
+            </div>
+            <div class="wstep-actions">
+              <span id="dtPitchMsg" class="copy-msg" style="flex:1" aria-live="polite"></span>
+              <button id="dtPitchSave" class="ghost sm" type="button"><svg class="ic"><use href="#i-check"/></svg> Save pitch</button>
+            </div>
+          </section>
+          <section>
+            <div class="gen-hdr"><svg class="ic accent"><use href="#i-refresh"/></svg> Activity</div>
+            <div id="dtActivity" class="activity-feed"></div>
+          </section>
+        </div>
+      </div>
     </div>
-
-    <!-- SLATE RESULT -->
-    <section id="slateResult" class="slate card hidden">
-      <div class="slate-hdr">
-        <div>
-          <div id="slateTitle" class="conjured"></div>
-          <div id="slateSub" class="slate-sub"></div>
-        </div>
-        <a id="slateOpen" class="primary slate-open" href="#" target="_blank" rel="noopener">
-          <svg class="ic"><use href="#i-sparkle"/></svg> Open pitch page
-        </a>
-      </div>
-      <div id="slateBuilds" class="slate-builds"></div>
-      <div id="slateMsg" class="copy-msg" aria-live="polite"></div>
-    </section>
-
-    <!-- SINGLE RESULT -->
-    <section id="result" class="result hidden">
-      <aside class="rail card">
-        <div id="conjured" class="conjured"></div>
-        <div id="chips" class="chips"></div>
-        <div id="briefNote" class="brief-note hidden"></div>
-        <div class="rail-actions">
-          <button id="surprise" class="ghost"><svg class="ic"><use href="#i-refresh"/></svg> Surprise me again</button>
-          <button id="copy" class="ghost"><svg class="ic"><use href="#i-copy"/></svg> Copy AMP code</button>
-          <button id="download" class="ghost"><svg class="ic"><use href="#i-download"/></svg> Download .html</button>
-          <button id="share" class="ghost hidden"><svg class="ic"><use href="#i-send"/></svg> Copy share link</button>
-        </div>
-        <div id="copyMsg" class="copy-msg" aria-live="polite"></div>
-        <div id="tweakBox" class="tweak hidden">
-          <label class="fieldlabel" for="tweakPrompt">Refine with a prompt <span class="hint">parameters only, revalidated, every version kept</span></label>
-          <div class="dispatch-row">
-            <input id="tweakPrompt" type="text" placeholder="e.g. make it 25% off &middot; switch to the quiz &middot; #112233 &middot; more premium">
-            <button id="tweakGo" class="primary" title="Apply the tweak as a new validated version"><svg class="ic"><use href="#i-sparkle"/></svg></button>
-          </div>
-          <div id="tweakMsg" class="dispatch-msg" aria-live="polite"></div>
-          <div id="versionsRow" class="chips hidden"></div>
-        </div>
-        <div class="dispatch">
-          <label class="fieldlabel" for="dispatchTo">Send to your inbox <span class="hint">self-send renders AMP without Google registration</span></label>
-          <div class="dispatch-row">
-            <input id="dispatchTo" type="email" placeholder="you@gmail.com">
-            <button id="dispatch" class="primary"><svg class="ic"><use href="#i-send"/></svg></button>
-          </div>
-          <div id="dispatchMsg" class="dispatch-msg" aria-live="polite"></div>
-        </div>
-      </aside>
-      <div class="panel card">
-        <nav class="tabs">
-          <button data-tab="preview" class="on" type="button">Live preview</button>
-          <button data-tab="code" type="button" class="advanced-only">AMP code <span id="editedDot" class="editdot hidden"></span></button>
-          <button data-tab="validation" type="button" class="advanced-only">Validation <span id="valDot" class="statdot"></span></button>
-        </nav>
-        <div data-pane="preview" class="pane on">
-          <div id="previewStale" class="preview-stale hidden" role="status">
-            Preview shows the last <b>generated</b> version &mdash; your code edits are not reflected here. Re-validate &amp; download use your edits.
-          </div>
-          <div class="stage">
-            <div class="phone"><div id="previewArea" class="phone-screen"></div></div>
-          </div>
-        </div>
-        <div data-pane="code" class="pane advanced-only">
-          <div class="code-actions">
-            <button id="revalidate" class="primary sm"><svg class="ic"><use href="#i-check"/></svg> Re-validate</button>
-            <button id="resetCode" class="ghost sm"><svg class="ic"><use href="#i-refresh"/></svg> Reset</button>
-            <span id="editedLabel" class="edited hidden">edited &mdash; differs from generated</span>
-          </div>
-          <textarea id="code" spellcheck="false"></textarea>
-        </div>
-        <div data-pane="validation" class="pane advanced-only">
-          <div id="verdict" class="verdict"></div>
-          <a id="playground" class="pglink" href="https://amp.gmail.dev/playground/" target="_blank" rel="noopener">Open in AMP Playground &rarr;</a>
-          <ul id="errors" class="errlist"></ul>
-        </div>
-      </div>
-    </section>
   </section>
 
-  <!-- ======================= PITCHES ======================= -->
-  <section id="view-pitches" class="view">
+  <!-- ======================= SETTINGS ======================= -->
+  <section id="view-settings" class="view">
+    <div class="view-hdr">
+      <div>
+        <h1 class="view-title">Settings</h1>
+        <p class="view-sub">Team-wide switches &mdash; everything here applies to everyone&rsquo;s builds.</p>
+      </div>
+    </div>
     <section class="card">
-      <div class="wstep-hdr"><svg class="ic accent"><use href="#i-folder"/></svg> Pitches <span class="hint">every slate the team has built &mdash; open, share, reuse</span></div>
-      <div id="pitchesList" class="pitches-list"><div class="empty-note">No pitches yet &mdash; build a slate from the Create tab.</div></div>
-    </section>
-  </section>
-
-  <!-- ======================= BRANDS ======================= -->
-  <section id="view-brands" class="view">
-    <section class="card">
-      <div class="wstep-hdr"><svg class="ic accent"><use href="#i-brand"/></svg> Brands <span class="hint">what the genie knows &mdash; research once, reuse in every pitch</span></div>
-      <div class="hero-input-row">
-        <input id="bSearch" type="text" placeholder="Brand name&hellip;" autocomplete="off">
-        <button id="bShow" class="primary"><svg class="ic"><use href="#i-search"/></svg> Look up</button>
+      <div class="wstep-hdr"><svg class="ic accent"><use href="#i-key"/></svg> LLM key pool</div>
+      <p class="explainer">Keys pasted here are <b>shared team-wide</b>: every research, proposal and build draws from this pool, and the genie rotates to the next key automatically when one hits a rate limit. Keys are stored server-side and only ever shown masked. With an empty pool the genie still works on its deterministic template tier.</p>
+      <div id="keysStatus" class="statusline"></div>
+      <div class="keys-wrap">
+        <table class="keys-table">
+          <thead><tr><th>Provider</th><th>Key</th><th>Label</th><th>Model</th><th>Added by</th><th></th></tr></thead>
+          <tbody id="keysRows"></tbody>
+        </table>
       </div>
-      <div id="bStatus" class="statusline"></div>
-      <div id="brandCard" class="hidden">
-        <p id="bSummary" class="dossier-summary"></p>
-        <div id="bChips" class="chips"></div>
-        <div class="wstep-actions">
-          <button id="bUse" class="ghost"><svg class="ic"><use href="#i-sparkle"/></svg> Start a pitch with this brand</button>
-        </div>
+      <div class="key-add">
+        <select id="keyProvider" aria-label="Provider"></select>
+        <input id="keyValue" type="password" placeholder="Paste API key" autocomplete="off" aria-label="API key">
+        <input id="keyLabel" type="text" placeholder="Label (optional)" maxlength="60">
+        <input id="keyModel" type="text" placeholder="Model (optional)" maxlength="80">
+        <button id="keyAdd" class="primary" type="button"><svg class="ic"><use href="#i-plus"/></svg> Add key</button>
       </div>
-    </section>
-
-    <!-- Brand kit assets: paste once, every future build for this brand uses them -->
-    <section id="kitCard" class="card hidden">
-      <div class="wstep-hdr"><svg class="ic accent"><use href="#i-star"/></svg> Brand kit assets
-        <span class="hint">paste once &mdash; real logo, hero &amp; product images and brand voice flow into every build for this brand</span>
-      </div>
-      <div class="qgrid">
-        <div class="ctrl">
-          <label for="kLogo">Logo URL <span class="hint">auto-detected via Google if blank</span></label>
-          <input id="kLogo" type="url" placeholder="https://&hellip;/logo.png">
-        </div>
-        <div class="ctrl">
-          <label for="kHero">Hero image URL <span class="hint">banner under the header</span></label>
-          <input id="kHero" type="url" placeholder="https://&hellip;/campaign-hero.jpg">
-        </div>
-        <div class="ctrl">
-          <label for="kColor">Brand colour <span class="hint">#rrggbb &mdash; blank keeps auto</span></label>
-          <input id="kColor" type="text" maxlength="7" placeholder="#00b386">
-        </div>
-      </div>
-      <div class="ctrl" style="margin-top:12px">
-        <label>Real products <span class="hint">name &middot; price (optional) &middot; image URL (optional) &mdash; used instead of placeholders</span></label>
-        <div id="kProducts" class="kit-products"></div>
-        <button id="kAddProduct" class="ghost sm" type="button">+ add product</button>
-      </div>
-      <div class="brief-field">
-        <label class="fieldlabel" for="kVoice">Brand voice sample <span class="hint">paste a real email/caption from the brand &mdash; the genie writes copy in this voice</span></label>
-        <textarea id="kVoice" rows="4" placeholder="Paste 2&ndash;10 sentences of the brand&rsquo;s actual copy&hellip;"></textarea>
-      </div>
-      <div class="wstep-actions">
-        <span id="kMsg" class="copy-msg" style="flex:1"></span>
-        <button id="kSave" class="primary"><svg class="ic"><use href="#i-check"/></svg> Save brand kit</button>
-      </div>
-    </section>
-  </section>
-
-  <!-- ======================= HISTORY ======================= -->
-  <section id="view-history" class="view">
-    <section id="historySection" class="history card">
-      <button type="button" id="historyToggle" class="history-hdr" aria-expanded="true" aria-controls="historyList">
-        <svg class="ic history-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
-        <h2 class="history-title">Recent builds</h2>
-        <span class="hint">brief &amp; metadata from past generations, for review &mdash; read-only</span>
-      </button>
-      <div id="historyList" class="history-list"></div>
     </section>
   </section>
 
   </main>
 </div>
 
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

@@ -1,820 +1,973 @@
 (function () {
+  'use strict';
   const $ = (id) => document.getElementById(id);
-  const PLAYGROUND = 'https://amp.gmail.dev/playground/';
 
-  const S = { meta: null, result: null, edited: null, counter: 0, colorTouched: false, active: 'preview', briefOverLimit: false, building: false };
-  const BRIEF_MAX = 2000;
-  // Guided-wizard state: the dossier and proposal being refined before build.
-  const W = { dossier: null, useCases: [], gColorTouched: false };
+  // ---------- state: one object, one source of truth ----------
+  const S = {
+    meta: null,            // /api/meta (module id -> friendly name)
+    pitches: [],
+    // new-pitch wizard
+    wBrand: null,          // brand row from POST /api/brands
+    wContacts: [],
+    // workspace
+    pitch: null, examples: [], brand: null, assets: [], contacts: [],
+    example: null, versions: [], proposals: [],
+    keysLoaded: false,
+  };
 
-  // Lightweight identity for team attribution: a name kept in localStorage and
-  // stamped onto every build/slate this browser creates. Not auth — access
-  // control is Cloudflare Access's job (see SETUP-CLOUDFLARE.md).
+  // ---------- identity: attribution, not auth ----------
   const AUTHOR_KEY = 'genieAuthor';
   function author() { try { return (localStorage.getItem(AUTHOR_KEY) || '').trim() || null; } catch (e) { return null; } }
 
+  // ---------- fetch helpers ----------
   async function api(path, body) {
     const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     return r.json();
   }
+  async function req(method, path, body) {
+    const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    return r.json();
+  }
+  async function getJson(path) { const r = await fetch(path); return r.json(); }
+  // Tolerant list extraction — the API wraps lists as {ok, <name>: []}.
+  function listOf(data, keys) {
+    for (const k of keys) if (data && Array.isArray(data[k])) return data[k];
+    return Array.isArray(data) ? data : [];
+  }
 
+  // ---------- tiny dom helpers ----------
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function chip(box, k, v) { const c = el('span', 'chip'); c.innerHTML = '<b>' + escapeHtml(String(k)) + '</b> ' + escapeHtml(String(v)); box.appendChild(c); return c; }
   function setLine(id, t, loading) {
-    const s = $(id); s.innerHTML = '';
+    const s = $(id); if (!s) return;
+    s.innerHTML = ''; s.classList.toggle('err', !loading && /^error/i.test(t || ''));
     if (loading) { const sp = document.createElement('span'); sp.className = 'spinner'; s.appendChild(sp); }
     if (t) s.appendChild(document.createTextNode(t));
   }
-  function setStatus(t, loading) { setLine('status', t, loading); }
-
-  // ---------- init ----------
-  async function init() {
-    const m = await (await fetch('/api/meta')).json();
-    S.meta = m;
-    bind();
-    loadHistory();
-    loadPitches();
-  }
-
-  function bind() {
-    // shell navigation
-    document.querySelectorAll('.nav-item').forEach((b) => b.onclick = () => switchView(b.dataset.view));
-    $('modeGuided').onclick = () => switchMode(true);
-    $('modeQuick').onclick = () => switchMode(false);
-
-    // guided wizard
-    $('gResearch').onclick = research;
-    $('gPropose').onclick = propose;
-    $('ucReroll').onclick = reroll;
-    $('ucAddIdea').onclick = addIdea;
-    $('ucBuild').onclick = buildFromUseCases;
-    $('gBrand').onkeydown = (e) => { if (e.key === 'Enter') research(); };
-    $('gColorpick').oninput = () => { $('gColorhex').value = $('gColorpick').value; W.gColorTouched = true; };
-    $('gColorhex').oninput = () => { if (/^#[0-9a-f]{6}$/i.test($('gColorhex').value)) $('gColorpick').value = $('gColorhex').value; W.gColorTouched = true; };
-
-    // brands view
-    $('bShow').onclick = lookupBrand;
-    $('bSearch').onkeydown = (e) => { if (e.key === 'Enter') lookupBrand(); };
-    $('bUse').onclick = () => {
-      switchView('create'); switchMode(true);
-      $('gBrand').value = $('bSearch').value.trim();
-      research();
-    };
-    $('kAddProduct').onclick = () => addProductRow();
-    $('kSave').onclick = saveKit;
-
-    // quick generate (v2 flow, unchanged)
-    $('colorpick').oninput = () => { $('colorhex').value = $('colorpick').value; S.colorTouched = true; };
-    $('colorhex').oninput = () => { if (/^#[0-9a-f]{6}$/i.test($('colorhex').value)) $('colorpick').value = $('colorhex').value; S.colorTouched = true; };
-    $('rub').onclick = () => build(false);
-    $('surprise').onclick = () => { S.counter++; build(true); };
-    $('copy').onclick = copyCode;
-    $('download').onclick = downloadCode;
-    $('share').onclick = copyShareLink;
-    $('authorName').value = author() || '';
-    $('authorName').onchange = () => { try { localStorage.setItem(AUTHOR_KEY, $('authorName').value.trim()); } catch (e) {} };
-    $('revalidate').onclick = revalidate;
-    $('resetCode').onclick = resetCode;
-    $('dispatch').onclick = doDispatch;
-    $('tweakGo').onclick = doTweak;
-    $('tweakPrompt').onkeydown = (e) => { if (e.key === 'Enter') doTweak(); };
-    $('code').oninput = onEdit;
-    $('campaignBrief').oninput = updateBriefCounter;
-    document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => switchTab(b.dataset.tab));
-    $('devToggle').onchange = () => {
-      document.body.classList.toggle('dev-mode', $('devToggle').checked);
-      if (!$('devToggle').checked && (S.active === 'code' || S.active === 'validation')) switchTab('preview');
-    };
-    $('historyToggle').onclick = toggleHistory;
-    updateBriefCounter();
-  }
-
-  // ---------- shell: views + create modes ----------
-  function switchView(name) {
-    document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('on', b.dataset.view === name));
-    document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === 'view-' + name));
-    if (name === 'history') loadHistory();
-    if (name === 'pitches') loadPitches();
-  }
-  function switchMode(guided) {
-    $('modeGuided').classList.toggle('on', guided);
-    $('modeQuick').classList.toggle('on', !guided);
-    $('guided').classList.toggle('hidden', !guided);
-    $('quick').classList.toggle('hidden', guided);
-  }
-
-  // ---------- guided wizard: research -> questionnaire -> proposal -> build ----------
-  async function research() {
-    const brand = $('gBrand').value.trim();
-    if (!brand) { setLine('gStatus1', 'Type a brand name first.'); $('gBrand').focus(); return; }
-    setLine('gStatus1', 'Researching ' + brand + ' — site, products, voice…', true);
-    $('gResearch').disabled = true;
-    try {
-      const out = await api('/usecases', { brand, notes: $('gNotes').value.trim() || null, count: 1 });
-      if (out.error) { setLine('gStatus1', 'Error: ' + out.error); return; }
-      W.dossier = out.dossier || null;
-      renderDossier(W.dossier);
-      $('wstep2').classList.remove('hidden');
-      $('wstep3').classList.add('hidden');
-      W.useCases = [];
-      setLine('gStatus1', '');
-      $('wstep2').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch (e) {
-      setLine('gStatus1', 'Error: ' + e.message);
-    } finally {
-      $('gResearch').disabled = false;
+  // Generic button loading state: spinner in, label back out.
+  function busy(btn, on, label) {
+    if (on) {
+      if (!btn.dataset.orig) btn.dataset.orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>' + (label ? ' ' + escapeHtml(label) : '');
+    } else {
+      btn.disabled = false;
+      if (btn.dataset.orig) { btn.innerHTML = btn.dataset.orig; delete btn.dataset.orig; }
     }
   }
-
-  function renderDossier(d) {
-    const card = $('dossierCard');
-    if (!d) { card.classList.add('hidden'); return; }
-    card.classList.remove('hidden');
-    // Honest label: 'heuristic' has two very different causes. Only say
-    // "no LLM key" when there genuinely isn't one — otherwise the LLM just
-    // didn't land this time (free-tier flakiness), and clicking Research
-    // again retries it (the server re-attempts a cached heuristic dossier).
-    $('dossierConf').textContent = d.confidence === 'llm'
-      ? 'LLM-researched'
-      : (d.llmConfigured ? 'heuristic — click Research to retry the LLM' : 'heuristic (no LLM key)');
-    $('dossierSummary').textContent = d.summary || 'No public summary found — add notes above and re-research, or just continue.';
-    const chips = $('dossierChips'); chips.innerHTML = '';
-    if (d.vertical) chip(chips, 'vertical', d.vertical);
-    (d.voice && d.voice.adjectives || []).slice(0, 4).forEach((a) => chip(chips, 'voice', a));
-    (d.currentCampaigns || []).slice(0, 3).forEach((c) => chip(chips, 'campaign', c));
-    // Products land in the questionnaire as tap-to-include picks.
-    const picks = $('qProducts'); picks.innerHTML = '';
-    const prods = (d.products || []).slice(0, 10);
-    if (!prods.length) { picks.innerHTML = '<span class="hint">none found — name products in the must-include box below</span>'; }
-    prods.forEach((p) => {
-      const c = el('button', 'chip pick', p);
-      c.type = 'button';
-      c.onclick = () => c.classList.toggle('on');
-      picks.appendChild(c);
-    });
+  function flash(node, msg) {
+    const isBtn = node.tagName === 'BUTTON';
+    if (isBtn) { const o = node.innerHTML; node.innerHTML = '<svg class="ic"><use href="#i-check"/></svg> ' + escapeHtml(msg); setTimeout(() => { node.innerHTML = o; }, 1600); }
+    else { node.textContent = msg; setTimeout(() => { if (node.textContent === msg) node.textContent = ''; }, 2400); }
   }
-
-  // The questionnaire folds into a synthesized brief — the same channel the
-  // engines already understand (routing, signals, LLM context), so guided
-  // answers and a hand-typed quick brief are one code path server-side.
-  function synthesizedBrief() {
-    const parts = [];
-    if ($('qGoal').value) parts.push('Goal: ' + $('qGoal').value + '.');
-    if ($('qAudience').value.trim()) parts.push('Audience: ' + $('qAudience').value.trim() + '.');
-    if ($('qMoment').value.trim()) parts.push('Campaign moment: ' + $('qMoment').value.trim() + '.');
-    const picked = Array.from(document.querySelectorAll('#qProducts .chip.on')).map((c) => c.textContent);
-    if (picked.length) parts.push('Feature these products: ' + picked.join(', ') + '.');
-    if ($('qMustHave').value.trim()) parts.push('Must include: ' + $('qMustHave').value.trim());
-    return parts.join(' ') || null;
-  }
-
-  async function propose() {
-    setLine('gStatus2', 'Drafting use-cases for ' + ($('gBrand').value.trim() || 'this brand') + '…', true);
-    $('gPropose').disabled = true;
-    try {
-      const out = await api('/usecases', {
-        brand: $('gBrand').value.trim(), notes: $('gNotes').value.trim() || null,
-        brief: synthesizedBrief(), count: 6,
-      });
-      if (out.error) { setLine('gStatus2', 'Error: ' + out.error); return; }
-      W.useCases = out.useCases || [];
-      if (out.dossier) { W.dossier = out.dossier; renderDossier(out.dossier); }
-      renderUseCases(out.source);
-      setLine('gStatus2', '');
-      $('wstep3').classList.remove('hidden');
-      $('wstep3').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch (e) {
-      setLine('gStatus2', 'Error: ' + e.message);
-    } finally {
-      $('gPropose').disabled = false;
+  async function toClipboard(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch (e) {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch (_) {}
+      document.body.removeChild(ta); return ok;
     }
   }
-
-  async function reroll() {
-    const feedback = $('ucFeedback').value.trim();
-    setLine('gStatus3', feedback ? 'Rerolling with your steer…' : 'Rerolling…', true);
-    $('ucReroll').disabled = true;
-    try {
-      const out = await api('/usecases', {
-        brand: $('gBrand').value.trim(), notes: $('gNotes').value.trim() || null,
-        brief: synthesizedBrief(), count: 6,
-        feedback: feedback || null,
-        prior: W.useCases.map((u) => u.title),
-      });
-      if (out.error) { setLine('gStatus3', 'Error: ' + out.error); return; }
-      W.useCases = out.useCases || [];
-      renderUseCases(out.source);
-      $('ucFeedback').value = '';
-      setLine('gStatus3', '');
-    } catch (e) { setLine('gStatus3', 'Error: ' + e.message); } finally { $('ucReroll').disabled = false; }
+  function shortDate(x) {
+    if (!x) return '';
+    const d = new Date(x); if (isNaN(d)) return '';
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
-
-  async function addIdea() {
-    const idea = $('ucFeedback').value.trim();
-    if (!idea) { setLine('gStatus3', 'Describe the use-case you want in the box first.'); $('ucFeedback').focus(); return; }
-    setLine('gStatus3', 'Shaping your idea into a use-case…', true);
-    $('ucAddIdea').disabled = true;
-    try {
-      const out = await api('/usecases', { brand: $('gBrand').value.trim(), notes: $('gNotes').value.trim() || null, idea });
-      if (out.error) { setLine('gStatus3', 'Error: ' + out.error); return; }
-      if (out.useCase) { W.useCases.push(out.useCase); renderUseCases(); $('ucFeedback').value = ''; }
-      setLine('gStatus3', '');
-    } catch (e) { setLine('gStatus3', 'Error: ' + e.message); } finally { $('ucAddIdea').disabled = false; }
-  }
-
-  function renderUseCases(source) {
-    if (source) $('ucSource').textContent = source === 'library' ? 'library playbook (LLM idle: key missing, cooling down, or unreachable)' : 'LLM-proposed';
-    const list = $('ucList'); list.innerHTML = '';
-    W.useCases.forEach((u, i) => {
-      const card = el('div', 'uc-card');
-      const top = el('div', 'uc-top');
-      top.appendChild(el('span', 'uc-title', u.title));
-      const rm = el('button', 'uc-remove', '✕');
-      rm.type = 'button'; rm.title = 'Remove this use-case';
-      rm.onclick = () => { W.useCases.splice(i, 1); renderUseCases(); };
-      top.appendChild(rm);
-      card.appendChild(top);
-      card.appendChild(el('div', 'uc-goal', u.businessGoal || ''));
-      const meta = el('div', 'chips');
-      chip(meta, 'module', moduleName(u.moduleId));
-      if (u.trigger) chip(meta, 'trigger', u.trigger);
-      if (u.kpi) chip(meta, 'kpi', u.kpi);
-      card.appendChild(meta);
-      list.appendChild(card);
-    });
-    $('ucCount').textContent = W.useCases.length ? '(' + W.useCases.length + ')' : '';
-    $('ucBuild').disabled = !W.useCases.length;
+  function timeAgo(x) {
+    if (!x) return '';
+    const t = new Date(x).getTime(); if (isNaN(t)) return '';
+    const s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    if (s < 86400 * 30) return Math.floor(s / 86400) + 'd ago';
+    return shortDate(x);
   }
   function moduleName(id) {
-    const m = (S.meta && S.meta.modules || []).find((x) => x.id === id);
-    return m ? m.name : id;
+    const m = ((S.meta && S.meta.modules) || []).find((x) => x.id === id);
+    return m ? m.name : (id || 'module');
+  }
+  function slugify(s) { return String(s || 'example').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'example'; }
+
+  // ---------- file -> base64 -> /assets ----------
+  function readFileB64(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => { const s = String(r.result); resolve(s.slice(s.indexOf(',') + 1)); }; // strip data:*;base64, prefix
+      r.onerror = () => reject(new Error('could not read ' + file.name));
+      r.readAsDataURL(file);
+    });
+  }
+  async function uploadAsset(file, kind, brandId) {
+    const dataBase64 = await readFileB64(file);
+    const out = await api('/assets', {
+      brandId, kind, filename: file.name, mime: file.type || 'image/png', dataBase64, author: author(),
+    });
+    if (out && out.error) throw new Error(out.error);
+    const a = (out && out.asset) || out || {};
+    return { id: a.id, url: a.url || (a.id ? '/assets/' + a.id : ''), filename: a.filename || file.name };
+  }
+  function wireDropzone(zone, input, onFiles) {
+    input.onchange = () => { if (input.files && input.files.length) onFiles(Array.from(input.files)); input.value = ''; };
+    ['dragenter', 'dragover'].forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.remove('drag'); }));
+    zone.addEventListener('drop', (e) => {
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []).filter((f) => /^image\//.test(f.type));
+      if (files.length) onFiles(files);
+    });
   }
 
-  async function buildFromUseCases() {
-    if (!W.useCases.length) return;
-    setLine('gStatus3', 'Building ' + W.useCases.length + ' validated emails — this takes a moment…', true);
-    $('ucBuild').disabled = true;
+  // ---------- shell: view routing ----------
+  function switchView(name) {
+    const navKey = (name === 'settings') ? 'settings' : 'pitches';
+    document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('on', b.dataset.view === navKey));
+    document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === 'view-' + name));
+    if (name === 'pitches') loadPitches();
+    if (name === 'settings' && !S.keysLoaded) loadKeys();
+  }
+
+  // ======================================================================
+  // VIEW 1 — PITCHES HOME
+  // ======================================================================
+  async function loadPitches() {
     try {
-      const body = {
-        brand: $('gBrand').value.trim() || 'Acme',
-        brief: synthesizedBrief(),
-        author: author(),
-        useCases: W.useCases.map((u) => ({ title: u.title, moduleId: u.moduleId, contentPlan: u.contentPlan || {} })),
-      };
-      if (W.gColorTouched && /^#[0-9a-f]{6}$/i.test($('gColorhex').value)) body.colorOverride = $('gColorhex').value;
-      const out = await api('/slate', body);
-      if (out.error) { setLine('gStatus3', 'Error: ' + out.error); return; }
-      renderSlate(out);
-      setLine('gStatus3', 'Done — ' + out.builds.length + ' validated emails on one pitch page.');
-      loadHistory(); loadPitches();
-      $('slateResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch (e) {
-      setLine('gStatus3', 'Error: ' + e.message);
-    } finally {
-      $('ucBuild').disabled = !W.useCases.length;
+      const data = await getJson('/api/pitches');
+      if (data && data.error) { setLine('pitchesStatus', 'Error: ' + data.error); return; }
+      S.pitches = listOf(data, ['pitches', 'items']);
+      setLine('pitchesStatus', '');
+      renderPitches();
+    } catch (e) { setLine('pitchesStatus', 'Error: ' + e.message); }
+  }
+  function renderPitches() {
+    const box = $('pitchesList'); box.innerHTML = '';
+    if (!S.pitches.length) {
+      box.appendChild(el('div', 'pitch-card empty', 'No pitches yet — create the first one.'));
+      return;
     }
+    S.pitches.forEach((p) => {
+      const card = el('button', 'pitch-card'); card.type = 'button';
+      card.appendChild(el('div', 'pc-brand', p.brandName || p.brand_name || p.brand || '?'));
+      card.appendChild(el('div', 'pc-title', p.title || 'Untitled pitch'));
+      const chips = el('div', 'chips');
+      const n = (p.exampleCount != null) ? p.exampleCount : (p.example_count != null ? p.example_count : 0);
+      chip(chips, 'examples', n);
+      if (p.status) chip(chips, 'status', p.status);
+      if (p.created_by || p.author) chip(chips, 'by', p.created_by || p.author);
+      card.appendChild(chips);
+      const upd = p.updated_at || p.created_at;
+      if (upd) card.appendChild(el('div', 'pc-foot', 'Updated ' + shortDate(upd)));
+      card.onclick = () => openPitch(p.id);
+      box.appendChild(card);
+    });
   }
 
-  // ---------- brands view ----------
-  async function lookupBrand() {
-    const brand = $('bSearch').value.trim();
-    if (!brand) { $('bSearch').focus(); return; }
-    setLine('bStatus', 'Looking up ' + brand + '…', true);
+  // ======================================================================
+  // VIEW 2 — NEW PITCH WIZARD
+  // ======================================================================
+  function resetWizard() {
+    S.wBrand = null; S.wContacts = [];
+    ['npBrand', 'npNotes', 'npLogoUrl', 'npHeroUrl', 'npColor', 'npVoice', 'npTitle', 'npBrief'].forEach((id) => { $(id).value = ''; });
+    $('npGoal').value = '';
+    ['npStatus1', 'npStatus2', 'npStatus3'].forEach((id) => setLine(id, ''));
+    ['npDossier', 'npStep2', 'npStep3'].forEach((id) => $(id).classList.add('hidden'));
+    $('npLogo').classList.add('hidden');
+    $('npUploads').innerHTML = '';
+    $('npProducts').innerHTML = '';
+    addProductRow($('npProducts'));
+    renderWizardContacts();
+  }
+
+  async function researchBrand() {
+    const name = $('npBrand').value.trim();
+    if (!name) { setLine('npStatus1', 'Type a brand name first.'); $('npBrand').focus(); return; }
+    const btn = $('npResearch');
+    busy(btn, true, 'Researching…');
+    setLine('npStatus1', 'Researching ' + name + ' — site, products, voice…', true);
     try {
-      const out = await api('/usecases', { brand, count: 1 });
-      if (out.error) { setLine('bStatus', 'Error: ' + out.error); return; }
-      const d = out.dossier || {};
-      $('brandCard').classList.remove('hidden');
-      $('bSummary').textContent = d.summary || 'Nothing on file — research it from the Create tab.';
-      const chips = $('bChips'); chips.innerHTML = '';
-      if (d.vertical) chip(chips, 'vertical', d.vertical);
-      if (d.confidence) chip(chips, 'research', d.confidence);
-      (d.products || []).slice(0, 8).forEach((p) => chip(chips, 'product', p));
-      (d.voice && d.voice.adjectives || []).slice(0, 4).forEach((a) => chip(chips, 'voice', a));
-      setLine('bStatus', '');
-      // The kit editor loads alongside the dossier — assets are the part the
-      // team curates by hand.
-      try {
-        const kres = await fetch('/brandkit/' + encodeURIComponent(brandSlug(brand)));
-        const kdata = await kres.json();
-        fillKitEditor(kdata && kdata.kit);
-      } catch (e) { fillKitEditor(null); }
-    } catch (e) { setLine('bStatus', 'Error: ' + e.message); }
+      const out = await api('/api/brands', { name, notes: $('npNotes').value.trim() || null, author: author() });
+      if (out && out.error) { setLine('npStatus1', 'Error: ' + out.error); return; }
+      const brand = (out && out.brand) || out;
+      if (!brand || !brand.id) { setLine('npStatus1', 'Error: research returned no brand.'); return; }
+      S.wBrand = brand;
+      renderWizardDossier(brand);
+      prefillKit(brand);
+      $('npDossier').classList.remove('hidden');
+      $('npStep2').classList.remove('hidden');
+      $('npStep3').classList.remove('hidden');
+      setLine('npStatus1', '');
+      $('npDossier').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      setLine('npStatus1', 'Error: ' + e.message);
+    } finally { busy(btn, false); }
   }
 
-  // ---------- brand kit editor ----------
-  // Same slug rule as the server (store.js brandSlug) so the editor reads and
-  // writes the record the pipeline will actually consult.
-  function brandSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  function dossierChips(box, d) {
+    box.innerHTML = '';
+    if (d.vertical) chip(box, 'vertical', d.vertical);
+    ((d.voice && d.voice.adjectives) || []).slice(0, 4).forEach((a) => chip(box, 'voice', a));
+    (d.currentCampaigns || []).slice(0, 3).forEach((c) => chip(box, 'campaign', c));
+  }
+  function confLabel(d) { return (d && d.confidence === 'llm') ? 'LLM-researched' : 'heuristic'; }
 
-  function addProductRow(p) {
-    const box = $('kProducts');
+  function renderWizardDossier(brand) {
+    const d = brand.dossier || {};
+    $('npConf').textContent = confLabel(d);
+    $('npSummary').textContent = d.summary || 'No public summary found — notes above outrank scraped guesses; you can still continue.';
+    dossierChips($('npChips'), d);
+    const logo = $('npLogo');
+    if (brand.logo_url) { logo.src = brand.logo_url; logo.classList.remove('hidden'); }
+    else logo.classList.add('hidden');
+  }
+
+  function prefillKit(brand) {
+    $('npLogoUrl').value = brand.logo_url || '';
+    $('npHeroUrl').value = brand.hero_url || '';
+    $('npColor').value = brand.primary_hex || brand.primary || '';
+    $('npVoice').value = brand.voice_sample || '';
+    const box = $('npProducts'); box.innerHTML = '';
+    const prods = Array.isArray(brand.products) ? brand.products : [];
+    prods.slice(0, 8).forEach((p) => addProductRow(box, typeof p === 'string' ? { name: p } : p));
+    if (!box.children.length) addProductRow(box);
+  }
+
+  // Product editor row: name / price / image-url / Upload / remove.
+  function addProductRow(box, p) {
     if (box.children.length >= 8) return;
     const row = el('div', 'kit-product-row');
     const name = el('input'); name.placeholder = 'Product name'; name.value = (p && p.name) || '';
     const price = el('input'); price.placeholder = '₹ price'; price.value = (p && p.price != null) ? p.price : '';
     const image = el('input'); image.placeholder = 'https://…/product.jpg'; image.value = (p && p.image) || '';
-    const rm = el('button', 'uc-remove', '✕'); rm.type = 'button'; rm.onclick = () => row.remove();
-    [name, price, image, rm].forEach((n) => row.appendChild(n));
+    const up = el('button', 'ghost sm', 'Upload'); up.type = 'button'; up.title = 'Upload an image for this product';
+    const file = el('input'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp,image/gif'; file.style.display = 'none';
+    up.onclick = () => file.click();
+    file.onchange = async () => {
+      const f = file.files && file.files[0]; file.value = '';
+      if (!f) return;
+      if (!S.wBrand && !S.brand) { setLine('npStatus2', 'Research the brand first — uploads need a brand to land in.'); return; }
+      busy(up, true);
+      try {
+        const asset = await uploadAsset(f, 'product', (S.wBrand || S.brand).id);
+        image.value = asset.url;
+      } catch (e) { setLine('npStatus2', 'Error: upload failed — ' + e.message); }
+      finally { busy(up, false); }
+    };
+    const rm = el('button', 'uc-remove', '✕'); rm.type = 'button'; rm.title = 'Remove product';
+    rm.onclick = () => row.remove();
+    [name, price, image, up, file, rm].forEach((n) => row.appendChild(n));
     box.appendChild(row);
   }
-
-  function fillKitEditor(kit) {
-    $('kitCard').classList.remove('hidden');
-    $('kLogo').value = (kit && kit.logoUrl) || '';
-    $('kHero').value = (kit && kit.heroUrl) || '';
-    $('kColor').value = (kit && kit.primary) || '';
-    $('kVoice').value = (kit && kit.voiceSample) || '';
-    $('kProducts').innerHTML = '';
-    ((kit && kit.products) || []).forEach((p) => addProductRow(p));
-    if (!$('kProducts').children.length) addProductRow();
-    $('kMsg').textContent = '';
-  }
-
-  async function saveKit() {
-    const slug = brandSlug($('bSearch').value);
-    if (!slug) { $('kMsg').textContent = 'Look up a brand first.'; return; }
-    const products = Array.from($('kProducts').children).map((row) => {
-      const [name, price, image] = Array.from(row.querySelectorAll('input')).map((i) => i.value.trim());
+  function readProducts(box) {
+    return Array.from(box.querySelectorAll('.kit-product-row')).map((row) => {
+      const [name, price, image] = Array.from(row.querySelectorAll('input[type="text"], input:not([type])')).map((i) => i.value.trim());
       const out = { name };
-      if (price) out.price = Number(price.replace(/[^0-9.]/g, ''));
+      if (price) out.price = Number(price.replace(/[^0-9.]/g, '')) || undefined;
       if (image) out.image = image;
       return out;
     }).filter((p) => p.name);
-    const body = {
-      name: $('bSearch').value.trim(),
-      // '' means "clear this field" server-side; absent means keep — the
-      // editor always sends current values, so clearing a box clears the kit.
-      logoUrl: $('kLogo').value.trim(),
-      heroUrl: $('kHero').value.trim(),
-      voiceSample: $('kVoice').value.trim(),
-      products,
-      author: author(),
-    };
-    const colour = $('kColor').value.trim();
-    if (colour) body.primary = colour;
-    $('kSave').disabled = true;
-    $('kMsg').textContent = 'Saving…';
-    try {
-      const out = await api('/brandkit/' + encodeURIComponent(slug), body);
-      if (out && out.ok) {
-        $('kMsg').textContent = 'Saved — every future build for this brand uses these assets.';
-      } else {
-        $('kMsg').textContent = (out && out.error) || 'Save failed.';
-      }
-    } catch (e) {
-      $('kMsg').textContent = 'Save failed: ' + e.message;
-    } finally {
-      $('kSave').disabled = false;
-    }
   }
 
-  // ---------- pitches view ----------
-  async function loadPitches() {
-    try {
-      const res = await fetch('/slates');
-      if (!res.ok) return;
-      const data = await res.json();
-      renderPitches((data && data.items) || []);
-    } catch (e) { /* endpoint optional — the view keeps its empty note */ }
+  // Wizard gallery dropzone: files land as brand 'image' assets.
+  async function wizardUpload(files) {
+    if (!S.wBrand) { setLine('npStatus2', 'Research the brand first.'); return; }
+    for (let i = 0; i < files.length; i++) {
+      setLine('npStatus2', 'Uploading ' + (i + 1) + '/' + files.length + ' — ' + files[i].name + '…', true);
+      try {
+        const asset = await uploadAsset(files[i], 'image', S.wBrand.id);
+        chip($('npUploads'), 'uploaded', asset.filename);
+      } catch (e) { setLine('npStatus2', 'Error: ' + e.message); return; }
+    }
+    setLine('npStatus2', files.length + ' image' + (files.length > 1 ? 's' : '') + ' in the brand gallery.');
   }
-  function renderPitches(items) {
-    const list = $('pitchesList');
-    if (!items.length) { list.innerHTML = '<div class="empty-note">No pitches yet — build a slate from the Create tab.</div>'; return; }
-    list.innerHTML = '';
-    items.forEach((p) => {
-      const row = el('a', 'pitch-row');
-      row.href = '/s/' + p.id; row.target = '_blank'; row.rel = 'noopener';
-      const main = el('div', 'pitch-main');
-      main.appendChild(el('span', 'pitch-title', p.title || (p.brand + ' — pitch slate')));
-      main.appendChild(el('span', 'pitch-meta', (p.buildIds ? p.buildIds.length : '?') + ' emails' + (p.author ? ' · ' + p.author : '') + (p.ts ? ' · ' + new Date(p.ts).toLocaleDateString() : '')));
-      row.appendChild(main);
-      const open = el('span', 'slate-build-open', 'open ↗');
-      row.appendChild(open);
-      list.appendChild(row);
+
+  // Wizard quick contacts: one input row; Add posts immediately.
+  function renderWizardContacts() {
+    const box = $('npContacts'); box.innerHTML = '';
+    S.wContacts.forEach((c) => box.appendChild(contactItem(c, null)));
+    const row = el('div', 'contact-row');
+    const name = el('input'); name.placeholder = 'Name'; name.id = 'npCtName';
+    const role = el('input'); role.placeholder = 'Role'; role.id = 'npCtRole';
+    const email = el('input'); email.placeholder = 'Email'; email.type = 'email'; email.id = 'npCtEmail';
+    [name, role, email].forEach((n) => row.appendChild(n));
+    box.appendChild(row);
+  }
+  function contactItem(c, onDelete) {
+    const item = el('div', 'contact-item');
+    item.appendChild(el('span', 'who', c.name || '?'));
+    item.appendChild(el('span', 'meta', [c.role, c.email].filter(Boolean).join(' · ')));
+    if (onDelete) {
+      const rm = el('button', 'uc-remove', '✕'); rm.type = 'button'; rm.title = 'Remove contact';
+      rm.onclick = onDelete;
+      item.appendChild(rm);
+    }
+    return item;
+  }
+  async function wizardAddContact() {
+    if (!S.wBrand) { setLine('npStatus2', 'Research the brand first.'); return; }
+    const c = { name: $('npCtName').value.trim(), role: $('npCtRole').value.trim(), email: $('npCtEmail').value.trim() };
+    if (!c.name) { setLine('npStatus2', 'A contact needs at least a name.'); $('npCtName').focus(); return; }
+    const btn = $('npAddContact');
+    busy(btn, true);
+    try {
+      const out = await api('/api/brands/' + encodeURIComponent(S.wBrand.id) + '/contacts', { contact: c, author: author() });
+      if (out && out.error) { setLine('npStatus2', 'Error: ' + out.error); return; }
+      S.wContacts.push((out && out.contact) || c);
+      renderWizardContacts();
+      setLine('npStatus2', '');
+    } catch (e) { setLine('npStatus2', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+
+  async function saveWizardKit() {
+    if (!S.wBrand) { setLine('npStatus2', 'Research the brand first.'); return; }
+    const colour = $('npColor').value.trim();
+    if (colour && !/^#[0-9a-f]{6}$/i.test(colour)) { setLine('npStatus2', 'Brand colour must look like #e78129.'); $('npColor').focus(); return; }
+    const btn = $('npSave2');
+    busy(btn, true, 'Saving…');
+    try {
+      const out = await api('/api/brands/' + encodeURIComponent(S.wBrand.id) + '/kit', {
+        patch: {
+          logoUrl: $('npLogoUrl').value.trim(),
+          heroUrl: $('npHeroUrl').value.trim(),
+          primary: colour,
+          voiceSample: $('npVoice').value.trim(),
+        },
+        products: readProducts($('npProducts')),
+        author: author(),
+      });
+      if (out && out.error) { setLine('npStatus2', 'Error: ' + out.error); return; }
+      if (out && out.brand) S.wBrand = out.brand;
+      setLine('npStatus2', 'Kit saved — every example for this brand uses it.');
+      $('npStep3').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) { setLine('npStatus2', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+
+  async function createPitch() {
+    if (!S.wBrand) { setLine('npStatus3', 'Research a brand in step 1 first.'); return; }
+    const title = $('npTitle').value.trim();
+    if (!title) { setLine('npStatus3', 'Give the pitch a title.'); $('npTitle').focus(); return; }
+    const btn = $('npCreate');
+    busy(btn, true, 'Creating…');
+    setLine('npStatus3', 'Creating the pitch…', true);
+    try {
+      const out = await api('/api/pitches', {
+        brandId: S.wBrand.id, title,
+        goal: $('npGoal').value || null,
+        brief: $('npBrief').value.trim() || null,
+        author: author(),
+      });
+      if (out && out.error) { setLine('npStatus3', 'Error: ' + out.error); return; }
+      const pitch = (out && out.pitch) || out;
+      if (!pitch || !pitch.id) { setLine('npStatus3', 'Error: the pitch was not created.'); return; }
+      setLine('npStatus3', '');
+      openPitch(pitch.id);
+    } catch (e) { setLine('npStatus3', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+
+  // ======================================================================
+  // VIEW 3 — PITCH WORKSPACE
+  // ======================================================================
+  async function openPitch(id) {
+    switchView('pitch');
+    switchWTab('examples');
+    showExDetail(false);
+    $('genPanel').classList.add('hidden');
+    $('exGrid').innerHTML = '';
+    setLine('exStatus', 'Opening the pitch…', true);
+    try {
+      const data = await getJson('/api/pitches/' + encodeURIComponent(id));
+      if (data && data.error) { setLine('exStatus', 'Error: ' + data.error); return; }
+      S.pitch = data.pitch || data;
+      S.examples = listOf(data, ['examples']);
+      await refreshBrand();
+      renderWorkspace();
+      // The brand loads asynchronously, so a fast switch to Details (or the
+      // e2e suite) can hit loadActivity before S.brand exists and get an
+      // empty feed — re-run it now that the brand is in hand.
+      if (S.wtab === 'details') loadActivity();
+      setLine('exStatus', '');
+    } catch (e) { setLine('exStatus', 'Error: ' + e.message); }
+  }
+  async function refreshPitch() {
+    if (!S.pitch) return;
+    try {
+      const data = await getJson('/api/pitches/' + encodeURIComponent(S.pitch.id));
+      if (data && data.pitch) { S.pitch = data.pitch; S.examples = listOf(data, ['examples']); renderGallery(); renderHeader(); }
+    } catch (e) { /* refresh is best-effort */ }
+  }
+  async function refreshBrand() {
+    const brandId = S.pitch && (S.pitch.brand_id || S.pitch.brandId);
+    if (!brandId) { S.brand = null; S.assets = []; S.contacts = []; return; }
+    const data = await getJson('/api/brands/' + encodeURIComponent(brandId));
+    if (data && data.error) throw new Error(data.error);
+    S.brand = data.brand || data;
+    S.assets = listOf(data, ['assets']).length ? listOf(data, ['assets']) : listOf(S.brand, ['assets']);
+    S.contacts = listOf(data, ['contacts']).length ? listOf(data, ['contacts']) : listOf(S.brand, ['contacts']);
+  }
+
+  function renderWorkspace() {
+    renderHeader();
+    renderGallery();
+    renderAssets();
+    renderContacts();
+    renderDetails();
+  }
+  function renderHeader() {
+    const b = S.brand || {}, p = S.pitch || {};
+    const logo = $('pwLogo');
+    if (b.logo_url) { logo.src = b.logo_url; logo.classList.remove('hidden'); } else logo.classList.add('hidden');
+    $('pwBrand').textContent = b.name || p.brandName || p.brand_name || '';
+    $('pwTitle').textContent = p.title || 'Untitled pitch';
+    const st = $('pwStatus');
+    if (p.status) { st.textContent = p.status; st.classList.remove('hidden'); } else st.classList.add('hidden');
+  }
+
+  // Inline rename: click the title, Enter/blur commits, Escape cancels.
+  function startRename() {
+    const inp = $('pwTitleInput');
+    inp.value = (S.pitch && S.pitch.title) || '';
+    $('pwTitle').classList.add('hidden');
+    inp.classList.remove('hidden');
+    inp.focus(); inp.select();
+  }
+  async function commitRename() {
+    const inp = $('pwTitleInput');
+    const v = inp.value.trim();
+    inp.classList.add('hidden');
+    $('pwTitle').classList.remove('hidden');
+    if (!v || !S.pitch || v === S.pitch.title) return;
+    try {
+      const out = await req('PATCH', '/api/pitches/' + encodeURIComponent(S.pitch.id), { patch: { title: v }, author: author() });
+      if (out && out.error) { setLine('exStatus', 'Error: ' + out.error); return; }
+      S.pitch.title = v;
+      renderHeader();
+    } catch (e) { setLine('exStatus', 'Error: ' + e.message); }
+  }
+
+  function switchWTab(name) {
+    S.wtab = name;
+    document.querySelectorAll('[data-wtab]').forEach((b) => b.classList.toggle('on', b.dataset.wtab === name));
+    document.querySelectorAll('[data-wpane]').forEach((p) => p.classList.toggle('on', p.dataset.wpane === name));
+    if (name === 'details') loadActivity();
+  }
+
+  // ---- examples: proposals + your idea ----
+  async function propose(reroll) {
+    if (!S.brand) return;
+    const btn = reroll ? $('genReroll') : $('genPropose');
+    busy(btn, true, 'Thinking…');
+    setLine('genStatus', 'Drafting use-cases for ' + S.brand.name + '…', true);
+    try {
+      const body = { brand: S.brand.name, brief: (S.pitch && S.pitch.brief) || undefined, count: 6 };
+      if (reroll && S.proposals.length) body.prior = S.proposals.map((u) => u.title);
+      const out = await api('/usecases', body);
+      if (out && out.error) { setLine('genStatus', 'Error: ' + out.error); return; }
+      S.proposals = out.useCases || [];
+      const src = $('genSource');
+      if (out.source) { src.textContent = out.source === 'library' ? 'library playbook' : 'LLM-proposed'; src.classList.remove('hidden'); }
+      renderProposals();
+      $('genReroll').classList.remove('hidden');
+      setLine('genStatus', S.proposals.length ? '' : 'No proposals this time — try again or type your own idea.');
+    } catch (e) { setLine('genStatus', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+  function renderProposals() {
+    const list = $('genList'); list.innerHTML = '';
+    S.proposals.forEach((u) => {
+      const card = el('div', 'uc-card');
+      const top = el('div', 'uc-top');
+      top.appendChild(el('span', 'uc-title', u.title || 'Use-case'));
+      card.appendChild(top);
+      if (u.businessGoal) card.appendChild(el('div', 'uc-goal', u.businessGoal));
+      const meta = el('div', 'chips');
+      chip(meta, 'module', moduleName(u.moduleId));
+      card.appendChild(meta);
+      const actions = el('div', 'uc-actions');
+      const go = el('button', 'primary sm'); go.type = 'button';
+      go.innerHTML = '<svg class="ic"><use href="#i-sparkle"/></svg> Generate';
+      go.onclick = () => generateFromProposal(u, go);
+      actions.appendChild(go);
+      card.appendChild(actions);
+      list.appendChild(card);
     });
   }
-
-  // ---------- campaign brief: soft character guidance, never a hard cutoff ----------
-  function updateBriefCounter() {
-    const len = $('campaignBrief').value.length;
-    const over = len > BRIEF_MAX;
-    $('briefCount').textContent = len + '/' + BRIEF_MAX;
-    $('briefCount').classList.toggle('over', over);
-    $('briefWarn').classList.toggle('hidden', !over);
-    S.briefOverLimit = over;
-    if (!S.building) $('rub').disabled = over;
-  }
-
-  // ---------- build affordance: genie-lamp smoke loading animation ----------
-  const LAMP_LOADING_HTML =
-    '<svg class="lamp-anim" viewBox="0 0 64 48" aria-hidden="true">' +
-      '<defs>' +
-        '<linearGradient id="lampBodyGrad" x1="0" y1="0" x2="0" y2="1">' +
-          '<stop offset="0" stop-color="#f2a94e"/><stop offset="1" stop-color="#c2691c"/>' +
-        '</linearGradient>' +
-        '<radialGradient id="smokeGrad" cx="50%" cy="50%" r="50%">' +
-          '<stop offset="0" stop-color="#4c88f8" stop-opacity=".9"/><stop offset="1" stop-color="#5257b3" stop-opacity="0"/>' +
-        '</radialGradient>' +
-      '</defs>' +
-      '<g class="lamp-smoke">' +
-        '<circle class="wisp wisp-1" cx="54" cy="25" r="5" fill="url(#smokeGrad)"/>' +
-        '<circle class="wisp wisp-2" cx="54" cy="25" r="4" fill="url(#smokeGrad)"/>' +
-        '<circle class="wisp wisp-3" cx="54" cy="25" r="3.2" fill="url(#smokeGrad)"/>' +
-      '</g>' +
-      '<path d="M16 34C4 36 2 20 14 14" fill="none" stroke="#c2691c" stroke-width="3" stroke-linecap="round"/>' +
-      '<ellipse cx="29" cy="40" rx="20" ry="3" fill="#00000030"/>' +
-      '<path d="M8 38C8 26 18 18 30 18c8 0 14 4 17 10l7-3 2 5-7 3c.6 1.6 1 3.3 1 5Z" fill="url(#lampBodyGrad)"/>' +
-      '<circle cx="54" cy="25" r="2.6" fill="#d5945e"/>' +
-    '</svg> Conjuring&hellip;';
-
-  let RUB_LABEL = '';
-  function setBuilding(on, success) {
-    const rub = $('rub');
-    S.building = on;
-    if (on) {
-      if (!RUB_LABEL) RUB_LABEL = rub.innerHTML;
-      rub.classList.add('loading'); rub.disabled = true;
-      rub.innerHTML = LAMP_LOADING_HTML;
-      return;
-    }
-    const finish = () => {
-      rub.classList.remove('loading'); rub.disabled = S.briefOverLimit;
-      if (RUB_LABEL) rub.innerHTML = RUB_LABEL;
-    };
-    if (success) {
-      const lamp = rub.querySelector('.lamp-anim');
-      if (lamp) { lamp.classList.add('success'); setTimeout(finish, 300); }
-      else finish();
-    } else {
-      finish();
-    }
-  }
-
-  // ---------- quick generate: the one click ----------
-  async function build() {
-    if ($('campaignBrief').value.length > BRIEF_MAX) {
-      setStatus('Trim the campaign brief below ' + BRIEF_MAX + ' characters to Rub the lAMP.');
-      return;
-    }
-    setBuilding(true);
-    const slateMode = $('slateToggle').checked;
-    setStatus(slateMode ? 'Conjuring the full slate — validated emails on one page…' : 'Rubbing the lamp…', true);
-    let ok = false;
+  async function generateFromProposal(u, btn) {
+    busy(btn, true, 'Generating…');
+    setLine('genStatus', 'Building “' + (u.title || 'example') + '” — validated AMP takes a moment…', true);
     try {
-      const body = {
-        brand: $('brand').value.trim() || 'Acme',
-        counter: S.counter,
-        brief: $('campaignBrief').value.trim() || null,
-        author: author(),
-      };
-      if (S.colorTouched && /^#[0-9a-f]{6}$/i.test($('colorhex').value)) body.colorOverride = $('colorhex').value;
-      if (slateMode) {
-        const out = await api('/slate', body);
-        if (out.error) { setStatus('Error: ' + out.error); return; }
-        renderSlate(out);
-        setStatus('Done — ' + out.builds.length + ' validated emails on one pitch page.');
-      } else {
-        const out = await api('/generate', body);
-        if (out.error) { setStatus('Error: ' + out.error); return; }
-        S.result = out;
-        S.edited = null;
-        // A fresh generation starts a fresh version chain.
-        S.rootId = null;
-        $('versionsRow').classList.add('hidden');
-        $('tweakMsg').textContent = '';
-        if (!S.colorTouched) { $('colorhex').value = out.palette.primary; $('colorpick').value = out.palette.primary; }
-        $('slateResult').classList.add('hidden');
-        $('result').classList.remove('hidden');
-        renderResult();
-        setStatus(out.validation.pass ? 'Done — valid AMP4EMAIL, zero errors.' : 'Done — see Validation tab for issues.');
-      }
-      ok = true;
-      loadHistory(); loadPitches();
-    } catch (e) {
-      setStatus('Error: ' + e.message);
-    } finally {
-      setBuilding(false, ok);
-    }
+      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/examples', {
+        title: u.title, moduleId: u.moduleId, contentPlan: u.contentPlan || {}, author: author(),
+      });
+      if (out && out.error) { setLine('genStatus', 'Error: ' + out.error); return; }
+      setLine('genStatus', 'Built “' + (u.title || 'example') + '” — it’s in the gallery below.');
+      await refreshPitch();
+    } catch (e) { setLine('genStatus', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+  async function generateFromIdea() {
+    const text = $('ideaInput').value.trim();
+    if (!text) { setLine('ideaStatus', 'Describe the email you want first.'); $('ideaInput').focus(); return; }
+    const btn = $('ideaGo');
+    busy(btn, true);
+    setLine('ideaStatus', 'Building your idea — validated AMP takes a moment…', true);
+    try {
+      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/examples', {
+        title: text, brief: text, author: author(),
+      });
+      if (out && out.error) { setLine('ideaStatus', 'Error: ' + out.error); return; }
+      $('ideaInput').value = '';
+      setLine('ideaStatus', 'Built — it’s in the gallery below.');
+      await refreshPitch();
+    } catch (e) { setLine('ideaStatus', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
   }
 
-  // ---------- slate rendering: the pitch deliverable ----------
-  function renderSlate(out) {
-    $('result').classList.add('hidden');
-    const box = $('slateResult');
-    box.classList.remove('hidden');
-    $('slateTitle').textContent = out.title || (out.brand + ' — pitch slate');
-    $('slateSub').textContent = out.builds.length + ' interactive modules, each validated AMP4EMAIL';
-    const open = $('slateOpen');
-    if (out.sharePath) {
-      open.href = out.sharePath;
+  // ---- examples: gallery + detail ----
+  function renderGallery() {
+    const grid = $('exGrid'); grid.innerHTML = '';
+    if (!S.examples.length) {
+      grid.appendChild(el('div', 'empty-note', 'No examples yet — hit “New example” and let the genie propose.'));
+      return;
+    }
+    S.examples.forEach((x) => {
+      const card = el('button', 'ex-card'); card.type = 'button';
+      card.appendChild(el('div', 'ex-name', x.title || 'Untitled example'));
+      const chips = el('div', 'chips');
+      if (x.module_id || x.moduleId) chip(chips, 'module', moduleName(x.module_id || x.moduleId));
+      if (x.validation_pass || x.validationPass) { const c = el('span', 'chip pass', 'PASS'); chips.appendChild(c); }
+      card.appendChild(chips);
+      const bits = [x.created_by || x.author, shortDate(x.created_at || x.createdAt)].filter(Boolean).join(' · ');
+      if (bits) card.appendChild(el('div', 'ex-foot', bits));
+      card.onclick = () => openExample(x.id);
+      grid.appendChild(card);
+    });
+  }
+  function showExDetail(on) {
+    $('exDetail').classList.toggle('hidden', !on);
+    $('exGrid').classList.toggle('hidden', on);
+    $('exToolbar').classList.toggle('hidden', on);
+    if (on) $('genPanel').classList.add('hidden');
+  }
+
+  function exampleParams(x) {
+    const raw = x.params_json != null ? x.params_json : (x.params != null ? x.params : null);
+    if (raw == null) return {};
+    if (typeof raw === 'object') return raw;
+    try { return JSON.parse(raw); } catch (e) { return {}; }
+  }
+
+  async function openExample(id) {
+    setLine('exStatus', '');
+    try {
+      const data = await getJson('/api/examples/' + encodeURIComponent(id));
+      if (data && data.error) { setLine('exStatus', 'Error: ' + data.error); return; }
+      S.example = data.example || data;
+      S.versions = listOf(data, ['versions']);
+      renderExampleDetail();
+      showExDetail(true);
+      switchDTab('preview');
+    } catch (e) { setLine('exStatus', 'Error: ' + e.message); }
+  }
+
+  function renderExampleDetail() {
+    const x = S.example;
+    const t = $('exTitle'); t.innerHTML = '';
+    t.appendChild(document.createTextNode(x.title || 'Untitled example'));
+    t.appendChild(el('small', '', moduleName(x.module_id || x.moduleId)));
+
+    const meta = $('exMeta'); meta.innerHTML = '';
+    if (x.validation_pass || x.validationPass) meta.appendChild(el('span', 'chip pass', 'PASS — valid AMP4EMAIL'));
+    if (x.created_by || x.author) chip(meta, 'by', x.created_by || x.author);
+    if (x.created_at) chip(meta, 'created', shortDate(x.created_at));
+    if (x.tweak_prompt || x.tweakPrompt) chip(meta, 'tweak', x.tweak_prompt || x.tweakPrompt);
+
+    // The exact generated AMP, byte-identical to the download, in the phone.
+    $('exFrame').srcdoc = x.amp_html || x.ampHtml || '';
+    $('exCode').value = x.amp_html || x.ampHtml || '';
+
+    // Share page derives from the linked build record.
+    const buildId = exampleParams(x).buildId;
+    const open = $('exOpenShare'), share = $('exShare');
+    if (buildId) {
+      open.href = '/b/' + encodeURIComponent(buildId);
       open.classList.remove('hidden');
-      $('slateMsg').textContent = '';
+      share.classList.remove('hidden');
     } else {
       open.classList.add('hidden');
-      $('slateMsg').textContent = 'Share pages unavailable — storage is not configured on this server.';
+      share.classList.add('hidden');
     }
-    const list = $('slateBuilds'); list.innerHTML = '';
-    out.builds.forEach((b) => {
-      const row = el('div', 'slate-build');
-      const name = el('span', 'slate-build-name', b.useCase || b.moduleName);
-      const chipEl = el('span', 'chip ' + (b.validation && b.validation.pass ? 'pass' : 'fail'), b.validation && b.validation.pass ? 'valid' : 'invalid');
-      row.appendChild(name);
-      row.appendChild(chipEl);
-      if (b.sharePath) {
-        const a = el('a', 'slate-build-open', 'open');
-        a.href = b.sharePath; a.target = '_blank'; a.rel = 'noopener';
-        row.appendChild(a);
-      }
-      list.appendChild(row);
+    $('exMsg').textContent = '';
+    $('exTweakMsg').textContent = ''; $('exTweakMsg').className = 'dispatch-msg';
+    $('exTweak').value = '';
+    renderVersions();
+  }
+
+  function renderVersions() {
+    const row = $('exVersions'); row.innerHTML = '';
+    const list = S.versions.slice().sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+    if (list.length < 2) { row.classList.add('hidden'); return; }
+    row.classList.remove('hidden');
+    list.forEach((v, i) => {
+      const c = el('button', 'chip', 'v' + (i + 1)); c.type = 'button';
+      if (v.tweak_prompt || v.tweakPrompt) c.title = v.tweak_prompt || v.tweakPrompt;
+      if (S.example && v.id === S.example.id) c.classList.add('pass');
+      c.onclick = () => openExample(v.id);
+      row.appendChild(c);
     });
   }
 
-  // ---------- refine: prompt-to-tweak with version chains ----------
-  // The LLM (or the deterministic parser when no key is set) turns the prompt
-  // into a parameter edit-plan; the server rebuilds through generate() and the
-  // real validator, persists the new version with parentId/rootId lineage, and
-  // an invalid result is rejected server-side — this box can never ship a
-  // broken email.
-  async function doTweak() {
-    const prompt = $('tweakPrompt').value.trim();
-    const msg = $('tweakMsg');
-    if (!prompt) { $('tweakPrompt').focus(); return; }
-    if (!S.result || !S.result.shareId) return;
-    const btn = $('tweakGo');
-    btn.disabled = true;
+  async function tweakExample() {
+    const prompt = $('exTweak').value.trim();
+    const msg = $('exTweakMsg');
+    if (!prompt) { $('exTweak').focus(); return; }
+    if (!S.example) return;
+    const btn = $('exTweakGo');
+    busy(btn, true);
     msg.className = 'dispatch-msg'; msg.innerHTML = '<span class="spinner"></span> Rebuilding&hellip;';
     try {
-      const out = await api('/tweak', { buildId: S.result.shareId, prompt, author: author() });
-      if (!out.ok) { msg.className = 'dispatch-msg err'; msg.textContent = out.error || 'Tweak failed.'; return; }
-      S.result = out.response;
-      S.edited = null;
-      S.rootId = (out.build && (out.build.rootId || out.build.parentId)) || S.rootId || null;
-      renderResult();
+      const out = await api('/api/examples/' + encodeURIComponent(S.example.id) + '/tweak', { prompt, author: author() });
+      if (!out || out.error || out.ok === false) { msg.className = 'dispatch-msg err'; msg.textContent = (out && out.error) || 'Tweak failed.'; return; }
       msg.className = 'dispatch-msg ok'; msg.textContent = 'Applied — new validated version.';
-      $('tweakPrompt').value = '';
-      loadVersions();
-      loadHistory();
-    } catch (e) {
-      msg.className = 'dispatch-msg err'; msg.textContent = 'Tweak failed: ' + e.message;
-    } finally {
-      btn.disabled = false;
-    }
+      $('exTweak').value = '';
+      const next = out.example || (out.json && out.json.example);
+      if (next && next.id) await openExample(next.id);
+      refreshPitch();
+    } catch (e) { msg.className = 'dispatch-msg err'; msg.textContent = 'Tweak failed: ' + e.message; }
+    finally { busy(btn, false); }
   }
 
-  async function loadVersions() {
-    const row = $('versionsRow');
-    if (!S.rootId) { row.classList.add('hidden'); return; }
-    try {
-      const res = await fetch('/versions/' + encodeURIComponent(S.rootId));
-      const data = await res.json();
-      const items = (data && data.items) || [];
-      row.innerHTML = '';
-      const mk = (label, id, title) => {
-        const a = el('a', 'chip', label);
-        a.href = '/b/' + id; a.target = '_blank'; a.rel = 'noopener';
-        if (title) a.title = title;
-        if (S.result && S.result.shareId === id) a.classList.add('pass');
-        row.appendChild(a);
-      };
-      mk('original', S.rootId, 'the first generation');
-      items.forEach((v, i) => mk('v' + (i + 2), v.id, v.tweakPrompt || ''));
-      row.classList.toggle('hidden', !items.length);
-    } catch (e) { /* lineage is a nicety — never an error */ }
+  function downloadExample() {
+    if (!S.example) return;
+    const code = S.example.amp_html || S.example.ampHtml || '';
+    const blob = new Blob([code], { type: 'text/html;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'amp-genie-' + slugify(S.example.title) + '.html';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
-
+  async function copyExampleAmp() {
+    if (!S.example) return;
+    const ok = await toClipboard(S.example.amp_html || S.example.ampHtml || '');
+    flash($('exMsg'), ok ? 'AMP copied to clipboard.' : 'Copy failed — use Download instead.');
+  }
   async function copyShareLink() {
-    if (!S.result || !S.result.sharePath) return;
-    const url = location.origin + S.result.sharePath;
-    try { await navigator.clipboard.writeText(url); flash($('share'), 'Link copied!'); }
-    catch (e) { flash($('share'), url); }
+    const buildId = S.example && exampleParams(S.example).buildId;
+    if (!buildId) return;
+    const ok = await toClipboard(location.origin + '/b/' + encodeURIComponent(buildId));
+    flash($('exMsg'), ok ? 'Share link copied.' : 'Copy failed.');
   }
 
-  // ---------- result rendering ----------
-  function renderResult() {
-    const r = S.result;
-    $('conjured').innerHTML = '';
-    $('conjured').appendChild(document.createTextNode('The genie conjured: ' + r.moduleName));
-    $('conjured').appendChild(el('small', '', r.kind));
+  function switchDTab(name) {
+    document.querySelectorAll('[data-dtab]').forEach((b) => b.classList.toggle('on', b.dataset.dtab === name));
+    document.querySelectorAll('[data-dpane]').forEach((p) => p.classList.toggle('on', p.dataset.dpane === name));
+  }
 
-    const chips = $('chips'); chips.innerHTML = '';
-    chip(chips, 'brand', r.brand);
-    chip(chips, 'vertical', r.vertical);
-    chip(chips, 'tone', r.tone);
-    chip(chips, 'colour', r.palette.primary + ' (' + (r.colorSource || '?') + ')');
-    if (r.copySource) chip(chips, 'copy', r.copySource);
-    $('share').classList.toggle('hidden', !r.sharePath);
-    // Tweaking rebuilds from the persisted record, so it needs a stored build.
-    $('tweakBox').classList.toggle('hidden', !r.sharePath);
-
-    const note = $('briefNote');
-    if (r.brief) {
-      note.classList.remove('hidden');
-      note.innerHTML = '<b>Brief:</b> ' + escapeHtml(r.brief);
-    } else {
-      note.classList.add('hidden');
-      note.innerHTML = '';
+  // ---- assets pane ----
+  function assetUrl(a) { return a.url || ('/assets/' + a.id); }
+  async function assetsUpload(files) {
+    if (!S.brand) return;
+    const kind = $('assetKind').value || 'image';
+    for (let i = 0; i < files.length; i++) {
+      setLine('assetStatus', 'Uploading ' + (i + 1) + '/' + files.length + ' — ' + files[i].name + '…', true);
+      try { await uploadAsset(files[i], kind, S.brand.id); }
+      catch (e) { setLine('assetStatus', 'Error: ' + e.message); return; }
     }
-
-    $('code').value = currentCode();
-    updateEditedIndicator();
-    renderPreview();
-    renderValidation(r.validation);
+    setLine('assetStatus', files.length + ' file' + (files.length > 1 ? 's' : '') + ' uploaded.');
+    try { await refreshBrand(); renderAssets(); } catch (e) { /* grid refresh is best-effort */ }
   }
-
-  // Directive 7: the preview IS the email. Render the exact generated AMP inside
-  // a sandboxed iframe that boots the real AMP runtime (amp-bind / amp-form /
-  // amp-img, the amp4email boilerplate reveal) — not a hand-written JS mirror
-  // that can drift from what actually ships. The iframe is created once and
-  // reused; srcdoc carries the doc verbatim so no extra route or request is
-  // involved and the bytes shown are byte-identical to the download.
-  //
-  // sandbox: allow-scripts (the AMP runtime + every interaction needs JS) and
-  // allow-same-origin (the runtime refuses to boot in a sandboxed frame without
-  // it). That pair is normally powerful, but the content here is our OWN
-  // validator-passed AMP, not third-party HTML — the iframe is a rendering
-  // surface, never a trust boundary for untrusted code.
-  function renderPreview() {
-    const area = $('previewArea');
-    let frame = area.querySelector('iframe.amp-frame');
-    if (!frame) {
-      area.textContent = '';
-      frame = document.createElement('iframe');
-      frame.className = 'amp-frame';
-      frame.title = 'Interactive AMP email preview';
-      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
-      area.appendChild(frame);
+  function renderAssets() {
+    const grid = $('assetGrid'); grid.innerHTML = '';
+    if (!S.assets.length) {
+      grid.appendChild(el('div', 'empty-note', 'No assets yet — drop the brand’s logo, heroes and product shots here.'));
+      return;
     }
-    // Always the last SUCCESSFULLY generated (validator-passed) AMP — never the
-    // live-edited textarea, which may be mid-edit invalid; edits stay flagged by
-    // the stale badge (updateEditedIndicator) exactly as before.
-    frame.srcdoc = S.result.ampHtml;
-  }
-
-  function chip(box, k, v) { const c = el('span', 'chip'); c.innerHTML = '<b>' + escapeHtml(String(k)) + '</b> ' + escapeHtml(String(v)); box.appendChild(c); }
-
-  function renderValidation(v) {
-    const dot = $('valDot'); dot.className = 'statdot ' + (v.pass ? 'pass' : 'fail');
-    const verdict = $('verdict'); verdict.className = 'verdict ' + (v.pass ? 'pass' : 'fail');
-    verdict.innerHTML = '';
-    verdict.appendChild(svg(v.pass ? 'i-check' : 'i-cross'));
-    verdict.appendChild(document.createTextNode(v.pass ? 'PASS — valid AMP4EMAIL, zero errors' : 'FAIL — ' + v.errorCount + ' error(s)'));
-    $('playground').href = PLAYGROUND;
-    const list = $('errors'); list.innerHTML = '';
-    (v.errors || []).forEach((er) => {
-      const li = document.createElement('li');
-      li.innerHTML = '<span class="loc">' + er.line + ':' + er.col + '</span>' + escapeHtml(er.message);
-      list.appendChild(li);
+    S.assets.forEach((a) => {
+      const card = el('div', 'asset-card');
+      const img = el('img', 'asset-thumb');
+      img.src = assetUrl(a); img.loading = 'lazy'; img.alt = a.filename || 'asset';
+      card.appendChild(img);
+      const meta = el('div', 'asset-meta');
+      meta.appendChild(el('div', 'asset-name', a.filename || 'file'));
+      const sub = el('div', 'asset-sub');
+      sub.appendChild(el('span', 'chip', a.kind || 'image'));
+      const by = a.uploadedBy || a.uploaded_by || a.created_by;
+      if (by) sub.appendChild(document.createTextNode(by));
+      meta.appendChild(sub);
+      card.appendChild(meta);
+      const actions = el('div', 'asset-actions');
+      const copy = el('button', 'ghost sm', 'Copy URL'); copy.type = 'button';
+      copy.onclick = async () => { const ok = await toClipboard(location.origin + assetUrl(a)); flash(copy, ok ? 'Copied' : 'Failed'); };
+      const del = el('button', 'ghost sm danger', 'Delete'); del.type = 'button';
+      del.onclick = async () => {
+        if (!confirm('Delete ' + (a.filename || 'this asset') + '? Emails already built keep their copy.')) return;
+        busy(del, true);
+        try {
+          const out = await req('DELETE', '/assets/' + encodeURIComponent(a.id));
+          if (out && out.error) { setLine('assetStatus', 'Error: ' + out.error); return; }
+          await refreshBrand(); renderAssets();
+        } catch (e) { setLine('assetStatus', 'Error: ' + e.message); busy(del, false); }
+      };
+      actions.appendChild(copy); actions.appendChild(del);
+      card.appendChild(actions);
+      grid.appendChild(card);
     });
   }
 
-  // ---------- history: read-only review of past builds ----------
-  async function loadHistory() {
+  // ---- contacts (workspace assets pane) ----
+  function renderContacts() {
+    const list = $('ctList'); list.innerHTML = '';
+    if (!S.contacts.length) { list.appendChild(el('div', 'empty-note', 'No contacts yet.')); return; }
+    S.contacts.forEach((c) => {
+      list.appendChild(contactItem(c, async () => {
+        try {
+          const out = await req('DELETE', '/api/contacts/' + encodeURIComponent(c.id));
+          if (out && out.error) { setLine('ctStatus', 'Error: ' + out.error); return; }
+          await refreshBrand(); renderContacts();
+        } catch (e) { setLine('ctStatus', 'Error: ' + e.message); }
+      }));
+    });
+  }
+  async function addContact() {
+    if (!S.brand) return;
+    const c = { name: $('ctName').value.trim(), role: $('ctRole').value.trim(), email: $('ctEmail').value.trim() };
+    if (!c.name) { setLine('ctStatus', 'A contact needs at least a name.'); $('ctName').focus(); return; }
+    const btn = $('ctAdd');
+    busy(btn, true);
     try {
-      const res = await fetch('/history');
-      const data = await res.json();
-      renderHistory((data && data.items) || []);
-    } catch (e) { /* best-effort review aid */ }
+      const out = await api('/api/brands/' + encodeURIComponent(S.brand.id) + '/contacts', { contact: c, author: author() });
+      if (out && out.error) { setLine('ctStatus', 'Error: ' + out.error); return; }
+      ['ctName', 'ctRole', 'ctEmail'].forEach((id) => { $(id).value = ''; });
+      setLine('ctStatus', '');
+      await refreshBrand(); renderContacts();
+    } catch (e) { setLine('ctStatus', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
   }
 
-  function renderHistory(items) {
-    const list = $('historyList');
-    list.innerHTML = '';
-    if (!items.length) { list.innerHTML = '<div class="empty-note">No builds yet.</div>'; return; }
-    items.forEach((it) => list.appendChild(historyItem(it)));
+  // ---- details pane ----
+  function renderDetails() {
+    const b = S.brand || {}, p = S.pitch || {};
+    const d = b.dossier || {};
+    const conf = $('dtConf');
+    conf.textContent = confLabel(d); conf.classList.remove('hidden');
+    $('dtSummary').textContent = d.summary || 'No dossier summary on file.';
+    dossierChips($('dtChips'), d);
+    $('dtVoice').value = b.voice_sample || b.voiceSample || '';
+    $('dtGoal').value = p.goal || '';
+    if ($('dtGoal').value !== (p.goal || '')) $('dtGoal').value = ''; // goal text not in the list -> Not sure yet
+    $('dtBrief').value = p.brief || '';
+    $('dtVoiceMsg').textContent = ''; $('dtPitchMsg').textContent = '';
   }
-
-  function toggleHistory() {
-    const btn = $('historyToggle');
-    const list = $('historyList');
-    const open = btn.getAttribute('aria-expanded') === 'true';
-    btn.setAttribute('aria-expanded', open ? 'false' : 'true');
-    list.classList.toggle('hidden', open);
-  }
-
-  function historyItem(it) {
-    const row = el('div', 'history-item');
-
-    const hdr = el('div', 'history-item-hdr');
-    const title = el('span', 'history-item-title', (it.brand || '?') + ' — ' + (it.moduleName || it.moduleId || '?'));
-    const when = el('span', 'history-item-when', it.ts ? new Date(it.ts).toLocaleString() : '');
-    hdr.appendChild(title); hdr.appendChild(when);
-    row.appendChild(hdr);
-
-    const meta = el('div', 'history-item-meta');
-    meta.innerHTML =
-      '<span class="chip"><b>vertical</b> ' + escapeHtml(String(it.vertical || '?')) + '</span>' +
-      '<span class="chip"><b>tone</b> ' + escapeHtml(String(it.tone || '?')) + '</span>' +
-      '<span class="chip ' + (it.validationPass ? 'pass' : 'fail') + '"><b>validation</b> ' + (it.validationPass ? 'pass' : 'fail') + '</span>' +
-      (it.shareId ? ' <a class="slate-build-open" target="_blank" rel="noopener" href="/b/' + encodeURIComponent(it.shareId) + '">open</a>' : '');
-    row.appendChild(meta);
-
-    if (it.brief) {
-      row.appendChild(el('div', 'history-item-brief', it.brief));
-    } else {
-      row.appendChild(el('div', 'history-item-brief empty', 'No campaign brief given.'));
-    }
-    return row;
-  }
-
-  // ---------- code editing ----------
-  function currentCode() { return S.edited != null ? S.edited : S.result.ampHtml; }
-  // The preview mirrors the last GENERATED build, so a keystroke in the code box
-  // only flips the stale badge — it does not (and must not) reload the AMP iframe
-  // on every character (that would refetch the runtime and flash the frame).
-  function onEdit() { S.edited = $('code').value; updateEditedIndicator(); }
-  function updateEditedIndicator() {
-    const edited = S.edited != null && S.edited !== S.result.ampHtml;
-    $('editedDot').classList.toggle('hidden', !edited);
-    $('editedLabel').classList.toggle('hidden', !edited);
-    $('previewStale').classList.toggle('hidden', !edited);
-  }
-  async function revalidate() {
-    setStatus('Validating edited code…');
-    const v = await api('/validate', { ampHtml: $('code').value });
-    renderValidation(v);
-    switchTab('validation');
-    setStatus(v.pass ? 'Edited code is valid.' : 'Edited code FAILED validation.');
-  }
-  function resetCode() {
-    S.edited = null;
-    $('code').value = S.result.ampHtml;
-    updateEditedIndicator();
-    renderValidation(S.result.validation);
-    renderPreview();
-  }
-
-  // ---------- copy / download ----------
-  async function copyCode() {
-    const text = currentCode();
+  async function saveVoice() {
+    if (!S.brand) return;
+    const btn = $('dtVoiceSave');
+    busy(btn, true);
     try {
-      await navigator.clipboard.writeText(text);
-      flash($('copy'), 'Copied!');
-    } catch (e) {
-      const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.focus(); ta.select();
-      let ok = false; try { ok = document.execCommand('copy'); } catch (_) {}
-      document.body.removeChild(ta);
-      flash($('copy'), ok ? 'Copied!' : 'Press Ctrl/Cmd+C in the code box');
-    }
-  }
-  function flash(btn, msg) {
-    const o = btn.innerHTML;
-    btn.innerHTML = '<svg class="ic"><use href="#i-check"/></svg> ' + msg;
-    setTimeout(() => { btn.innerHTML = o; }, 1600);
-  }
-  function downloadCode() {
-    const blob = new Blob([currentCode()], { type: 'text/html;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = (S.result.moduleId || 'amp') + '.html'; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  }
-
-  // ---------- dispatch ----------
-  async function doDispatch() {
-    const to = $('dispatchTo').value.trim();
-    const msg = $('dispatchMsg');
-    if (!to) { msg.className = 'dispatch-msg err'; msg.textContent = 'Enter a recipient email.'; $('dispatchTo').focus(); return; }
-    if (!S.result) { msg.className = 'dispatch-msg err'; msg.textContent = 'Rub the lAMP first.'; return; }
-    const btn = $('dispatch');
-    const orig = btn.innerHTML;
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
-    msg.className = 'dispatch-msg'; msg.innerHTML = '<span class="spinner"></span> Sending&hellip;';
-    try {
-      const out = await api('/dispatch', {
-        to,
-        subject: S.result.brand + ' — ' + S.result.moduleName,
-        ampHtml: currentCode(),
-        fromName: S.result.brand,
-        // Branded fallback parts from the same generation context (server
-        // fallback.js). They match the last generation, not manual code edits.
-        html: S.result.fallbackHtml || undefined,
-        text: S.result.fallbackText || undefined,
+      const out = await api('/api/brands/' + encodeURIComponent(S.brand.id) + '/kit', {
+        patch: { voiceSample: $('dtVoice').value.trim() }, author: author(),
       });
-      if (out && out.ok) {
-        msg.className = 'dispatch-msg ok';
-        msg.textContent = 'Sent to ' + to + ' — open it in Gmail to see the interactive AMP part.';
-      } else {
-        msg.className = 'dispatch-msg err';
-        msg.textContent = (out && out.error) || 'Send failed.';
-      }
-    } catch (err) {
-      msg.className = 'dispatch-msg err';
-      msg.textContent = 'Send failed: ' + err.message;
-    } finally {
-      btn.disabled = false; btn.innerHTML = orig;
+      if (out && out.error) { flash($('dtVoiceMsg'), 'Error: ' + out.error); return; }
+      if (out && out.brand) S.brand = out.brand;
+      flash($('dtVoiceMsg'), 'Voice saved.');
+    } catch (e) { flash($('dtVoiceMsg'), 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+  async function savePitchDetails() {
+    if (!S.pitch) return;
+    const btn = $('dtPitchSave');
+    busy(btn, true);
+    try {
+      const out = await req('PATCH', '/api/pitches/' + encodeURIComponent(S.pitch.id), {
+        patch: { goal: $('dtGoal').value || null, brief: $('dtBrief').value.trim() || null },
+        author: author(),
+      });
+      if (out && out.error) { flash($('dtPitchMsg'), 'Error: ' + out.error); return; }
+      S.pitch.goal = $('dtGoal').value || null;
+      S.pitch.brief = $('dtBrief').value.trim() || null;
+      flash($('dtPitchMsg'), 'Pitch saved.');
+    } catch (e) { flash($('dtPitchMsg'), 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+  async function loadActivity() {
+    if (!S.brand) return;
+    const box = $('dtActivity');
+    try {
+      const data = await getJson('/api/brands/' + encodeURIComponent(S.brand.id) + '/activity');
+      const items = listOf(data, ['activity', 'items', 'events']);
+      box.innerHTML = '';
+      if (!items.length) { box.appendChild(el('div', 'empty-note', 'Nothing yet — research, uploads and builds land here.')); return; }
+      items.forEach((a) => {
+        const row = el('div', 'activity-item');
+        const verb = el('b', '', a.verb || a.action || 'did');
+        row.appendChild(verb);
+        const detail = a.detail || a.details || '';
+        if (detail) row.appendChild(document.createTextNode(' — ' + detail));
+        const who = a.actor || a.author || a.created_by;
+        if (who) { row.appendChild(document.createTextNode(' · ')); row.appendChild(el('span', 'who', who)); }
+        const when = timeAgo(a.created_at || a.ts);
+        if (when) { row.appendChild(document.createTextNode(' · ')); row.appendChild(el('span', 'when', when)); }
+        box.appendChild(row);
+      });
+    } catch (e) {
+      box.innerHTML = '';
+      box.appendChild(el('div', 'empty-note', 'Could not load activity.'));
     }
   }
 
-  // ---------- tabs ----------
-  function switchTab(name) {
-    S.active = name;
-    document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
-    document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === name));
+  // ======================================================================
+  // VIEW 4 — SETTINGS: LLM key pool
+  // ======================================================================
+  async function loadKeys() {
+    setLine('keysStatus', 'Loading the key pool…', true);
+    try {
+      const data = await getJson('/settings/keys');
+      if (data && data.error) { setLine('keysStatus', 'Error: ' + data.error); return; }
+      S.keysLoaded = true;
+      const providers = listOf(data, ['providers']);
+      const sel = $('keyProvider');
+      if (providers.length && sel.options.length !== providers.length) {
+        sel.innerHTML = '';
+        providers.forEach((p) => {
+          const id = typeof p === 'string' ? p : (p.id || p.name);
+          const label = typeof p === 'string' ? p : (p.name || p.id);
+          const o = document.createElement('option'); o.value = id; o.textContent = label;
+          sel.appendChild(o);
+        });
+      }
+      renderKeys(listOf(data, ['keys', 'items']));
+      setLine('keysStatus', '');
+    } catch (e) { setLine('keysStatus', 'Error: ' + e.message); }
+  }
+  function renderKeys(keys) {
+    const tbody = $('keysRows'); tbody.innerHTML = '';
+    if (!keys.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td'); td.colSpan = 6; td.className = 'mono';
+      td.textContent = 'No keys yet — the genie runs on its deterministic template tier until one lands.';
+      tr.appendChild(td); tbody.appendChild(tr);
+      return;
+    }
+    keys.forEach((k) => {
+      const tr = document.createElement('tr');
+      const cell = (txt, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = txt || '—'; tr.appendChild(td); return td; };
+      cell(k.provider);
+      cell(k.key || k.masked || k.key_masked || '••••••••', 'mono'); // server sends the key pre-masked (····last4)
+      cell(k.label);
+      cell(k.model, 'mono');
+      cell(k.addedBy || k.added_by || k.author);
+      const td = document.createElement('td');
+      const del = el('button', 'ghost sm danger', 'Delete'); del.type = 'button';
+      del.onclick = async () => {
+        busy(del, true);
+        try {
+          const out = await req('DELETE', '/settings/keys/' + encodeURIComponent(k.id));
+          if (out && out.error) { setLine('keysStatus', 'Error: ' + out.error); busy(del, false); return; }
+          loadKeys();
+        } catch (e) { setLine('keysStatus', 'Error: ' + e.message); busy(del, false); }
+      };
+      td.appendChild(del); tr.appendChild(td);
+      tbody.appendChild(tr);
+    });
+  }
+  async function addKey() {
+    const provider = $('keyProvider').value;
+    const key = $('keyValue').value.trim();
+    if (!key) { setLine('keysStatus', 'Paste the API key first.'); $('keyValue').focus(); return; }
+    const btn = $('keyAdd');
+    busy(btn, true, 'Adding…');
+    try {
+      const out = await api('/settings/keys', {
+        provider, key,
+        label: $('keyLabel').value.trim() || null,
+        model: $('keyModel').value.trim() || null,
+        author: author(),
+      });
+      if (out && out.error) { setLine('keysStatus', 'Error: ' + out.error); return; }
+      ['keyValue', 'keyLabel', 'keyModel'].forEach((id) => { $(id).value = ''; });
+      setLine('keysStatus', 'Key added to the shared pool.');
+      loadKeys();
+    } catch (e) { setLine('keysStatus', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
   }
 
-  // ---------- tiny dom helpers ----------
-  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-  function svg(id) { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('class', 'ic'); const u = document.createElementNS('http://www.w3.org/2000/svg', 'use'); u.setAttribute('href', '#' + id); s.appendChild(u); return s; }
-  function escapeHtml(s) { return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  // ======================================================================
+  // init + bindings
+  // ======================================================================
+  function bind() {
+    document.querySelectorAll('.nav-item').forEach((b) => b.onclick = () => switchView(b.dataset.view));
+    $('authorName').value = author() || '';
+    $('authorName').onchange = () => { try { localStorage.setItem(AUTHOR_KEY, $('authorName').value.trim()); } catch (e) {} };
+    $('devToggle').onchange = () => {
+      document.body.classList.toggle('dev-mode', $('devToggle').checked);
+      if (!$('devToggle').checked) switchDTab('preview');
+    };
+
+    // pitches home
+    $('newPitchBtn').onclick = () => { resetWizard(); switchView('newpitch'); $('npBrand').focus(); };
+
+    // wizard
+    $('npBack').onclick = () => switchView('pitches');
+    $('npResearch').onclick = researchBrand;
+    $('npBrand').onkeydown = (e) => { if (e.key === 'Enter') researchBrand(); };
+    $('npAddProduct').onclick = () => addProductRow($('npProducts'));
+    wireDropzone($('npDrop'), $('npFile'), wizardUpload);
+    $('npAddContact').onclick = wizardAddContact;
+    $('npSave2').onclick = saveWizardKit;
+    $('npSkip2').onclick = () => { setLine('npStatus2', ''); $('npStep3').scrollIntoView({ behavior: 'smooth', block: 'start' }); $('npTitle').focus(); };
+    $('npCreate').onclick = createPitch;
+    $('npTitle').onkeydown = (e) => { if (e.key === 'Enter') createPitch(); };
+
+    // workspace
+    $('pwBack').onclick = () => { switchView('pitches'); };
+    $('pwTitle').onclick = startRename;
+    $('pwTitleInput').onblur = commitRename;
+    $('pwTitleInput').onkeydown = (e) => {
+      if (e.key === 'Enter') $('pwTitleInput').blur();
+      if (e.key === 'Escape') { $('pwTitleInput').value = (S.pitch && S.pitch.title) || ''; $('pwTitleInput').blur(); }
+    };
+    document.querySelectorAll('[data-wtab]').forEach((b) => b.onclick = () => switchWTab(b.dataset.wtab));
+    document.querySelectorAll('[data-dtab]').forEach((b) => b.onclick = () => switchDTab(b.dataset.dtab));
+
+    // examples
+    $('exNew').onclick = () => {
+      const panel = $('genPanel');
+      panel.classList.toggle('hidden');
+      if (!panel.classList.contains('hidden') && !S.proposals.length) $('genPropose').focus();
+    };
+    $('genPropose').onclick = () => propose(false);
+    $('genReroll').onclick = () => propose(true);
+    $('ideaGo').onclick = generateFromIdea;
+    $('ideaInput').onkeydown = (e) => { if (e.key === 'Enter') generateFromIdea(); };
+    $('exBackBtn').onclick = () => { showExDetail(false); refreshPitch(); };
+    $('exShare').onclick = copyShareLink;
+    $('exDownload').onclick = downloadExample;
+    $('exCopyAmp').onclick = copyExampleAmp;
+    $('exTweakGo').onclick = tweakExample;
+    $('exTweak').onkeydown = (e) => { if (e.key === 'Enter') tweakExample(); };
+
+    // assets + contacts
+    wireDropzone($('assetDrop'), $('assetFile'), assetsUpload);
+    $('ctAdd').onclick = addContact;
+
+    // details
+    $('dtVoiceSave').onclick = saveVoice;
+    $('dtPitchSave').onclick = savePitchDetails;
+
+    // settings
+    $('keyAdd').onclick = addKey;
+    $('keyValue').onkeydown = (e) => { if (e.key === 'Enter') addKey(); };
+  }
+
+  async function init() {
+    bind();
+    switchView('pitches');
+    try { S.meta = await getJson('/api/meta'); } catch (e) { S.meta = null; }
+    // meta arrived after first paint: refresh module-name chips if a pitch is open
+    if (S.examples.length) renderGallery();
+  }
 
   init();
 })();
