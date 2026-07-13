@@ -1054,6 +1054,37 @@
     if (u) u.disabled = !(S.edUndo && S.edUndo.length);
     if (r) r.disabled = !(S.edRedo && S.edRedo.length);
   }
+
+  // ---- AMP code viewer: the exact validated source, live. Shown in the left
+  // column (collapsible, below Draft-with-AI) and in a modal from the </>
+  // button in the canvas bar. Read-only — the source of truth is the doc. ----
+  function updateCodeViews(validation) {
+    const src = S.edAmpHtml || '';
+    const panel = $('edCodePanel');
+    if (panel && !panel.classList.contains('hidden')) { const t = $('edCodeText'); if (t) t.value = src; }
+    const modal = $('edCodeModal');
+    if (modal && !modal.classList.contains('hidden')) {
+      const t = $('edCodeModalText'); if (t) t.value = src;
+      const chip = $('edCodeModalChip');
+      if (chip && validation) { const pass = validation.pass; chip.textContent = pass ? 'PASS' : ('FAIL' + (validation.errorCount != null ? ' · ' + validation.errorCount : '')); chip.className = 'chip ' + (pass ? 'pass' : 'fail'); }
+    }
+  }
+  function toggleCodePanel() {
+    const panel = $('edCodePanel'); if (!panel) return;
+    const open = panel.classList.toggle('hidden') === false;
+    const hint = $('edCodeHint'); if (hint) hint.textContent = open ? 'hide' : 'click to view';
+    if (open) { const t = $('edCodeText'); if (t) t.value = S.edAmpHtml || ''; }
+  }
+  function openCodeModal() {
+    const modal = $('edCodeModal'); if (!modal) return;
+    modal.classList.remove('hidden');
+    updateCodeViews();
+  }
+  function closeCodeModal() { const m = $('edCodeModal'); if (m) m.classList.add('hidden'); }
+  async function copyText(text, btn) {
+    try { await navigator.clipboard.writeText(text || ''); if (btn) { const o = btn.innerHTML; btn.textContent = 'Copied'; setTimeout(() => { btn.innerHTML = o; }, 1200); } }
+    catch (e) { /* clipboard blocked — no-op */ }
+  }
   // True when a text field owns focus — the guard that keeps Backspace/Delete
   // from nuking a block while the user is editing copy (M14).
   function isTextEntryFocused() {
@@ -1072,7 +1103,9 @@
       e.preventDefault(); deleteBlock(S.edSelId); return;
     }
     if (e.key === 'Escape') {
-      if (_assetPickCb) { _assetPickCb = null; }          // cancel an armed library pick
+      const modal = document.getElementById('edCodeModal');
+      if (modal && !modal.classList.contains('hidden')) { closeCodeModal(); }
+      else if (_assetPickCb) { _assetPickCb = null; }     // cancel an armed library pick
       else if (S.edSelId != null) { selectBlock(null); }  // deselect -> email settings
     }
   }
@@ -1827,6 +1860,8 @@
       // Re-bind the canvas each time the iframe reloads (srcdoc wipes it).
       $('edFrame').onload = bindCanvas;
       $('edFrame').srcdoc = out.ampHtml || '';
+      S.edAmpHtml = out.ampHtml || ''; // keep the live AMP source for the code viewer
+      updateCodeViews(out.validation || {});
       // Prefer the server's sanitized doc so ids/shape stay in lockstep.
       if (out.doc && Array.isArray(out.doc.blocks)) mergeSanitized(out.doc);
       const v = out.validation || {};
@@ -2017,6 +2052,13 @@
     $('edUndo').onclick = undo;   // M13
     $('edRedo').onclick = redo;
     document.addEventListener('keydown', editorKeydown); // M13 + M14
+    // AMP code viewer
+    $('edCodeToggle').onclick = toggleCodePanel;
+    $('edCodeCopy').onclick = (e) => copyText(S.edAmpHtml, e.currentTarget);
+    $('edCodeBtn').onclick = openCodeModal;
+    $('edCodeModalClose').onclick = closeCodeModal;
+    $('edCodeModalCopy').onclick = (e) => copyText(S.edAmpHtml, e.currentTarget);
+    $('edCodeModal').onclick = (e) => { if (e.target === $('edCodeModal')) closeCodeModal(); };
 
     // assets + contacts
     wireDropzone($('assetDrop'), $('assetFile'), assetsUpload);

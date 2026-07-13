@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=18">
+<link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
 
@@ -354,6 +354,13 @@
           <div id="edAiStatus" class="statusline" style="margin-top:0"></div>
           <div id="edAiList" class="ed-ai-list"></div>
         </div>
+        <div class="gen-hdr ed-code-hdr" id="edCodeToggle" style="margin-top:20px" title="Show the live AMP source">
+          <svg class="ic accent"><use href="#i-doc"/></svg> AMP code <span class="hint" id="edCodeHint">click to view</span>
+        </div>
+        <div id="edCodePanel" class="ed-code-panel hidden">
+          <textarea id="edCodeText" class="ed-code-text" readonly spellcheck="false" aria-label="AMP source"></textarea>
+          <button id="edCodeCopy" class="ghost sm" type="button"><svg class="ic"><use href="#i-copy"/></svg> Copy AMP</button>
+        </div>
         <div class="gen-hdr" style="margin-top:20px"><svg class="ic accent"><use href="#i-plus"/></svg> Add block</div>
         <div id="edPalette" class="ed-palette"></div>
         <div class="gen-hdr" style="margin-top:20px"><svg class="ic accent"><use href="#i-folder"/></svg> Asset library <span class="hint">drag onto a block, or Choose from library</span></div>
@@ -373,6 +380,7 @@
             <button type="button" data-mode="preview">Preview</button>
           </div>
           <span id="edChip" class="chip">rendering…</span>
+          <button id="edCodeBtn" type="button" class="ed-iconbtn ed-code-btn" title="View AMP source">&lt;/&gt;</button>
         </div>
         <div id="edWarn" class="ed-warn"></div>
         <div class="stage">
@@ -391,6 +399,20 @@
         <div class="gen-hdr"><svg class="ic accent"><use href="#i-sliders"/></svg> Properties</div>
         <div id="edProps" class="ed-props"></div>
       </aside>
+    </div>
+
+    <!-- AMP source modal (opened from the canvas bar </> button) -->
+    <div id="edCodeModal" class="ed-code-modal hidden" role="dialog" aria-label="AMP source">
+      <div class="ed-code-modal-box">
+        <div class="ed-code-modal-hdr">
+          <span><svg class="ic accent"><use href="#i-doc"/></svg> AMP source <span id="edCodeModalChip" class="chip"></span></span>
+          <span class="ed-code-modal-acts">
+            <button id="edCodeModalCopy" class="ghost sm" type="button"><svg class="ic"><use href="#i-copy"/></svg> Copy</button>
+            <button id="edCodeModalClose" class="ed-iconbtn" type="button" title="Close">✕</button>
+          </span>
+        </div>
+        <textarea id="edCodeModalText" class="ed-code-text" readonly spellcheck="false" aria-label="AMP source"></textarea>
+      </div>
     </div>
   </section>
 
@@ -425,6 +447,6 @@
   </main>
 </div>
 
-<script src="app.js?v=18"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>

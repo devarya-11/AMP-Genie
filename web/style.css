@@ -490,6 +490,19 @@ a.linkbtn{color:var(--ink-2)}
 .ed-selbar-tag.inter{background:#4c88f818;border-color:#4c88f855}
 .ed-selbar-tag .ed-block-ic{width:20px;height:20px}
 .ed-selbar-acts{display:flex;gap:3px}
+/* AMP code viewer: left-column collapsible panel + canvas-bar button + modal */
+.ed-code-hdr{cursor:pointer;user-select:none}
+.ed-code-hdr:hover{color:var(--accent2)}
+.ed-code-panel{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.ed-code-text{width:100%;height:200px;resize:vertical;font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+  padding:10px;border:1px solid var(--line);border-radius:10px;background:#1c161f;color:#d7cfd8;white-space:pre;overflow:auto}
+.ed-code-btn{font-size:12px;font-weight:700}
+.ed-code-modal{position:fixed;inset:0;z-index:60;background:#0009;display:flex;align-items:center;justify-content:center;padding:32px}
+.ed-code-modal-box{background:var(--panel,#2a222f);border:1px solid var(--line);border-radius:16px;width:min(900px,100%);max-height:100%;display:flex;flex-direction:column;overflow:hidden}
+.ed-code-modal-hdr{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line);font-weight:800}
+.ed-code-modal-hdr>span:first-child{display:flex;align-items:center;gap:8px}
+.ed-code-modal-acts{display:flex;align-items:center;gap:8px}
+.ed-code-modal .ed-code-text{height:min(60vh,560px);border:0;border-radius:0;margin:0}
 /* M13: undo / redo buttons in the canvas bar */
 .ed-histbar{display:inline-flex;gap:2px;margin-right:2px}
 .ed-histbar .ed-iconbtn{font-size:15px;line-height:1}

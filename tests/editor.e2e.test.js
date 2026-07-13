@@ -347,6 +347,26 @@ test('M13: undo/redo add a block via keyboard and toolbar', async ({ page }) => 
   await expect.poll(count, { timeout: 20000 }).toBe(base + 1);
 });
 
+test('AMP code viewer: the </> modal and the left panel show the live source', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.fill('#edAiIdea', 'quiz with an intro');
+  await page.click('#edAiGo');
+  await expect.poll(async () => (await canvasAttrs(page, 'data-bid')).length, { timeout: 60000 }).toBeGreaterThan(0);
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+
+  // canvas-bar </> opens the modal with the real AMP4EMAIL source
+  await page.click('#edCodeBtn');
+  await expect(page.locator('#edCodeModal')).toBeVisible();
+  await expect.poll(async () => await page.locator('#edCodeModalText').inputValue(), { timeout: 10000 }).toContain('amp4email');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#edCodeModal')).toBeHidden();
+
+  // left-column panel toggles open and mirrors the same source
+  await page.click('#edCodeToggle');
+  await expect(page.locator('#edCodePanel')).toBeVisible();
+  await expect.poll(async () => await page.locator('#edCodeText').inputValue(), { timeout: 10000 }).toContain('<html amp4email');
+});
+
 test('M14: Delete removes the selected block; Backspace in a field does not', async ({ page }) => {
   await openEditorFresh(page);
   await page.fill('#edAiIdea', 'quiz customers with a short intro');
