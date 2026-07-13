@@ -918,6 +918,81 @@
     (doc.blocks || []).forEach((b) => { if (!b.id) b.id = nextBlockId(); });
   }
 
+  // ---- M5: "New example" opens the editor DIRECTLY. AI lives INSIDE the
+  // editor (the "Draft with AI" drawer on the left), so you can start on a
+  // blank canvas and generate/build, all in one surface. ----
+  function openEditorBlank() {
+    if (!S.pitch) return;
+    const brand = S.brand ? {
+      name: S.brand.name,
+      primaryHex: S.brand.primary_hex || undefined,
+      logoUrl: S.brand.logo_url || undefined,
+    } : {};
+    enterEditor({ version: 1, brand, blocks: [] }, null,
+      (S.pitch && S.pitch.title) ? (S.pitch.title + ' email') : 'New email');
+    setLine('edAiStatus', '');
+    $('edAiList').innerHTML = '';
+  }
+  // Replace the canvas doc in place (from an AI draft) without leaving the
+  // editor or losing the current save target.
+  function setDocInEditor(doc, title) {
+    S.doc = (doc && typeof doc === 'object' && Array.isArray(doc.blocks)) ? doc : { version: 1, blocks: [] };
+    seedIdSeq(S.doc); ensureBlockIds(S.doc);
+    S.edSelId = S.doc.blocks.length ? S.doc.blocks[0].id : null;
+    if (title) $('edTitle').value = title;
+    renderPalette(); renderLibrary(); renderBlocks(); renderProps(); renderPreview();
+    markDirty();
+  }
+  async function edAiFromIdea() {
+    const text = $('edAiIdea').value.trim();
+    if (!text) { $('edAiIdea').focus(); return; }
+    const btn = $('edAiGo');
+    busy(btn, true);
+    setLine('edAiStatus', 'Drafting onto the canvas…', true);
+    try {
+      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/ai-doc', {
+        brief: text, useCase: text, author: author(),
+      });
+      if (out && out.error) { setLine('edAiStatus', 'Error: ' + out.error); return; }
+      setDocInEditor((out && out.doc) || { version: 1, blocks: [] });
+      $('edAiIdea').value = '';
+      setLine('edAiStatus', 'Drafted — click any block to edit it.');
+    } catch (e) { setLine('edAiStatus', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+  async function edAiPropose() {
+    if (!S.brand) { setLine('edAiStatus', 'Research a brand first.'); return; }
+    const btn = $('edAiProposeBtn');
+    busy(btn, true, 'Thinking…');
+    setLine('edAiStatus', 'Drafting use-cases for ' + S.brand.name + '…', true);
+    try {
+      const out = await api('/usecases', { brand: S.brand.name, brief: (S.pitch && S.pitch.brief) || undefined, count: 6 });
+      if (out && out.error) { setLine('edAiStatus', 'Error: ' + out.error); return; }
+      const list = $('edAiList'); list.innerHTML = '';
+      (out.useCases || []).forEach((u) => {
+        const card = el('div', 'ed-ai-uc');
+        card.appendChild(el('div', 'ed-ai-uc-title', u.title || 'Use-case'));
+        const meta = el('div', 'chips'); chip(meta, 'module', moduleName(u.moduleId)); card.appendChild(meta);
+        card.onclick = () => edAiFromProposal(u);
+        list.appendChild(card);
+      });
+      setLine('edAiStatus', (out.useCases || []).length ? 'Pick one to draft it onto the canvas.' : 'No proposals — type your own idea.');
+    } catch (e) { setLine('edAiStatus', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+  async function edAiFromProposal(u) {
+    setLine('edAiStatus', 'Drafting “' + (u.title || 'idea') + '”…', true);
+    try {
+      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/ai-doc', {
+        moduleId: u.moduleId, useCase: u.title, brief: (S.pitch && S.pitch.brief) || u.title || '', author: author(),
+      });
+      if (out && out.error) { setLine('edAiStatus', 'Error: ' + out.error); return; }
+      setDocInEditor((out && out.doc) || { version: 1, blocks: [] }, u.title);
+      $('edAiList').innerHTML = '';
+      setLine('edAiStatus', 'Drafted — click any block to edit it.');
+    } catch (e) { setLine('edAiStatus', 'Error: ' + e.message); }
+  }
+
   // ---- open the editor: fresh (from ai-doc) or from an existing doc example.
   async function openEditorNew() {
     if (!S.pitch) return;
@@ -1676,16 +1751,12 @@
     document.querySelectorAll('[data-wtab]').forEach((b) => b.onclick = () => switchWTab(b.dataset.wtab));
     document.querySelectorAll('[data-dtab]').forEach((b) => b.onclick = () => switchDTab(b.dataset.dtab));
 
-    // examples
-    $('exNew').onclick = () => {
-      const panel = $('genPanel');
-      panel.classList.toggle('hidden');
-      if (!panel.classList.contains('hidden') && !S.proposals.length) $('genPropose').focus();
-    };
-    $('genPropose').onclick = () => propose(false);
-    $('genReroll').onclick = () => propose(true);
-    $('ideaGo').onclick = generateFromIdea;
-    $('ideaInput').onkeydown = (e) => { if (e.key === 'Enter') generateFromIdea(); };
+    // examples: "New example" opens the visual editor directly (M5); the AI
+    // drafting lives inside it (the "Draft with AI" drawer).
+    $('exNew').onclick = openEditorBlank;
+    $('edAiGo').onclick = edAiFromIdea;
+    $('edAiIdea').onkeydown = (e) => { if (e.key === 'Enter') edAiFromIdea(); };
+    $('edAiProposeBtn').onclick = edAiPropose;
     $('exBackBtn').onclick = () => { showExDetail(false); refreshPitch(); };
     $('exShare').onclick = copyShareLink;
     $('exDownload').onclick = downloadExample;

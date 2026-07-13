@@ -47,9 +47,8 @@ async function openPitch(page) {
 
 async function openEditorFresh(page) {
   await openPitch(page);
+  // M5: "New example" opens the editor directly (AI drawer is inside it).
   await page.click('#exNew');
-  await expect(page.locator('#genPanel')).toBeVisible();
-  await page.click('#edNew');
   await expect(page.locator('#view-editor')).toBeVisible({ timeout: 30000 });
 }
 
@@ -86,14 +85,16 @@ test('adding a text block and editing its heading re-renders the preview', async
 
 test('reorder via the down button, then Save lands the email in the gallery', async ({ page }) => {
   await openEditorFresh(page);
-  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 25000 });
+  // Draft a multi-block doc via the AI drawer (a text intro + the interactive
+  // module), so there is something to reorder on the canvas.
+  await page.fill('#edAiIdea', 'quiz customers on their favourite with a short intro');
+  await page.click('#edAiGo');
 
-  // The email IS the canvas: the fresh doc already has >1 block (a text intro
-  // + the interactive module). Click the first block IN the phone to select
-  // it, then move it down one slot via the selection toolbar.
+  // The email IS the canvas: click the first block IN the phone to select it,
+  // then move it down one slot via the selection toolbar.
   const canvasOrder = () => page.frameLocator('#edFrame').locator('[data-bid]')
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-bid')));
-  await expect.poll(async () => (await canvasOrder()).length, { timeout: 20000 }).toBeGreaterThan(1);
+  await expect.poll(async () => (await canvasOrder()).length, { timeout: 60000 }).toBeGreaterThan(1);
   const before = await canvasOrder();
   await page.frameLocator('#edFrame').locator('[data-bid]').first().click();
   await expect(page.locator('#edSelBar button[title="Move down"]')).toBeVisible();

@@ -495,6 +495,16 @@ a.linkbtn{color:var(--ink-2)}
 .ed-selbar-tag .ed-block-ic{width:20px;height:20px}
 .ed-selbar-acts{display:flex;gap:3px}
 
+/* M5: the "Draft with AI" drawer inside the editor's left column */
+.ed-ai{display:flex;flex-direction:column;gap:8px}
+.ed-ai .dispatch-row{display:flex;gap:6px}
+.ed-ai .dispatch-row input{flex:1;min-width:0}
+.ed-ai-list{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto}
+.ed-ai-uc{border:1px solid var(--line);border-radius:var(--r-md);padding:9px 11px;cursor:pointer;
+  transition:border-color var(--tr),background var(--tr)}
+.ed-ai-uc:hover{border-color:var(--accent);background:#e7812912}
+.ed-ai-uc-title{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px}
+
 @media(max-width:1100px){
   .ed-grid{grid-template-columns:1fr}
   .ed-left,.ed-right{position:static}

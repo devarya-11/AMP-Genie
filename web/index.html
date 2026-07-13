@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
 
@@ -363,9 +363,19 @@
     <div id="edSaveErr" class="statusline" style="margin-top:0"></div>
 
     <div class="ed-grid">
-      <!-- LEFT: palette + asset drawer -->
+      <!-- LEFT: draft-with-AI + palette + asset drawer -->
       <aside class="ed-left card">
-        <div class="gen-hdr"><svg class="ic accent"><use href="#i-plus"/></svg> Add block</div>
+        <div class="gen-hdr"><svg class="ic accent"><use href="#i-sparkle"/></svg> Draft with AI</div>
+        <div class="ed-ai">
+          <div class="dispatch-row">
+            <input id="edAiIdea" type="text" placeholder="Describe the email &mdash; e.g. spin-the-wheel Diwali reward&hellip;">
+            <button id="edAiGo" class="primary sm" type="button" title="Draft onto the canvas"><svg class="ic"><use href="#i-sparkle"/></svg></button>
+          </div>
+          <button id="edAiProposeBtn" class="ghost sm" type="button" style="align-self:flex-start"><svg class="ic"><use href="#i-lamp"/></svg> Propose use-cases</button>
+          <div id="edAiStatus" class="statusline" style="margin-top:0"></div>
+          <div id="edAiList" class="ed-ai-list"></div>
+        </div>
+        <div class="gen-hdr" style="margin-top:20px"><svg class="ic accent"><use href="#i-plus"/></svg> Add block</div>
         <div id="edPalette" class="ed-palette"></div>
         <div class="gen-hdr" style="margin-top:20px"><svg class="ic accent"><use href="#i-folder"/></svg> Asset library <span class="hint">drag onto a block, or Choose from library</span></div>
         <div id="edLibrary" class="ed-library"><div id="edDrawer" class="ed-drawer"></div></div>
@@ -428,6 +438,6 @@
   </main>
 </div>
 
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>

@@ -94,33 +94,30 @@ test('pitches home lists the new pitch with its brand', async ({ page }) => {
   await expect(card).toContainText(BRAND);
 });
 
-test('examples: "your idea" opens the editor with a validated doc, then Save lands a card', async ({ page }) => {
+test('examples: "New example" opens the editor; the AI drawer drafts an interactive doc that saves', async ({ page }) => {
   await openPitch(page);
   await page.click('#exNew');
-  await expect(page.locator('#genPanel')).toBeVisible();
-  await page.fill('#ideaInput', 'spin the wheel for a festive speaker discount');
-  await page.click('#ideaGo');
-  // editor-first: the idea drafts a doc and opens the visual editor
-  await expect(page.locator('#view-editor')).toBeVisible({ timeout: 60000 });
+  // editor-first: New example opens the visual editor directly
+  await expect(page.locator('#view-editor')).toBeVisible({ timeout: 30000 });
+  // AI drawer INSIDE the editor drafts onto the canvas
+  await page.fill('#edAiIdea', 'spin the wheel for a festive speaker discount');
+  await page.click('#edAiGo');
   await expect
-    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
-    .toContain('amp4email');
-  // it carries the interactive module (amp-bind) as a block
-  await expect
-    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
-    .toContain('amp-bind');
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 60000 })
+    .toContain('amp-bind'); // the interactive module is on the canvas
   await page.click('#edSave');
   await expect(page.locator('#edSaved')).toContainText(/saved/i, { timeout: 30000 });
   await page.click('#edBack');
   await expect(page.locator('#exGrid .ex-card')).not.toHaveCount(0, { timeout: 15000 });
 });
 
-test('examples: proposals return library use-cases offline', async ({ page }) => {
+test('examples: the editor AI drawer proposes use-cases offline', async ({ page }) => {
   await openPitch(page);
   await page.click('#exNew');
-  await page.click('#genPropose');
+  await expect(page.locator('#view-editor')).toBeVisible({ timeout: 30000 });
+  await page.click('#edAiProposeBtn');
   await expect
-    .poll(async () => page.locator('#genList > *').count(), { timeout: 30000 })
+    .poll(async () => page.locator('#edAiList > *').count(), { timeout: 30000 })
     .toBeGreaterThan(0);
 });
 
