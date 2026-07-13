@@ -1198,6 +1198,17 @@
     S.doc.blocks.splice(blockIndex(targetId) + (from < to ? 1 : 0), 0, b);
     S.edSelId = movedId; renderBlocks(); renderProps(); markDirty();
   }
+  // Position-exact reorder for a canvas drop-line: insert the moved block
+  // strictly before/after the target regardless of original direction.
+  function reorderBlockTo(movedId, targetId, after) {
+    if (movedId === targetId) return;
+    const from = blockIndex(movedId);
+    if (from < 0 || blockIndex(targetId) < 0) return;
+    const [b] = S.doc.blocks.splice(from, 1);
+    const ti = blockIndex(targetId); // recompute: indices shifted after removal
+    S.doc.blocks.splice(ti + (after ? 1 : 0), 0, b);
+    S.edSelId = movedId; renderBlocks(); renderProps(); markDirty();
+  }
   function duplicateBlock(id) {
     const i = blockIndex(id); if (i < 0) return;
     const src = S.doc.blocks[i];
@@ -1554,6 +1565,17 @@
         + '.edg-resize-badge{position:absolute;right:6px;bottom:8px;z-index:10;background:#28202c;color:#fff;font:600 11px/1.4 system-ui,sans-serif;padding:2px 7px;border-radius:6px;pointer-events:none}';
       (cd.head || cd.documentElement).appendChild(st);
     }
+    // M8: arm every canvas block as draggable so it can be reordered by dragging
+    // it onto another block (mirrors the block-list panel's HTML5 drag-reorder).
+    // Re-armed on every srcdoc reload; the resize handle drag is excluded.
+    cd.querySelectorAll('.edg-a').forEach((n) => {
+      n.setAttribute('draggable', 'true');
+      n.addEventListener('dragstart', (e) => {
+        if (S.editMode === false || (e.target && e.target.closest && e.target.closest('.edg-resize'))) { e.preventDefault(); return; }
+        e.dataTransfer.setData('text/block-id', n.dataset.bid);
+        e.dataTransfer.effectAllowed = 'move';
+      });
+    });
     cd.addEventListener('mouseover', (e) => {
       if (S.editMode === false) return; // preview mode: no edit affordances
       const a = anchorOf(cd, e.target);
@@ -1577,13 +1599,15 @@
       const t = e.dataTransfer.types || [];
       const isNew = t.indexOf && t.indexOf('text/ed-newblock') >= 0;
       const isAsset = t.indexOf && t.indexOf('text/asset-url') >= 0;
-      if (!isNew && !isAsset) return;
+      const isMove = t.indexOf && t.indexOf('text/block-id') >= 0; // M8 reorder
+      if (!isNew && !isAsset && !isMove) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = isNew ? 'copy' : 'move';
       clearDropMarks(cd);
       const a = anchorOf(cd, e.target);
       if (!a) return;
       if (isAsset) { if (ASSET_TARGET.test(a.dataset.btype)) a.classList.add('edg-drop-asset'); return; }
+      // isNew or isMove: a before/after drop line at the block under the cursor.
       const rect = a.getBoundingClientRect();
       const after = (e.clientY - rect.top) > rect.height / 2;
       a.classList.add(after ? 'edg-drop-after' : 'edg-drop-before');
@@ -1591,10 +1615,19 @@
     });
     cd.addEventListener('dragleave', () => clearDropMarks(cd));
     cd.addEventListener('drop', (e) => {
+      const movedId = e.dataTransfer.getData('text/block-id'); // M8 reorder
       const nb = e.dataTransfer.getData('text/ed-newblock');
       const asset = e.dataTransfer.getData('text/asset-url');
       const a = anchorOf(cd, e.target);
+      const after = !!(a && a.dataset.dropafter === '1');
       clearDropMarks(cd);
+      // Order is load-bearing: a block-move must be handled before the asset
+      // branch so a dragged block is never mis-read as an image drop.
+      if (movedId) {
+        e.preventDefault();
+        if (a && a.dataset.bid !== movedId) reorderBlockTo(movedId, a.dataset.bid, after);
+        return;
+      }
       if (nb) {
         e.preventDefault();
         let idx = S.doc.blocks.length;

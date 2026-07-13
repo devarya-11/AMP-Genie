@@ -256,3 +256,38 @@ test('M6: dragging the resize handle changes a hero block height and stays valid
   await expect.poll(async () => Number(await heightInput.inputValue()), { timeout: 20000 }).toBeGreaterThan(startH);
   await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
 });
+
+test('M8: dragging a block onto another reorders the canvas and stays valid', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.fill('#edAiIdea', 'quiz customers on their favourite with a short intro');
+  await page.click('#edAiGo');
+  const order = () => canvasAttrs(page, 'data-bid');
+  await expect.poll(async () => (await order()).length, { timeout: 60000 }).toBeGreaterThan(1);
+  await waitCanvasBound(page);
+  const before = await order();
+
+  // canvas anchors are draggable
+  const draggable = await page.frameLocator('#edFrame').locator('[data-bid]').first().getAttribute('draggable');
+  expect(draggable).toBe('true');
+
+  // Drag the FIRST block onto the LAST, dropping below its midpoint (after it).
+  // Dispatch the DnD sequence in the iframe realm (cross-iframe DnD isn't
+  // scriptable), same pattern as the M4 palette-drop test.
+  await page.evaluate(() => {
+    const win = document.getElementById('edFrame').contentWindow;
+    const cd = win.document;
+    const anchors = cd.querySelectorAll('[data-bid]');
+    const src = anchors[0], tgt = anchors[anchors.length - 1];
+    const dt = new win.DataTransfer(); dt.setData('text/block-id', src.getAttribute('data-bid'));
+    src.dispatchEvent(new win.DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const r = tgt.getBoundingClientRect();
+    const y = r.top + r.height - 2; // below midpoint -> drop AFTER
+    tgt.dispatchEvent(new win.DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: y }));
+    tgt.dispatchEvent(new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: y }));
+  });
+
+  // the moved block (was first) is now last, and the email is still valid
+  await expect.poll(async () => (await order()).indexOf(before[0]), { timeout: 20000 })
+    .toBe((await order()).length - 1);
+  await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 20000 });
+});

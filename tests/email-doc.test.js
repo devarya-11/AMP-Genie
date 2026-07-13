@@ -106,6 +106,18 @@ test('determinism: docToAmp on the same input yields identical ampHtml', () => {
   assert.strictEqual(docToAmp(doc).ampHtml, docToAmp(doc).ampHtml);
 });
 
+// M8: the editor reorders by permuting blocks[]. Any permutation must still
+// render valid AMP (the reorder can never produce a broken email), and a
+// permuted order must render byte-identically to itself (dedup is order-safe).
+test('M8: a reversed block order still PASSes and stays byte-deterministic', async () => {
+  const doc = everyBlockDoc();
+  const reversed = { ...doc, blocks: [...doc.blocks].reverse() };
+  const out = renderDoc(reversed);
+  const v = await validate(out.ampHtml);
+  assert.strictEqual(v.pass, true, `reversed order must pass: ${JSON.stringify(v.errors)}`);
+  assert.strictEqual(renderDoc(reversed).ampHtml, out.ampHtml, 'permuted order is byte-stable');
+});
+
 // ---- structural rules (mirrors tests/validator.test.js) ----------------------
 
 test('AMP4EMAIL structural rules are honoured', () => {

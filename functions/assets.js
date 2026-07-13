@@ -26,12 +26,14 @@ export async function onRequestPost({ request, env }) {
   const id = newId();
   let storageKey;
   let url;
+  // Prefer Supabase (permanent public CDN URL); fall back to the KV byte store
+  // (served via /assets/:id) if Supabase is unreachable, rather than hard-failing.
   if (storage) {
     const objPath = storage.objectPath(brand.slug, id, vetted.filename);
     url = await storage.putObject(objPath, b64ToBytes(body.dataBase64), vetted.mime);
-    if (!url) return json({ error: 'storage upload failed' }, 502);
-    storageKey = 'supabase:' + objPath;
-  } else {
+    if (url) storageKey = 'supabase:' + objPath;
+  }
+  if (!url) {
     if (!(await putAssetBytes(env.HISTORY, id, { base64: body.dataBase64, mime: vetted.mime }))) {
       return json({ error: 'storage upload failed' }, 502);
     }
