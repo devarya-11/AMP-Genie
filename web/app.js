@@ -500,16 +500,19 @@
       list.appendChild(card);
     });
   }
+  // Every new example is editor-first: generate a starting doc (with the
+  // routed interactive module baked in) and open the visual editor. Nothing
+  // is persisted until the user saves from the editor.
   async function generateFromProposal(u, btn) {
-    busy(btn, true, 'Generating…');
-    setLine('genStatus', 'Building “' + (u.title || 'example') + '” — validated AMP takes a moment…', true);
+    busy(btn, true, 'Drafting…');
+    setLine('genStatus', 'Drafting “' + (u.title || 'example') + '” for the editor…', true);
     try {
-      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/examples', {
-        title: u.title, moduleId: u.moduleId, contentPlan: u.contentPlan || {}, author: author(),
+      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/ai-doc', {
+        moduleId: u.moduleId, useCase: u.title, brief: (S.pitch && S.pitch.brief) || u.title || '', author: author(),
       });
       if (out && out.error) { setLine('genStatus', 'Error: ' + out.error); return; }
-      setLine('genStatus', 'Built “' + (u.title || 'example') + '” — it’s in the gallery below.');
-      await refreshPitch();
+      setLine('genStatus', '');
+      enterEditor((out && out.doc) || { version: 1, blocks: [] }, null, u.title || 'New email');
     } catch (e) { setLine('genStatus', 'Error: ' + e.message); }
     finally { busy(btn, false); }
   }
@@ -518,15 +521,15 @@
     if (!text) { setLine('ideaStatus', 'Describe the email you want first.'); $('ideaInput').focus(); return; }
     const btn = $('ideaGo');
     busy(btn, true);
-    setLine('ideaStatus', 'Building your idea — validated AMP takes a moment…', true);
+    setLine('ideaStatus', 'Drafting your idea for the editor…', true);
     try {
-      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/examples', {
-        title: text, brief: text, author: author(),
+      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/ai-doc', {
+        brief: text, useCase: text, author: author(),
       });
       if (out && out.error) { setLine('ideaStatus', 'Error: ' + out.error); return; }
       $('ideaInput').value = '';
-      setLine('ideaStatus', 'Built — it’s in the gallery below.');
-      await refreshPitch();
+      setLine('ideaStatus', '');
+      enterEditor((out && out.doc) || { version: 1, blocks: [] }, null, text.slice(0, 60) || 'New email');
     } catch (e) { setLine('ideaStatus', 'Error: ' + e.message); }
     finally { busy(btn, false); }
   }
@@ -594,8 +597,11 @@
     $('exFrame').srcdoc = x.amp_html || x.ampHtml || '';
     $('exCode').value = x.amp_html || x.ampHtml || '';
 
-    // Share page derives from the linked build record.
-    const buildId = exampleParams(x).buildId;
+    // Share page id: interactive examples link their KV build via
+    // params.buildId; doc examples (built in the editor) key the build record
+    // by the example id itself (/b/<exampleId>, stable across edits).
+    const isDocEx = (x.module_id || x.moduleId) === 'doc';
+    const buildId = exampleParams(x).buildId || (isDocEx ? x.id : null);
     const open = $('exOpenShare'), share = $('exShare');
     if (buildId) {
       open.href = '/b/' + encodeURIComponent(buildId);
@@ -605,9 +611,13 @@
       open.classList.add('hidden');
       share.classList.add('hidden');
     }
-    // Doc examples (built in the visual editor) get an "Edit in editor" button.
-    const isDoc = (x.module_id || x.moduleId) === 'doc' && (x.doc_json != null || x.docJson != null);
-    $('exEditDoc').classList.toggle('hidden', !isDoc);
+    // EVERY example is editable in the visual editor: doc examples load their
+    // blocks; legacy interactive examples synthesize an editable doc via
+    // /as-doc (openEditorForExample handles both).
+    $('exEditDoc').classList.remove('hidden');
+    // Prompt-tweak applies to interactive (KV-build) examples; doc examples
+    // are refined in the visual editor instead, so hide the tweak box there.
+    $('exTweakBox').classList.toggle('hidden', isDocEx);
 
     $('exMsg').textContent = '';
     $('exTweakMsg').textContent = ''; $('exTweakMsg').className = 'dispatch-msg';
@@ -859,6 +869,35 @@
       make: () => ({ brandName: (S.brand && S.brand.name) || 'Brand', text: 'You are receiving this because you subscribed.' }),
       summary: (p) => p.text || p.brandName || 'Footer' },
   ];
+  // ---- INTERACTIVE (amp-state) modules. block.type === module id. A doc may
+  //      hold only ONE of these (they share amp-state). Copy fields per module
+  //      are edited here; the interactivity itself is baked into the renderer.
+  const INTERACTIVE_FIELDS = {
+    reveal: ['head', 'teaserText', 'ctaLabel', 'footerText'],
+    search: ['head', 'footerText'],
+    quiz:   ['head', 'question', 'footerText'],
+    rating: ['head', 'prompt', 'footerText'],
+    spin:   ['head', 'teaserText', 'footerText'],
+    poll:   ['head', 'question', 'optionA', 'optionB', 'footerText'],
+    calc:   ['head', 'promptText', 'ctaLabel', 'assumptionText', 'footerText'],
+    report: ['head', 'verdictText', 'ctaLabel', 'footerText'],
+  };
+  const INTERACTIVE_TYPES = [
+    { type: 'reveal', label: 'Tap to reveal',    glyph: '⊕' },
+    { type: 'search', label: 'Search & filter',  glyph: '⌕' },
+    { type: 'quiz',   label: 'Quiz',             glyph: '?' },
+    { type: 'rating', label: 'Star rating',      glyph: '★' },
+    { type: 'spin',   label: 'Spin to win',      glyph: '◉' },
+    { type: 'poll',   label: 'This-or-that poll', glyph: '⇄' },
+    { type: 'calc',   label: 'Calculator',       glyph: '∑' },
+    { type: 'report', label: 'Personal report',  glyph: '⎙' },
+  ];
+  function interactiveDef(type) { return INTERACTIVE_TYPES.find((b) => b.type === type); }
+  function isInteractive(type) { return Object.prototype.hasOwnProperty.call(INTERACTIVE_FIELDS, type); }
+  function docHasInteractive() { return (S.doc && S.doc.blocks || []).some((b) => isInteractive(b.type)); }
+  // Pretty label + glyph for any block type (static or interactive).
+  function typeLabel(type) { const d = blockDef(type) || interactiveDef(type); return (d && d.label) || type; }
+  function typeGlyph(type) { const d = blockDef(type) || interactiveDef(type); return (d && d.glyph) || '▪'; }
   function blockDef(type) { return BLOCK_TYPES.find((b) => b.type === type); }
   function shortUrl(u) { const s = String(u); return s.length > 34 ? '…' + s.slice(-32) : s; }
   function productSeed() {
@@ -896,13 +935,26 @@
     } catch (e) { setLine('edNewStatus', 'Error: ' + e.message); }
     finally { busy(btn, false); }
   }
-  function openEditorForExample() {
+  // Open ANY example in the editor: a doc example loads its stored blocks; a
+  // legacy interactive example is synthesized into an editable doc server-side
+  // (/as-doc). Saving PATCHes the same example, so editing an old AMP updates
+  // it in place.
+  async function openEditorForExample() {
     const x = S.example; if (!x) return;
     let doc = null;
     const raw = x.doc_json != null ? x.doc_json : x.docJson;
     try { doc = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { doc = null; }
-    if (!doc || !Array.isArray(doc.blocks)) { setLine('exStatus', 'Error: this example has no editable block document.'); return; }
-    enterEditor(doc, x.id, x.title || 'Email');
+    if (doc && Array.isArray(doc.blocks)) { enterEditor(doc, x.id, x.title || 'Email'); return; }
+    setLine('exStatus', 'Opening in the editor…', true);
+    try {
+      const out = await getJson('/api/examples/' + encodeURIComponent(x.id) + '/as-doc');
+      if (!out || out.error || !out.doc || !Array.isArray(out.doc.blocks)) {
+        setLine('exStatus', 'Error: ' + ((out && out.error) || 'this example cannot be edited as a document.'));
+        return;
+      }
+      setLine('exStatus', '');
+      enterEditor(out.doc, x.id, x.title || 'Email');
+    } catch (e) { setLine('exStatus', 'Error: ' + e.message); }
   }
   function enterEditor(doc, exampleId, title) {
     S.doc = doc && typeof doc === 'object' ? doc : { version: 1, blocks: [] };
@@ -916,11 +968,31 @@
     setLine('edSaveErr', '');
     switchView('editor');
     renderPalette();
-    renderDrawer();
+    renderLibrary();
     renderBlocks();
     renderProps();
     setSaved();
     renderPreview();
+    // Pull the freshest shared brand library (teammates upload via Supabase);
+    // don't trust stale S.assets. Best-effort — the editor works without it.
+    refreshBrandAssets().catch(() => {});
+  }
+  // Re-GET the brand so the asset library reflects teammates' uploads. Updates
+  // S.assets + S.brand.products in place, then repaints the library grid.
+  async function refreshBrandAssets() {
+    const brandId = (S.brand && S.brand.id) || (S.pitch && (S.pitch.brand_id || S.pitch.brandId));
+    if (!brandId) return;
+    const data = await getJson('/api/brands/' + encodeURIComponent(brandId));
+    if (data && data.error) return;
+    if (data.brand || data.id) S.brand = data.brand || data;
+    const assets = listOf(data, ['assets']).length ? listOf(data, ['assets']) : listOf(S.brand, ['assets']);
+    if (assets.length || !S.assets) S.assets = assets;
+    const prods = listOf(data, ['products']);
+    if (prods.length && S.brand) S.brand.products = prods;
+    if (document.getElementById('view-editor') && document.getElementById('view-editor').classList.contains('on')) {
+      renderLibrary();
+      if (selectedBlock() && selectedBlock().type === 'products') renderProps();
+    }
   }
   function leaveEditor() {
     switchView('pitch');
@@ -937,44 +1009,109 @@
     else { el0.textContent = S.editingExampleId ? 'Saved' : 'Not saved yet'; el0.className = 'ed-saved' + (S.editingExampleId ? ' saved' : ''); }
   }
 
-  // ---- LEFT: palette ----
+  // ---- LEFT: palette (Layout blocks + Interactive modules) ----
+  function paletteBtn(def, opts) {
+    const b = el('button', 'ed-add-btn'); b.type = 'button';
+    b.appendChild(el('span', 'ed-add-ic', def.glyph));
+    b.appendChild(el('span', 'ed-add-lbl', def.label));
+    if (opts && opts.disabled) {
+      b.disabled = true; b.classList.add('disabled');
+      b.title = (opts.hint || '');
+    } else {
+      b.onclick = () => addBlock(def.type);
+    }
+    return b;
+  }
   function renderPalette() {
     const box = $('edPalette'); box.innerHTML = '';
-    BLOCK_TYPES.forEach((def) => {
-      const b = el('button', 'ed-add-btn'); b.type = 'button';
-      b.appendChild(el('span', 'ed-add-ic', def.glyph));
-      b.appendChild(el('span', '', def.label));
-      b.onclick = () => addBlock(def.type);
-      box.appendChild(b);
+    box.appendChild(el('div', 'ed-pal-group', 'Layout'));
+    BLOCK_TYPES.forEach((def) => box.appendChild(paletteBtn(def)));
+    box.appendChild(el('div', 'ed-pal-group', 'Interactive'));
+    const locked = docHasInteractive();
+    INTERACTIVE_TYPES.forEach((def) => {
+      box.appendChild(paletteBtn(def, locked ? { disabled: true, hint: 'one interactive block per email' } : null));
     });
+    if (locked) box.appendChild(el('div', 'ed-pal-note', 'One interactive block per email.'));
   }
   function addBlock(type) {
-    const def = blockDef(type); if (!def) return;
-    const block = { id: nextBlockId(), type, props: def.make() };
+    let block;
+    if (isInteractive(type)) {
+      if (docHasInteractive()) return; // guard: one per email
+      block = { id: nextBlockId(), type, props: {} };
+    } else {
+      const def = blockDef(type); if (!def) return;
+      block = { id: nextBlockId(), type, props: def.make() };
+    }
     const idx = S.doc.blocks.findIndex((b) => b.id === S.edSelId);
     if (idx >= 0) S.doc.blocks.splice(idx + 1, 0, block);
     else S.doc.blocks.push(block);
     S.edSelId = block.id;
-    renderBlocks(); renderProps();
+    renderPalette(); renderBlocks(); renderProps();
     markDirty();
   }
 
-  // ---- LEFT: asset drawer (draggable thumbnails) ----
-  function renderDrawer() {
+  // ---- LEFT: brand ASSET LIBRARY (shared, collaborative) ----
+  //      #edDrawer stays the id (e2e finds it); #edLibrary is an alias for the
+  //      same panel. Renders: upload control + drag/pick thumbnail grid.
+  function renderLibrary() {
     const box = $('edDrawer'); box.innerHTML = '';
+    // --- upload control (dropzone + file input) ---
+    const up = el('div', 'ed-lib-upload');
+    const zone = el('div', 'ed-lib-drop');
+    zone.appendChild(el('span', 'ed-lib-drop-ic', '⇪'));
+    zone.appendChild(el('span', 'ed-lib-drop-txt', 'Drop images or click to upload'));
+    const input = el('input'); input.type = 'file'; input.accept = 'image/*'; input.multiple = true; input.className = 'ed-lib-file';
+    input.id = 'edLibFile';
+    zone.appendChild(input);
+    zone.onclick = () => input.click();
+    up.appendChild(zone);
+    const status = el('div', 'ed-lib-status'); status.id = 'edLibStatus';
+    up.appendChild(status);
+    wireDropzone(zone, input, (files) => libraryUpload(files));
+    box.appendChild(up);
+    // --- thumbnail grid ---
+    const grid = el('div', 'ed-lib-grid'); grid.id = 'edLibGrid';
     const assets = (S.assets || []).filter((a) => assetUrl(a));
-    if (!assets.length) { box.appendChild(el('div', 'empty-note', 'No brand assets — add some in the Assets tab.')); return; }
-    assets.forEach((a) => {
-      const cell = el('div', 'ed-asset'); cell.draggable = true; cell.title = a.filename || 'asset';
-      const img = el('img'); img.src = assetUrl(a); img.loading = 'lazy'; img.alt = a.filename || 'asset';
-      cell.appendChild(img);
-      cell.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/asset-url', assetUrl(a));
-        e.dataTransfer.setData('text/plain', assetUrl(a));
-        e.dataTransfer.effectAllowed = 'copy';
-      });
-      box.appendChild(cell);
+    if (!assets.length) {
+      grid.appendChild(el('div', 'empty-note ed-lib-empty',
+        'Upload images or add them in the pitch’s Assets tab — your whole team shares this library.'));
+    } else {
+      assets.forEach((a) => grid.appendChild(libraryCell(a)));
+    }
+    box.appendChild(grid);
+  }
+  function libraryCell(a) {
+    const url = assetUrl(a);
+    const cell = el('div', 'ed-asset'); cell.draggable = true;
+    cell.title = a.filename || 'asset';
+    const img = el('img'); img.src = url; img.loading = 'lazy'; img.alt = a.filename || 'asset';
+    cell.appendChild(img);
+    const cap = el('div', 'ed-asset-cap');
+    cap.appendChild(el('span', 'ed-asset-name', a.filename || 'file'));
+    const by = a.uploadedBy || a.uploaded_by || a.created_by || a.author;
+    if (by) cap.appendChild(el('span', 'ed-asset-by', String(by)));
+    cell.appendChild(cap);
+    cell.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/asset-url', url);
+      e.dataTransfer.setData('text/plain', url);
+      e.dataTransfer.effectAllowed = 'copy';
     });
+    return cell;
+  }
+  // Upload file(s) in-editor -> POST /assets -> refresh the shared library.
+  async function libraryUpload(files) {
+    const brandId = (S.brand && S.brand.id) || (S.pitch && (S.pitch.brand_id || S.pitch.brandId));
+    const status = $('edLibStatus');
+    if (!brandId) { if (status) status.textContent = 'Research the brand first — uploads need a brand to land in.'; return; }
+    const imgs = Array.from(files).filter((f) => /^image\//.test(f.type) || !f.type);
+    if (!imgs.length) { if (status) status.textContent = 'Only image files can be added to the library.'; return; }
+    for (let i = 0; i < imgs.length; i++) {
+      if (status) status.textContent = 'Uploading ' + (i + 1) + '/' + imgs.length + ' — ' + imgs[i].name + '…';
+      try { await uploadAsset(imgs[i], 'image', brandId); }
+      catch (e) { if (status) status.textContent = 'Error: ' + e.message; return; }
+    }
+    if (status) status.textContent = imgs.length + ' image' + (imgs.length > 1 ? 's' : '') + ' uploaded — shared with your team.';
+    try { await refreshBrandAssets(); } catch (e) { renderLibrary(); }
   }
 
   // ---- CENTER: block list (select / delete / duplicate / reorder) ----
@@ -983,16 +1120,22 @@
     if (!S.doc.blocks.length) { box.appendChild(el('div', 'empty-note', 'Empty email — add a block from the left.')); return; }
     S.doc.blocks.forEach((blk, i) => {
       const def = blockDef(blk.type);
-      const card = el('div', 'ed-block' + (blk.id === S.edSelId ? ' sel' : ''));
+      const inter = isInteractive(blk.type);
+      const card = el('div', 'ed-block' + (blk.id === S.edSelId ? ' sel' : '') + (inter ? ' ed-block-inter' : ''));
       card.dataset.id = blk.id;
       const canDropAsset = /^(hero|image|header|products)$/.test(blk.type);
 
       const handle = el('span', 'ed-handle', '⋮⋮'); handle.title = 'Drag to reorder';
       card.appendChild(handle);
 
+      const icon = el('span', 'ed-block-ic', typeGlyph(blk.type));
+      card.appendChild(icon);
+
       const body = el('div', 'ed-block-body');
-      body.appendChild(el('div', 'ed-block-type', (def && def.label) || blk.type));
-      body.appendChild(el('div', 'ed-block-sum', (def && def.summary(blk.props || {})) || ''));
+      body.appendChild(el('div', 'ed-block-type', typeLabel(blk.type)));
+      const sum = inter ? (blk.props && blk.props.head ? blk.props.head : 'Interactive module')
+                        : ((def && def.summary(blk.props || {})) || '');
+      body.appendChild(el('div', 'ed-block-sum', sum));
       body.onclick = () => { S.edSelId = blk.id; renderBlocks(); renderProps(); };
       card.appendChild(body);
 
@@ -1001,7 +1144,9 @@
       up.onclick = () => moveBlock(blk.id, -1);
       const down = el('button', 'ed-iconbtn', '↓'); down.type = 'button'; down.title = 'Move down'; down.disabled = i === S.doc.blocks.length - 1;
       down.onclick = () => moveBlock(blk.id, 1);
-      const dup = el('button', 'ed-iconbtn', '⧉'); dup.type = 'button'; dup.title = 'Duplicate';
+      const dup = el('button', 'ed-iconbtn', '⧉'); dup.type = 'button';
+      dup.title = inter ? 'One interactive block per email' : 'Duplicate';
+      dup.disabled = inter;
       dup.onclick = () => duplicateBlock(blk.id);
       const del = el('button', 'ed-iconbtn danger', '✕'); del.type = 'button'; del.title = 'Delete';
       del.onclick = () => deleteBlock(blk.id);
@@ -1053,6 +1198,7 @@
   function duplicateBlock(id) {
     const i = blockIndex(id); if (i < 0) return;
     const src = S.doc.blocks[i];
+    if (isInteractive(src.type)) return; // can't duplicate: one interactive per email
     const copy = { id: nextBlockId(), type: src.type, props: JSON.parse(JSON.stringify(src.props || {})) };
     S.doc.blocks.splice(i + 1, 0, copy);
     S.edSelId = copy.id; renderBlocks(); renderProps(); markDirty();
@@ -1061,7 +1207,7 @@
     const i = blockIndex(id); if (i < 0) return;
     S.doc.blocks.splice(i, 1);
     if (S.edSelId === id) S.edSelId = S.doc.blocks.length ? S.doc.blocks[Math.min(i, S.doc.blocks.length - 1)].id : null;
-    renderBlocks(); renderProps(); markDirty();
+    renderPalette(); renderBlocks(); renderProps(); markDirty();
   }
   function dropAssetOnBlock(blk, url) {
     if (blk.type === 'products') {
@@ -1084,8 +1230,30 @@
     const blk = selectedBlock();
     if (!blk) { box.appendChild(el('div', 'ed-props-empty', 'Select a block to edit its content, or add one from the left.')); return; }
     const def = blockDef(blk.type);
-    box.appendChild(el('div', 'ed-block-type', (def && def.label) || blk.type));
+    // header: icon + type name
+    const hdr = el('div', 'ed-props-hdr');
+    hdr.appendChild(el('span', 'ed-props-hdr-ic', typeGlyph(blk.type)));
+    hdr.appendChild(el('span', 'ed-props-hdr-name', typeLabel(blk.type)));
+    box.appendChild(hdr);
     const set = (key, val) => { blk.props[key] = val; renderBlocks(); markDirty(); };
+    if (!blk.props || typeof blk.props !== 'object') blk.props = {};
+    // Interactive modules: one labelled copy field per its field-map entry.
+    if (isInteractive(blk.type)) {
+      const note = el('div', 'ed-props-note');
+      note.textContent = typeLabel(blk.type) + ' — interactivity is baked in; edit the copy here.';
+      box.appendChild(note);
+      const sec = el('div', 'ed-props-sec', 'Copy');
+      box.appendChild(sec);
+      (INTERACTIVE_FIELDS[blk.type] || []).forEach((f) => {
+        // multi-line copy for the longer prose fields; single-line for headings/labels/short prompts
+        const long = /^(teaserText|footerText|assumptionText|verdictText|promptText)$/.test(f);
+        const label = fieldLabel(f);
+        box.appendChild(long
+          ? areaField(label, blk.props[f] || '', (v) => set(f, v))
+          : field(label, blk.props[f] || '', (v) => set(f, v)));
+      });
+      return;
+    }
     switch (blk.type) {
       case 'header':
         box.appendChild(field('Brand name', blk.props.brandName || '', (v) => set('brandName', v)));
@@ -1127,6 +1295,11 @@
     }
   }
   // property-field builders (label + input, live oninput)
+  // camelCase field key -> human label, e.g. "footerText" -> "Footer text".
+  function fieldLabel(key) {
+    const words = String(key).replace(/([A-Z])/g, ' $1').trim();
+    return words.charAt(0).toUpperCase() + words.slice(1).toLowerCase();
+  }
   function ctrl(labelText) { const c = el('div', 'ctrl'); c.appendChild(el('label', '', labelText)); return c; }
   function field(labelText, value, onChange) {
     const c = ctrl(labelText); const i = el('input'); i.type = 'text'; i.value = value;
@@ -1145,15 +1318,25 @@
   // arms the next drawer click to fill THIS field (in addition to drag-drop).
   function urlField(labelText, value, onChange) {
     const c = ctrl(labelText);
+    // current-image thumbnail preview (if set)
+    const prev = el('div', 'ed-url-prev');
+    function paintPrev(v) {
+      prev.innerHTML = '';
+      if (v) { const im = el('img'); im.src = v; im.loading = 'lazy'; im.alt = 'current'; prev.appendChild(im); prev.style.display = ''; }
+      else { prev.style.display = 'none'; }
+    }
     const row = el('div', 'ed-url-row');
     const i = el('input'); i.type = 'text'; i.value = value; i.placeholder = 'https://…';
-    i.oninput = () => onChange(i.value);
-    const pick = el('button', 'ghost sm', 'Assets'); pick.type = 'button'; pick.title = 'Choose from brand assets';
-    pick.onclick = () => armAssetPick((url) => { i.value = url; onChange(url); });
-    row.appendChild(i); row.appendChild(pick); c.appendChild(row);
+    i.oninput = () => { onChange(i.value); paintPrev(i.value); };
+    const pick = el('button', 'ghost sm', 'Choose from library'); pick.type = 'button'; pick.title = 'Pick an uploaded image';
+    pick.onclick = () => armAssetPick((url) => { i.value = url; onChange(url); paintPrev(url); });
+    row.appendChild(i); row.appendChild(pick);
+    c.appendChild(prev); c.appendChild(row);
+    paintPrev(value);
     return c;
   }
-  // Repeatable products editor: name / price / image rows + add/remove.
+  // Repeatable products editor: name / price / image rows + add/remove, each
+  // row's image using the library-pick affordance, plus a brand-products picker.
   function productsEditor(blk) {
     const wrap = ctrl('Products');
     const rows = el('div', 'ed-prod-rows');
@@ -1166,15 +1349,49 @@
       price.oninput = () => { item.price = price.value; markDirty(); };
       const img = el('input'); img.type = 'text'; img.placeholder = 'Image URL'; img.value = item.imageUrl || item.image || '';
       img.oninput = () => { item.imageUrl = img.value; markDirty(); };
+      // library-pick button for THIS row's image
+      const pick = el('button', 'ed-iconbtn', '▤'); pick.type = 'button'; pick.title = 'Choose image from library';
+      pick.onclick = () => armAssetPick((url) => { img.value = url; item.imageUrl = url; renderBlocks(); markDirty(); });
       const rm = el('button', 'ed-iconbtn danger', '✕'); rm.type = 'button'; rm.title = 'Remove';
       rm.onclick = () => { blk.props.items.splice(idx, 1); renderProps(); renderBlocks(); markDirty(); };
-      [name, price, img, rm].forEach((n) => row.appendChild(n));
+      [name, price, img, pick, rm].forEach((n) => row.appendChild(n));
       rows.appendChild(row);
     });
     wrap.appendChild(rows);
-    const add = el('button', 'ghost sm', '+ add product'); add.type = 'button'; add.style.marginTop = '8px'; add.style.alignSelf = 'flex-start';
+    const btns = el('div', 'ed-prod-btns');
+    const add = el('button', 'ghost sm', '+ add product'); add.type = 'button';
     add.onclick = () => { blk.props.items.push({ name: 'Product', price: '', imageUrl: '' }); renderProps(); renderBlocks(); markDirty(); };
-    wrap.appendChild(add);
+    btns.appendChild(add);
+    // "Add from brand products" picker (GET /api/brands/:id products[])
+    const brandProds = (S.brand && Array.isArray(S.brand.products) ? S.brand.products : []).filter((p) => p && (typeof p === 'string' || p.name));
+    if (brandProds.length) {
+      const fromBrand = el('button', 'ghost sm', '+ from brand products'); fromBrand.type = 'button';
+      fromBrand.onclick = () => togglePicker();
+      btns.appendChild(fromBrand);
+      const picker = el('div', 'ed-prod-picker'); picker.style.display = 'none';
+      brandProds.forEach((p) => {
+        const item = typeof p === 'string' ? { name: p } : p;
+        const row = el('button', 'ed-prod-pick-row'); row.type = 'button';
+        const thumb = el('span', 'ed-prod-pick-thumb');
+        const purl = item.image_url || item.image || item.imageUrl || '';
+        if (purl) { const im = el('img'); im.src = purl; im.loading = 'lazy'; thumb.appendChild(im); }
+        row.appendChild(thumb);
+        const info = el('span', 'ed-prod-pick-info');
+        info.appendChild(el('span', 'ed-prod-pick-name', item.name || 'Product'));
+        if (item.price != null && item.price !== '') info.appendChild(el('span', 'ed-prod-pick-price', String(item.price)));
+        row.appendChild(info);
+        row.onclick = () => {
+          blk.props.items.push({ name: item.name || 'Product', price: item.price != null ? String(item.price) : '', imageUrl: purl });
+          renderProps(); renderBlocks(); markDirty();
+        };
+        picker.appendChild(row);
+      });
+      wrap.appendChild(btns);
+      wrap.appendChild(picker);
+      function togglePicker() { picker.style.display = picker.style.display === 'none' ? 'flex' : 'none'; }
+      return wrap;
+    }
+    wrap.appendChild(btns);
     return wrap;
   }
   // asset-pick arming: the drawer thumbnails also respond to a plain click

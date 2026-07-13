@@ -94,6 +94,12 @@ function registerPitchRoutes(app, ctx) {
 
   // ---- examples ---------------------------------------------------------------
   app.get('/api/examples/:id', async (req, res) => send(res, await api.getExampleH({ id: req.params.id })));
+  // Resolve ANY example to an editable block doc (a doc example returns its
+  // doc; a legacy interactive example is synthesized into one). GET, so it is a
+  // SEPARATE path from the PATCH /api/examples/:id/doc save-edit route.
+  app.get('/api/examples/:id/as-doc', async (req, res) => {
+    send(res, await api.exampleToDocH({ id: req.params.id }));
+  });
   app.post('/api/examples/:id/tweak', async (req, res) => {
     const b = body(req);
     send(res, await api.tweakExampleH({
@@ -123,7 +129,7 @@ function registerPitchRoutes(app, ctx) {
   app.post('/api/pitches/:id/ai-doc', async (req, res) => {
     const b = body(req);
     send(res, await api.aiDocH({
-      pitchId: req.params.id, brief: b.brief, useCase: b.useCase, author: b.author,
+      pitchId: req.params.id, brief: b.brief, useCase: b.useCase, moduleId: b.moduleId, author: b.author,
     }));
   });
 }

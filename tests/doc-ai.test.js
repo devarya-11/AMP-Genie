@@ -12,8 +12,18 @@ delete process.env.OLLAMA_BASE_URL;
 globalThis.fetch = async () => { throw new Error('offline test: network disabled'); };
 
 const { generateDoc, buildFallbackDoc } = require('../server/doc-ai');
-const { validateDoc, renderDoc, BLOCK_TYPES } = require('../server/email-doc');
+const {
+  validateDoc, renderDoc, BLOCK_TYPES, INTERACTIVE_TYPES,
+} = require('../server/email-doc');
 const { validate } = require('../server/validator');
+
+// GENIE 2.0 rule under test: EVERY doc generateDoc/buildFallbackDoc yields
+// carries EXACTLY ONE interactive block (a module id from INTERACTIVE_TYPES),
+// renders validator-clean, and never throws. If email-doc's interactive
+// exports have not landed yet, INTERACTIVE_TYPES is empty — the assertions
+// below would then be vacuous, so guard once and note it.
+const HAS_INTERACTIVE = INTERACTIVE_TYPES instanceof Set && INTERACTIVE_TYPES.size === 8;
+const MODULE_IDS = HAS_INTERACTIVE ? [...INTERACTIVE_TYPES] : [];
 
 const BRAND = {
   name: 'Groww',
@@ -31,165 +41,230 @@ function fixedProvider(value) {
   return { name: 'fake', call: async () => value };
 }
 
-// A doc a well-behaved model would emit: an ordered block list with flat props.
-function goodLlmDoc() {
+// The doc shape a well-behaved model emits for the interactive contract: a
+// `copy` map for the routed module's fields + optional plain-text framing.
+function goodLlmResult() {
   return {
-    blocks: [
-      { type: 'header', brandName: 'Groww' },
-      { type: 'text', heading: 'Start your first SIP today', body: 'A monthly habit, invested for you. Pick a fund and let it compound.' },
-      { type: 'products', columns: 2, items: [{ name: 'Index Fund Starter', price: 500 }] },
-      { type: 'button', label: 'Open my SIP', align: 'center' },
-      { type: 'footer', brandName: 'Groww', text: 'You opted in to Groww updates.' },
-    ],
+    copy: { head: 'Spin for your welcome-back bonus' },
+    before: [{ type: 'text', heading: 'Welcome back', body: 'Your streak is waiting — take one tap.' }],
+    after: [{ type: 'footer', text: 'You opted in to Groww updates.' }],
   };
 }
 
-// ---- buildFallbackDoc: a real, validator-clean doc ---------------------------
+// The single interactive block in a doc (there must be exactly one).
+function interactiveBlocks(doc) {
+  const blocks = (doc && Array.isArray(doc.blocks)) ? doc.blocks : [];
+  return blocks.filter((b) => INTERACTIVE_TYPES.has(b.type));
+}
 
-test('buildFallbackDoc yields a validateDoc-valid doc that renders and passes the REAL validator', async () => {
-  const doc = buildFallbackDoc({ brand: BRAND, brief: 'Convert dormant users to their first SIP', currency: 'INR' });
-  const v = validateDoc(doc);
-  assert.ok(v.ok, 'the fallback doc passes validateDoc');
-  assert.ok(Array.isArray(doc.blocks) && doc.blocks.length >= 3, 'it is a real multi-block doc');
-  // every block type is a known one
-  for (const b of doc.blocks) assert.ok(BLOCK_TYPES.includes(b.type), `known block type: ${b.type}`);
+// The universal invariant: a valid doc with exactly one interactive block that
+// renders and passes the REAL AMP validator.
+async function assertOneInteractiveValid(doc, label) {
+  assert.ok(validateDoc(doc).ok, `${label}: passes validateDoc`);
+  const ints = interactiveBlocks(doc);
+  assert.strictEqual(ints.length, 1, `${label}: exactly one interactive block`);
+  assert.ok(INTERACTIVE_TYPES.has(ints[0].type), `${label}: it is a real module id`);
+  for (const b of doc.blocks) assert.ok(BLOCK_TYPES.includes(b.type), `${label}: known block type ${b.type}`);
   const r = renderDoc(doc);
-  assert.ok(/^<!doctype html>/.test(r.ampHtml), 'renders an AMP document');
+  assert.ok(/^<!doctype html>/.test(r.ampHtml), `${label}: renders an AMP document`);
   const verdict = await validate(r.ampHtml);
-  assert.strictEqual(verdict.pass, true, 'the fallback email passes the real AMP validator');
+  assert.strictEqual(verdict.pass, true, `${label}: passes the real AMP validator`);
+}
+
+test('email-doc interactive exports are present (guard for the assertions below)', () => {
+  assert.ok(HAS_INTERACTIVE, 'INTERACTIVE_TYPES is the 8-module Set — the interactive contract is live');
 });
 
-test('buildFallbackDoc is brand-specific and brief-seeded, not generic', () => {
-  const doc = buildFallbackDoc({ brand: BRAND, brief: 'Flash weekend sale on index funds', currency: 'INR' });
-  assert.strictEqual(doc.brand.name, 'Groww');
+// ---- buildFallbackDoc: the deterministic interactive floor -------------------
+
+test('buildFallbackDoc yields a validator-clean doc with EXACTLY ONE interactive block', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('email-doc interactive exports not landed');
+  const doc = buildFallbackDoc({ brand: BRAND, brief: 'Convert dormant users to their first SIP', currency: 'INR' });
+  await assertOneInteractiveValid(doc, 'fallback');
+  assert.strictEqual(doc.brand.name, 'Groww', 'the brand rides into the doc');
   assert.strictEqual(doc.brand.primaryHex, '#00b386', 'the brand colour rides into the doc');
-  const header = doc.blocks.find((b) => b.type === 'header');
-  assert.strictEqual(header.props.brandName, 'Groww');
-  const text = doc.blocks.find((b) => b.type === 'text');
-  assert.ok(/weekend sale/i.test(text.props.heading), 'the headline is derived from the brief');
+});
+
+test('buildFallbackDoc respects an explicit moduleId', (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  for (const id of MODULE_IDS) {
+    const doc = buildFallbackDoc({ brand: BRAND, brief: '', moduleId: id });
+    const ints = interactiveBlocks(doc);
+    assert.strictEqual(ints.length, 1, `fallback for ${id}: one interactive block`);
+    assert.strictEqual(ints[0].type, id, `fallback honours moduleId ${id}`);
+  }
+});
+
+test('buildFallbackDoc routes the brief to a module via the deterministic router', (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const spinDoc = buildFallbackDoc({ brand: BRAND, brief: 'Spin the wheel to win a prize this weekend' });
+  assert.strictEqual(interactiveBlocks(spinDoc)[0].type, 'spin', 'a spin brief routes to the spin module');
+  const quizDoc = buildFallbackDoc({ brand: BRAND, brief: 'Take our quiz to find your perfect fund' });
+  assert.strictEqual(interactiveBlocks(quizDoc)[0].type, 'quiz', 'a quiz brief routes to the quiz module');
+});
+
+test('buildFallbackDoc without a brief still yields a valid interactive doc (a sensible default)', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const doc = buildFallbackDoc({ brand: { name: 'Acme' }, brief: '' });
+  await assertOneInteractiveValid(doc, 'no-brief fallback');
+});
+
+test('buildFallbackDoc frames the module with the brand catalogue when items exist', (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const doc = buildFallbackDoc({ brand: BRAND, brief: 'weekend offer', moduleId: 'reveal' });
   const products = doc.blocks.find((b) => b.type === 'products');
-  assert.ok(products, 'a brand carrying items gets a products block');
+  assert.ok(products, 'a brand carrying items frames the module with a products grid');
   assert.strictEqual(products.props.items.length, 2, 'the brand items land in the grid');
   assert.strictEqual(products.props.items[0].name, 'Index Fund Starter');
+  // and the interactive block is still the only interactive block
+  assert.strictEqual(interactiveBlocks(doc).length, 1, 'still exactly one interactive block');
 });
 
-test('buildFallbackDoc without items or logo degrades sensibly (no products, no hero)', async () => {
-  const doc = buildFallbackDoc({ brand: { name: 'Acme' }, brief: '' });
-  assert.ok(!doc.blocks.some((b) => b.type === 'products'), 'no items -> no products block');
-  assert.ok(!doc.blocks.some((b) => b.type === 'hero'), 'no logo -> no hero (hero-if-logo)');
-  assert.ok(doc.blocks.some((b) => b.type === 'header'), 'still has a header');
-  assert.ok(doc.blocks.some((b) => b.type === 'text'), 'still has a text block');
-  assert.ok(doc.blocks.some((b) => b.type === 'button'), 'still has a CTA');
-  assert.ok(doc.blocks.some((b) => b.type === 'footer'), 'still has a footer');
-  const verdict = await validate(renderDoc(doc).ampHtml);
-  assert.strictEqual(verdict.pass, true, 'the minimal doc still passes the validator');
-});
-
-test('buildFallbackDoc with a logo gets a hero block', () => {
-  const doc = buildFallbackDoc({ brand: { name: 'Acme', logoUrl: 'https://cdn.acme.com/logo.png' }, brief: '' });
-  assert.ok(doc.blocks.some((b) => b.type === 'hero'), 'a real logo earns the hero banner');
-});
-
-test('buildFallbackDoc never throws on junk input and still returns a valid doc', () => {
+test('buildFallbackDoc never throws on junk input and still returns a valid interactive doc', (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
   for (const junk of [undefined, null, {}, { brand: 42 }, { brand: { name: '<script>' } }]) {
     const doc = buildFallbackDoc(junk);
     assert.ok(validateDoc(doc).ok, 'a valid doc for junk: ' + JSON.stringify(junk));
-    assert.ok(doc.blocks.length >= 3, 'still a real doc');
+    assert.strictEqual(interactiveBlocks(doc).length, 1, 'still exactly one interactive block for junk: ' + JSON.stringify(junk));
   }
   // a markup-only name degrades to the house default, never poisons the doc
   const doc = buildFallbackDoc({ brand: { name: '<>' } });
   assert.strictEqual(doc.brand.name, 'Acme', 'markup-only brand name -> Acme default');
 });
 
-// ---- generateDoc: LLM tier + fallback + never-throw --------------------------
+// ---- generateDoc: always an interactive doc, all 8 modules -------------------
 
-test('generateDoc uses a GOOD injected provider doc', async () => {
-  const doc = await generateDoc({ brand: BRAND, brief: 'first SIP', useCase: 'onboarding' }, { providers: [fixedProvider(goodLlmDoc())] });
-  assert.ok(validateDoc(doc).ok, 'the result is a valid doc');
-  const text = doc.blocks.find((b) => b.type === 'text');
-  assert.ok(text && /Start your first SIP/i.test(text.props.heading), 'the LLM copy is used, not the fallback');
-  const verdict = await validate(renderDoc(doc).ampHtml);
-  assert.strictEqual(verdict.pass, true, 'the LLM-composed email passes the validator');
-});
-
-test('generateDoc accepts a provider that returns a JSON STRING', async () => {
-  const doc = await generateDoc({ brand: BRAND }, { providers: [fixedProvider(JSON.stringify(goodLlmDoc()))] });
-  assert.ok(validateDoc(doc).ok);
-  const text = doc.blocks.find((b) => b.type === 'text');
-  assert.ok(text && /first SIP/i.test(text.props.heading), 'a stringified doc is parsed and used');
-});
-
-test('generateDoc strips markup from LLM strings (defense in depth)', async () => {
-  const hostile = { blocks: [
-    { type: 'header', brandName: 'Groww' },
-    { type: 'text', heading: 'Hello <script>alert(1)</script>', body: 'Body <img src=x> text' },
-    { type: 'button', label: 'Go' },
-  ] };
-  const doc = await generateDoc({ brand: BRAND }, { providers: [fixedProvider(hostile)] });
-  assert.ok(validateDoc(doc).ok);
-  const text = doc.blocks.find((b) => b.type === 'text');
-  assert.ok(text, 'the text block survived');
-  assert.ok(!/[<>]/.test(text.props.heading), 'angle brackets stripped from heading');
-  assert.ok(!/[<>]/.test(text.props.body), 'angle brackets stripped from body');
-});
-
-test('generateDoc with a provider returning JUNK falls back to a valid doc', async () => {
-  for (const junk of ['not json at all', { nope: true }, { blocks: 'wrong' }, 42, null]) {
-    const doc = await generateDoc({ brand: BRAND, brief: 'weekend sale' }, { providers: [fixedProvider(junk)] });
-    assert.ok(validateDoc(doc).ok, 'fell back to a valid doc for junk: ' + JSON.stringify(junk));
-    assert.ok(doc.blocks.length >= 3, 'the fallback is a real doc');
+test('generateDoc produces a valid one-interactive doc for EVERY module id (offline fallback)', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  for (const id of MODULE_IDS) {
+    const doc = await generateDoc({ brand: BRAND, brief: 'monthly digest', moduleId: id }, { providers: [] });
+    await assertOneInteractiveValid(doc, `generateDoc(${id})`);
+    assert.strictEqual(interactiveBlocks(doc)[0].type, id, `generateDoc honours moduleId ${id}`);
   }
 });
 
-test('generateDoc with a provider returning ONLY markup blocks falls back (nothing substantial survives)', async () => {
-  // a doc of only a divider is not a real email -> isSubstantial is false -> fallback
-  const thin = { blocks: [{ type: 'divider' }, { type: 'bogus', foo: 1 }] };
-  const doc = await generateDoc({ brand: BRAND, brief: 'welcome journey' }, { providers: [fixedProvider(thin)] });
-  assert.ok(validateDoc(doc).ok);
-  // the fallback always includes a text block; the thin LLM doc did not
-  assert.ok(doc.blocks.some((b) => b.type === 'text'), 'degraded to the seeded fallback doc');
+test('generateDoc: opts.moduleId wins over the routed brief', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  // brief clearly reads "spin", but the explicit poll id must win.
+  const doc = await generateDoc({ brand: BRAND, brief: 'spin the wheel to win' }, { providers: [], moduleId: 'poll' });
+  assert.strictEqual(interactiveBlocks(doc)[0].type, 'poll', 'explicit opts.moduleId overrides the router');
 });
 
-test('generateDoc with ZERO providers returns the fallback', async () => {
-  const doc = await generateDoc({ brand: BRAND, brief: 'winback' }, { providers: [] });
-  assert.ok(validateDoc(doc).ok);
-  assert.ok(doc.blocks.some((b) => b.type === 'header'), 'a real fallback doc');
-  const verdict = await validate(renderDoc(doc).ampHtml);
-  assert.strictEqual(verdict.pass, true);
+test('generateDoc: the arg moduleId also selects the module', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const doc = await generateDoc({ brand: BRAND, brief: 'anything', moduleId: 'rating' }, { providers: [] });
+  assert.strictEqual(interactiveBlocks(doc)[0].type, 'rating', 'the arg moduleId selects the module');
 });
 
-test('generateDoc never throws on a THROWING provider', async () => {
+test('generateDoc: with no module id, the brief router picks the module', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const doc = await generateDoc({ brand: BRAND, brief: 'a calculator to estimate your SIP maturity' }, { providers: [] });
+  assert.strictEqual(interactiveBlocks(doc)[0].type, 'calc', 'a calculator brief routes to calc');
+});
+
+// ---- generateDoc: the LLM tier (interactive copy + framing) ------------------
+
+test('generateDoc merges a GOOD injected LLM result onto the interactive block', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const doc = await generateDoc({ brand: BRAND, brief: 'winback', moduleId: 'spin' }, { providers: [fixedProvider(goodLlmResult())] });
+  await assertOneInteractiveValid(doc, 'good-llm');
+  const spin = interactiveBlocks(doc)[0];
+  assert.strictEqual(spin.type, 'spin', 'the routed module is used');
+  assert.ok(/welcome-back bonus/i.test(spin.props.head || ''), 'the LLM copy landed on the interactive block');
+  // the plain-text framing blocks survived the merge
+  assert.ok(doc.blocks.some((b) => b.type === 'text'), 'the LLM text framing block was prepended');
+  assert.ok(doc.blocks.some((b) => b.type === 'footer'), 'the LLM footer framing block was appended');
+});
+
+test('generateDoc accepts an LLM result returned as a JSON STRING', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const doc = await generateDoc({ brand: BRAND, moduleId: 'reveal' }, { providers: [fixedProvider(JSON.stringify({ copy: { head: 'Unlock your reward' } }))] });
+  await assertOneInteractiveValid(doc, 'string-llm');
+  const reveal = interactiveBlocks(doc)[0];
+  assert.ok(/Unlock your reward/i.test(reveal.props.head || ''), 'a stringified LLM result is parsed and merged');
+});
+
+test('generateDoc strips markup from LLM copy (defense in depth)', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const hostile = { copy: { head: 'Win <script>alert(1)</script> now' }, before: [{ type: 'text', heading: 'Hi <b>x</b>', body: 'Body <img src=x>' }] };
+  const doc = await generateDoc({ brand: BRAND, moduleId: 'reveal' }, { providers: [fixedProvider(hostile)] });
+  await assertOneInteractiveValid(doc, 'hostile-llm');
+  const reveal = interactiveBlocks(doc)[0];
+  assert.ok(!/[<>]/.test(reveal.props.head || ''), 'angle brackets stripped from interactive copy');
+  const text = doc.blocks.find((b) => b.type === 'text');
+  if (text) {
+    assert.ok(!/[<>]/.test(text.props.heading || ''), 'angle brackets stripped from framing heading');
+    assert.ok(!/[<>]/.test(text.props.body || ''), 'angle brackets stripped from framing body');
+  }
+  assert.ok(!/<script>alert/.test(renderDoc(doc).ampHtml), 'no raw hostile markup in the rendered AMP');
+});
+
+test('generateDoc drops framing blocks that are not hero/text/footer (no doubled header/button/products)', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  // The module already renders its own header + CTA; a header/button/products in
+  // the framing arrays must be dropped, never doubled.
+  const sneaky = {
+    copy: { head: 'Take the quiz' },
+    before: [{ type: 'header', brandName: 'Groww' }, { type: 'button', label: 'Go' }],
+    after: [{ type: 'products', columns: 2, items: [{ name: 'X' }] }, { type: 'text', heading: 'Ok', body: 'Fine text.' }],
+  };
+  const doc = await generateDoc({ brand: BRAND, moduleId: 'quiz' }, { providers: [fixedProvider(sneaky)] });
+  await assertOneInteractiveValid(doc, 'sneaky-framing');
+  assert.ok(!doc.blocks.some((b) => b.type === 'header'), 'no doubled header block');
+  assert.ok(!doc.blocks.some((b) => b.type === 'button'), 'no doubled button block');
+  assert.ok(!doc.blocks.some((b) => b.type === 'products'), 'a framing products block was dropped');
+  assert.ok(doc.blocks.some((b) => b.type === 'text'), 'the valid text framing block survived');
+});
+
+test('generateDoc with a provider returning JUNK still yields a valid interactive doc (fallback)', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  for (const junk of ['not json at all', { nope: true }, { copy: 'wrong' }, 42, null, { blocks: 'wrong' }]) {
+    const doc = await generateDoc({ brand: BRAND, brief: 'weekend sale', moduleId: 'reveal' }, { providers: [fixedProvider(junk)] });
+    await assertOneInteractiveValid(doc, 'junk-' + JSON.stringify(junk));
+  }
+});
+
+test('generateDoc with ZERO providers returns the interactive fallback', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const doc = await generateDoc({ brand: BRAND, brief: 'winback', moduleId: 'poll' }, { providers: [] });
+  await assertOneInteractiveValid(doc, 'zero-providers');
+  assert.strictEqual(interactiveBlocks(doc)[0].type, 'poll');
+});
+
+test('generateDoc never throws on a THROWING provider (degrades to the interactive fallback)', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
   const thrower = { name: 'boom', call: async () => { throw new Error('provider exploded'); } };
-  const doc = await generateDoc({ brand: BRAND, brief: 'x' }, { providers: [thrower] });
-  assert.ok(validateDoc(doc).ok, 'a throwing provider degrades to a valid fallback doc');
+  const doc = await generateDoc({ brand: BRAND, brief: 'x', moduleId: 'search' }, { providers: [thrower] });
+  await assertOneInteractiveValid(doc, 'throwing-provider');
 });
 
-test('generateDoc never hangs: a provider that never resolves is raced out to the fallback', async () => {
-  const hanger = { name: 'hang', call: () => new Promise(() => {}) };
-  // withTimeout inside generateDoc resolves null past the budget; we do not
-  // wait 20s here — instead assert the CONTRACT holds with a resolved-null
-  // provider (the same value withTimeout yields), so the test is fast.
+test('generateDoc: a null (timed-out-equivalent) provider result -> the interactive fallback', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
   const nullProvider = { name: 'nullp', call: async () => null };
-  const doc = await generateDoc({ brand: BRAND }, { providers: [nullProvider] });
-  assert.ok(validateDoc(doc).ok, 'a null (timed-out-equivalent) provider result -> fallback');
-  assert.ok(hanger, 'hanger shape is valid (its real 20s race is exercised in integration, not unit)');
+  const doc = await generateDoc({ brand: BRAND, moduleId: 'report' }, { providers: [nullProvider] });
+  await assertOneInteractiveValid(doc, 'null-provider');
+  assert.strictEqual(interactiveBlocks(doc)[0].type, 'report');
 });
 
-test('generateDoc offline with env auto-detect (no keys) returns the fallback', async () => {
+test('generateDoc offline with env auto-detect (no keys) returns the interactive fallback', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
   // no opts.providers -> detectProviders() -> no keys set -> empty -> fallback
-  const doc = await generateDoc({ brand: BRAND, brief: 'monthly digest' });
-  assert.ok(validateDoc(doc).ok);
-  assert.ok(doc.blocks.length >= 3, 'a real fallback doc offline');
+  const doc = await generateDoc({ brand: BRAND, brief: 'monthly digest', moduleId: 'rating' });
+  await assertOneInteractiveValid(doc, 'env-autodetect');
 });
 
-test('generateDoc prefers the brand catalogue for a products block over LLM item names', async () => {
-  const withProducts = { blocks: [
-    { type: 'header', brandName: 'Groww' },
-    { type: 'products', columns: 3, items: [{ name: 'Made-up thing' }] },
-    { type: 'button', label: 'Go' },
-  ] };
-  const doc = await generateDoc({ brand: BRAND }, { providers: [fixedProvider(withProducts)] });
-  const products = doc.blocks.find((b) => b.type === 'products');
-  assert.ok(products, 'products block present');
-  assert.strictEqual(products.props.items[0].name, 'Index Fund Starter', 'real catalogue wins over the LLM name');
+test('generateDoc never throws on junk input entirely', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  for (const junk of [undefined, null, {}, { brand: 42 }, 'nonsense', 7]) {
+    const doc = await generateDoc(junk, { providers: [] });
+    assert.ok(validateDoc(doc).ok, 'a valid doc for generateDoc junk: ' + JSON.stringify(junk));
+    assert.strictEqual(interactiveBlocks(doc).length, 1, 'still exactly one interactive block');
+  }
+});
+
+test('generateDoc folds a brand voiceSample into the run without breaking the contract', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const brandWithVoice = { ...BRAND, voice: 'Calm, confident, jargon-free. Talk to first-time investors like a friend.' };
+  const doc = await generateDoc({ brand: brandWithVoice, brief: 'onboarding', moduleId: 'quiz' }, { providers: [fixedProvider(goodLlmResult())] });
+  await assertOneInteractiveValid(doc, 'voice-sample');
 });

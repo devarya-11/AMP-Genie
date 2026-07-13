@@ -94,14 +94,25 @@ test('pitches home lists the new pitch with its brand', async ({ page }) => {
   await expect(card).toContainText(BRAND);
 });
 
-test('examples: "your idea" generates a validated card (real engine, zero-key)', async ({ page }) => {
+test('examples: "your idea" opens the editor with a validated doc, then Save lands a card', async ({ page }) => {
   await openPitch(page);
   await page.click('#exNew');
   await expect(page.locator('#genPanel')).toBeVisible();
   await page.fill('#ideaInput', 'spin the wheel for a festive speaker discount');
   await page.click('#ideaGo');
-  await expect(page.locator('#exGrid .ex-card')).toHaveCount(1, { timeout: 60000 });
-  await expect(page.locator('#exGrid .ex-card').first()).toContainText(/PASS|valid/i);
+  // editor-first: the idea drafts a doc and opens the visual editor
+  await expect(page.locator('#view-editor')).toBeVisible({ timeout: 60000 });
+  await expect
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
+    .toContain('amp4email');
+  // it carries the interactive module (amp-bind) as a block
+  await expect
+    .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
+    .toContain('amp-bind');
+  await page.click('#edSave');
+  await expect(page.locator('#edSaved')).toContainText(/saved/i, { timeout: 30000 });
+  await page.click('#edBack');
+  await expect(page.locator('#exGrid .ex-card')).not.toHaveCount(0, { timeout: 15000 });
 });
 
 test('examples: proposals return library use-cases offline', async ({ page }) => {
@@ -131,18 +142,27 @@ test('example detail: AMP renders, share link works, download names an html file
   expect(download.suggestedFilename()).toMatch(/\.html$/);
 });
 
-test('tweak: deterministic hex creates version 2; gallery still shows one card', async ({ page }) => {
+test('tweak: an interactive example prompt-tweaks to version 2', async ({ page, request }) => {
+  // New examples are editor-first (doc), which refine in the editor. The
+  // prompt-tweak path is for interactive (KV-build) examples, so seed one
+  // directly through the still-supported endpoint.
+  const pitches = await (await request.get('/api/pitches')).json();
+  const pitchId = pitches.items.find((p) => p.title === PITCH_TITLE).id;
+  const made = await (await request.post('/api/pitches/' + pitchId + '/examples', {
+    data: { title: 'Tweakable spin', moduleId: 'spin', author: 'E2E Tester' },
+  })).json();
+  expect(made.example && made.example.id).toBeTruthy();
+
   await openPitch(page);
-  await page.locator('#exGrid .ex-card').first().click();
+  await page.locator('#exGrid .ex-card', { hasText: 'Tweakable spin' }).first().click();
   await expect(page.locator('#exDetail')).toBeVisible();
+  await expect(page.locator('#exTweakBox')).toBeVisible(); // shown for interactive examples
   await page.fill('#exTweak', '#228833 and 20% off');
   await page.click('#exTweakGo');
   await expect(page.locator('#exVersions .chip')).toHaveCount(2, { timeout: 60000 });
   await expect
     .poll(async () => (await page.locator('#exFrame').getAttribute('srcdoc')) || '', { timeout: 20000 })
     .toContain('#228833');
-  await page.click('#exBackBtn');
-  await expect(page.locator('#exGrid .ex-card')).toHaveCount(1);
 });
 
 test('assets tab: an uploaded image appears in the grid', async ({ page, request }) => {

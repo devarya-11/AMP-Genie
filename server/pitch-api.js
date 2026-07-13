@@ -39,7 +39,16 @@ const { resolveBrandColor, resolveBrandLogo } = require('./brand');
 const { createBuild } = require('./build-pipeline');
 const { applyTweak } = require('./tweak-engine');
 const { brandSlug, putBrandKit, putBuild } = require('./store');
-const { validateDoc, renderDoc } = require('./email-doc');
+const emailDoc = require('./email-doc');
+const { validateDoc, renderDoc } = emailDoc;
+// GENIE 2.0: turning a legacy interactive example into an editable doc needs
+// email-doc's interactive helpers. Required defensively (they land in the same
+// phase) so pitch-api still loads if they are absent — exampleToDocH guards on
+// interactiveDocForModule's presence and reports honestly rather than throwing.
+const interactiveDocForModule = emailDoc.interactiveDocForModule;
+const INTERACTIVE_TYPES = emailDoc.INTERACTIVE_TYPES instanceof Set
+  ? emailDoc.INTERACTIVE_TYPES
+  : new Set();
 const { generateDoc } = require('./doc-ai');
 
 // Local mirrors of the shapes repo.js/store.js enforce (kept private there —
@@ -454,6 +463,57 @@ function createPitchApi(ctx = {}) {
     return ok({ example, versions });
   }
 
+  // GET /api/examples/:id/as-doc — resolve an example TO AN EDITABLE DOC so the
+  // GENIE 2.0 editor can open ANY example, not only doc ones. Three cases:
+  //   1. A doc example (has doc_json): return the parsed doc as-is.
+  //   2. A LEGACY interactive example (module_id ∈ INTERACTIVE_TYPES, has
+  //      params_json but no doc_json): SYNTHESIZE a one-block interactive doc
+  //      from the brand row + the example's stored copy, so the editor can edit
+  //      it as a block document. { synthesized:true } flags this to the UI.
+  //   3. Anything module-less / unknown: 400 — it cannot be edited as a doc.
+  // Never throws (parseJson + interactiveDocForModule are safe).
+  async function exampleToDocH({ id } = {}) {
+    if (!ID_SHAPE.test(String(id || ''))) return bad('bad example id');
+    const example = await repo.getExample(id);
+    if (!example) return missing('no such example');
+
+    // Case 1: a real doc example round-trips straight through validateDoc.
+    const storedDoc = parseJson(example.doc_json);
+    if (storedDoc && typeof storedDoc === 'object' && !Array.isArray(storedDoc)) {
+      const v = validateDoc(storedDoc);
+      if (v.ok) return ok({ doc: v.doc });
+      // A persisted doc that no longer validates is a data problem, not a
+      // client one — surface it honestly rather than silently synthesizing.
+      return bad(v.error || 'the stored document is no longer valid');
+    }
+
+    // Case 2: a legacy interactive example -> synthesize an interactive doc.
+    const moduleId = example.module_id;
+    if (moduleId && INTERACTIVE_TYPES.has(moduleId) && typeof interactiveDocForModule === 'function') {
+      const brand = await repo.getBrandById(example.brand_id);
+      const params = parseJson(example.params_json) || {};
+      // The build pipeline stores copy at params.body.copy; be liberal about
+      // where the copy sits so a slightly older shape still yields its copy.
+      const copy = (params.body && params.body.copy && typeof params.body.copy === 'object')
+        ? params.body.copy
+        : (params.copy && typeof params.copy === 'object' ? params.copy : {});
+      const doc = interactiveDocForModule({
+        brand: brand ? {
+          name: brand.name,
+          primaryHex: brand.primary_hex || undefined,
+          logoUrl: brand.logo_url || undefined,
+        } : {},
+        moduleId,
+        copy,
+        currency: (params.body && params.body.currency) || undefined,
+      });
+      return ok({ doc, synthesized: true });
+    }
+
+    // Case 3: no doc, no editable interactive module -> not editable as a doc.
+    return bad('this example cannot be edited as a document');
+  }
+
   // Tweak = applyTweak against the example's linked build, then the accepted
   // rebuild lands as a NEW example row with parent/root lineage (the v3.1
   // contract) — the original is never mutated.
@@ -689,7 +749,7 @@ function createPitchApi(ctx = {}) {
   // generateDoc always returns a validated doc (fallback offline), so this
   // never fails once the pitch exists.
   async function aiDocH({
-    pitchId, brief, useCase, author,
+    pitchId, brief, useCase, moduleId, author,
   } = {}) {
     if (!ID_SHAPE.test(String(pitchId || ''))) return bad('bad pitch id');
     const pitch = await repo.getPitch(pitchId);
@@ -699,6 +759,13 @@ function createPitchApi(ctx = {}) {
     const products = await repo.listProducts(brand.id);
 
     const briefText = (typeof brief === 'string' && brief.trim()) ? brief : (pitch.brief || '');
+    // moduleId + useCase thread through to generateDoc so the returned starting
+    // doc carries the interactive module the editor asked for (an unknown/absent
+    // id lets doc-ai route it from the brief). Both are shape-guarded here —
+    // generateDoc re-validates the module id, so a junk value simply routes.
+    const reqModuleId = (typeof moduleId === 'string' && moduleId.trim())
+      ? cleanStr(moduleId).slice(0, MODULE_ID_MAX)
+      : undefined;
     const doc = await generateDoc({
       brand: {
         name: brand.name,
@@ -712,7 +779,8 @@ function createPitchApi(ctx = {}) {
       },
       brief: briefText,
       useCase,
-    }, { providers: await providers() });
+      moduleId: reqModuleId,
+    }, { providers: await providers(), moduleId: reqModuleId });
     // author is accepted for wire-symmetry with the other doc handlers (the
     // draft is unsaved, so it is not logged) — referenced to satisfy lint.
     void author;
@@ -741,6 +809,7 @@ function createPitchApi(ctx = {}) {
     updatePitchH: guarded(updatePitchH),
     createExampleH: guarded(createExampleH),
     getExampleH: guarded(getExampleH),
+    exampleToDocH: guarded(exampleToDocH),
     tweakExampleH: guarded(tweakExampleH),
     renderDocH: guarded(renderDocH),
     createDocExampleH: guarded(createDocExampleH),

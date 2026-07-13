@@ -12,7 +12,7 @@ export async function onRequestPost({ request, params, env }) {
   applyEnv(env); // provider API keys reach doc-ai via process.env
   const b = await readJson(request);
   const out = await getPitchApi(env).aiDocH({
-    pitchId: params.id, brief: b.brief, useCase: b.useCase, author: b.author,
+    pitchId: params.id, brief: b.brief, useCase: b.useCase, moduleId: b.moduleId, author: b.author,
   });
   return json(out.json, out.status);
 }

@@ -14,7 +14,13 @@ const { createPitchApi } = require('../server/pitch-api');
 const { bindLocalRepo } = require('../server/repo-supabase');
 const { createLocalDb, MIGRATIONS } = require('../server/db');
 const { validate } = require('../server/validator');
-const { validateDoc } = require('../server/email-doc');
+const {
+  validateDoc, renderDoc, INTERACTIVE_TYPES,
+} = require('../server/email-doc');
+
+// The interactive contract lands in the same phase; guard so the legacy-
+// synthesis assertions are skipped (not failed) if it has not landed yet.
+const HAS_INTERACTIVE = INTERACTIVE_TYPES instanceof Set && INTERACTIVE_TYPES.size === 8;
 
 // The in-memory KV stand-in from tests/pitch-api.test.js: Map-backed so we can
 // assert which build:<id> share records were written.
@@ -244,7 +250,10 @@ test('aiDocH: returns a valid doc offline (fallback), NOT saved', async () => {
   assert.strictEqual(res.status, 200);
   assert.ok(res.json.doc && Array.isArray(res.json.doc.blocks), 'returns a doc');
   assert.ok(validateDoc(res.json.doc).ok, 'the doc is valid');
-  assert.ok(res.json.doc.blocks.some((b) => b.type === 'header'), 'a real fallback doc');
+  // The starting doc always carries the interactive module (that IS the
+  // email); interactiveDocForModule bakes the brand header/footer into the
+  // module body, so there is no separate 'header' block to assert on.
+  assert.ok(res.json.doc.blocks.some((b) => INTERACTIVE_TYPES.has(b.type)), 'the doc carries the interactive module');
   assert.strictEqual(res.json.doc.brand.name, 'Groww', 'the doc is seeded from the pitch brand');
   // NOT saved: the pitch has no examples yet
   const gallery = await repo.latestExamplesPerRoot(pitchId);

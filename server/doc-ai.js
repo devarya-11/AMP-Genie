@@ -21,10 +21,50 @@
 // Runtime-agnostic by charter: fetch/crypto only, no fs/path/process at load,
 // so this bundles for Workers untouched. CommonJS like the rest of server/*.
 
-const { validateDoc, BLOCK_TYPES } = require('./email-doc');
+const emailDoc = require('./email-doc');
+const { validateDoc, BLOCK_TYPES } = emailDoc;
+const { routeBrief } = require('./brief-router');
 const {
   callClaude, callGemini, callGroq, callOllama, withTimeout,
 } = require('./llm-providers');
+
+// The GENIE 2.0 interactive-doc contract from server/email-doc.js. Another
+// agent added these three exports (interactiveDocForModule / fieldsForModule /
+// INTERACTIVE_TYPES) in the same phase; they are REQUIRED defensively so this
+// module still loads (and generateDoc still degrades to the static fallback)
+// if it is imported before those exports land. Each call site guards on the
+// function's presence rather than assuming it — the never-throw charter.
+const interactiveDocForModule = emailDoc.interactiveDocForModule;
+const fieldsForModule = emailDoc.fieldsForModule;
+const INTERACTIVE_TYPES = emailDoc.INTERACTIVE_TYPES instanceof Set
+  ? emailDoc.INTERACTIVE_TYPES
+  : new Set();
+
+// The module a brief with no interactive signal defaults to. 'quiz' when the
+// brief/use-case reads as engagement (a two-way interaction), else 'reveal'
+// (the lightest, most universal tap-to-reveal). Kept tiny + deterministic so
+// the floor is predictable; the LLM never picks the module, only the copy.
+const ENGAGEMENT_RE = /\b(engage|engagement|interact|quiz|game|gamif|play|fun|personal(?:ise|ize|ity)|match|which|discover|find your)\b/i;
+const DEFAULT_INTERACTIVE_ID = 'reveal';
+
+// Resolve which interactive module the doc carries: an explicit id (opts or
+// arg) wins; else the deterministic brief router (server/brief-router.js);
+// else the engagement heuristic's quiz-or-reveal default. Always returns a
+// real interactive id from INTERACTIVE_TYPES so the doc can never carry a
+// module id the renderer does not know.
+function resolveModuleId({ moduleId, brief, useCase } = {}) {
+  const explicit = typeof moduleId === 'string' ? moduleId.trim() : '';
+  if (explicit && INTERACTIVE_TYPES.has(explicit)) return explicit;
+  const routed = routeBrief(brief, undefined);
+  if (routed && routed.moduleId && INTERACTIVE_TYPES.has(routed.moduleId)) {
+    return routed.moduleId;
+  }
+  const hay = `${cleanStr(useCase, 200)} ${cleanStr(brief, 400)}`;
+  if (ENGAGEMENT_RE.test(hay) && INTERACTIVE_TYPES.has('quiz')) return 'quiz';
+  return INTERACTIVE_TYPES.has(DEFAULT_INTERACTIVE_ID)
+    ? DEFAULT_INTERACTIVE_ID
+    : (INTERACTIVE_TYPES.size ? [...INTERACTIVE_TYPES][0] : DEFAULT_INTERACTIVE_ID);
+}
 
 // Same models + opt-in gates as brief-content / usecase-engine, restated here
 // (those modules keep them private). Read lazily inside detectProviders so
@@ -53,8 +93,6 @@ const CAPS = {
   itemName: 60,
   footer: 300,
 };
-
-const MAX_LLM_BLOCKS = 12; // a sane email; validateDoc caps at 40 regardless
 
 /* ------------------------------------------------------------------ *
  * small coercers — mirror email-doc.cleanStr / usecase-engine.cleanString
@@ -143,44 +181,30 @@ function normItems(items) {
 }
 
 /* ------------------------------------------------------------------ *
- * the LLM JSON schema — a compact union of block props
+ * the LLM JSON schema — the interactive module's copy + optional framing
  * ------------------------------------------------------------------ */
 
-// ONE schema for every provider: a doc envelope whose blocks are the UNION of
-// every block type's props (the model picks a `type` from BLOCK_TYPES and
-// fills the props that type needs). additionalProperties:false keeps a
-// provider's structured-output honest; the local mapper + validateDoc enforce
-// the real per-type shape regardless of what the model actually emits — the
-// same defense-in-depth as usecase-engine's planUnionSchema.
-function docSchema() {
-  const item = {
+// The INTERACTIVE schema (GENIE 2.0): the doc is ALWAYS one routed interactive
+// module (its copy fields) plus 0-2 optional PLAIN-TEXT static blocks around it
+// (a hero line / a text intro / a footer). The model fills copy for the module
+// it is TOLD to use (it never picks the module) and may propose a couple of
+// framing blocks; the local merge + validateDoc enforce the real shape. `copy`
+// is an open string map (the module's fieldsForModule keys), kept honest by the
+// local merge which only reads the keys that module actually declares.
+function interactiveDocSchema(fields) {
+  const copyProps = {};
+  for (const f of (Array.isArray(fields) ? fields : [])) {
+    copyProps[f] = { type: 'string', maxLength: CAPS.body };
+  }
+  const staticBlock = {
     type: 'object',
     properties: {
-      name: { type: 'string', maxLength: CAPS.itemName },
-      price: { type: 'number' },
-    },
-    required: ['name'],
-    additionalProperties: false,
-  };
-  const block = {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: BLOCK_TYPES.slice() },
-      // header / footer
-      brandName: { type: 'string', maxLength: CAPS.brandName },
-      // text
+      type: { type: 'string', enum: ['hero', 'text', 'footer'] },
       heading: { type: 'string', maxLength: CAPS.heading },
       body: { type: 'string', maxLength: CAPS.body },
-      // hero / image
       alt: { type: 'string', maxLength: CAPS.alt },
-      // button
-      label: { type: 'string', maxLength: CAPS.label },
-      align: { type: 'string', enum: ['left', 'center', 'right'] },
-      // products
-      columns: { type: 'integer', minimum: 1, maximum: 3 },
-      items: { type: 'array', maxItems: 9, items: item },
-      // footer
       text: { type: 'string', maxLength: CAPS.footer },
+      brandName: { type: 'string', maxLength: CAPS.brandName },
     },
     required: ['type'],
     additionalProperties: false,
@@ -188,17 +212,53 @@ function docSchema() {
   return {
     type: 'object',
     properties: {
-      blocks: {
-        type: 'array', minItems: 1, maxItems: MAX_LLM_BLOCKS, items: block,
+      copy: {
+        type: 'object',
+        properties: copyProps,
+        additionalProperties: false,
       },
+      before: { type: 'array', maxItems: 2, items: staticBlock },
+      after: { type: 'array', maxItems: 2, items: staticBlock },
     },
-    required: ['blocks'],
+    required: ['copy'],
     additionalProperties: false,
   };
 }
 
+// The interactive-doc prompt: tell the model which module it is filling, list
+// exactly the copy fields it may set, and invite 0-2 plain-text framing blocks.
+// The module choice is OURS (routed deterministically); the model only writes
+// copy. Same plain-text-only / no-markup discipline the whole module keeps.
+function buildInteractivePrompt({
+  brand, brief, useCase, moduleId, fields,
+}) {
+  const uc = cleanStr(useCase, 160);
+  const fieldList = (Array.isArray(fields) ? fields : []).join(', ') || '(none)';
+  const lines = [
+    `You are a lifecycle-marketing designer writing the COPY for an interactive marketing email for the brand "${brand.name}".`,
+    `The email's centrepiece is a "${moduleId}" interactive module. You do NOT choose the module — you write its copy.`,
+    '',
+    `Fill these copy fields for the "${moduleId}" module (write real, specific marketing copy for each; omit a field only if it truly does not apply): ${fieldList}.`,
+    'You MAY also propose up to two short PLAIN-TEXT framing blocks before and/or after the module — a hero line (alt), a text intro (heading + body), or a footer (text). Keep them optional and brief; the module already carries the brand header and CTA.',
+    '',
+    'Rules:',
+    '- Output PLAIN TEXT only in every field. No HTML, no markdown, no links, no angle brackets.',
+    '- Write realistic, specific copy grounded in the brand and brief. NEVER lorem ipsum or placeholder text.',
+    '- The `copy` object is required; `before` and `after` are optional arrays of framing blocks.',
+    '',
+  ];
+  if (brand.voice) {
+    lines.push('Brand voice — match it, never copy sentences verbatim:', '"""', brand.voice.slice(0, 400), '"""', '');
+  }
+  if (uc) lines.push(`Use-case / angle for this email: ${uc}`, '');
+  lines.push(...briefLines(brief));
+  lines.push(...itemLines(brand.items));
+  lines.push(`Write the "${moduleId}" module's copy now for "${brand.name}".`);
+  return lines.join('\n');
+}
+
 /* ------------------------------------------------------------------ *
- * the prompt
+ * prompt helpers (shared by buildInteractivePrompt)
  * ------------------------------------------------------------------ */
 
 function briefLines(brief) {
@@ -210,38 +270,6 @@ function itemLines(items) {
   if (!items.length) return [];
   const names = items.map((it) => it.name).slice(0, 8).join(', ');
   return [`Products/items to feature where relevant: ${names}`, ''];
-}
-
-function buildPrompt({ brand, brief, useCase }) {
-  const uc = cleanStr(useCase, 160);
-  const lines = [
-    `You are a lifecycle-marketing designer composing ONE marketing email for the brand "${brand.name}" as an ORDERED LIST OF BLOCKS.`,
-    '',
-    `Available block types (pick and order them to tell the email's story): ${BLOCK_TYPES.join(', ')}.`,
-    '- header: the brand bar (brandName).',
-    '- hero: a large banner image slot (alt text only — the editor supplies the image).',
-    '- text: a headline (heading) and a paragraph (body) of real marketing copy.',
-    '- image: an inline image slot (alt).',
-    '- button: a call-to-action (label, align).',
-    '- products: a grid of items (columns 1-3, items: [{name, price}]).',
-    '- divider: a thin visual rule between sections.',
-    '- footer: the closing line (brandName, text).',
-    '',
-    'Rules:',
-    '- Output PLAIN TEXT only in every field. No HTML, no markdown, no links, no angle brackets.',
-    '- Write realistic, specific marketing copy grounded in the brand and brief. NEVER lorem ipsum or placeholder text.',
-    '- A good email usually opens with a header, has a hero or a strong text block, a products or text section, one clear button, and a footer.',
-    '- Keep it to a handful of blocks; every block must earn its place.',
-    '',
-  ];
-  if (brand.voice) {
-    lines.push('Brand voice — match it, never copy sentences verbatim:', '"""', brand.voice.slice(0, 400), '"""', '');
-  }
-  if (uc) lines.push(`Use-case / angle for this email: ${uc}`, '');
-  lines.push(...briefLines(brief));
-  lines.push(...itemLines(brand.items));
-  lines.push(`Compose the email now as blocks for "${brand.name}".`);
-  return lines.join('\n');
 }
 
 /* ------------------------------------------------------------------ *
@@ -319,47 +347,138 @@ function assembleDoc({ brand, currency, blocks }) {
 }
 
 /* ------------------------------------------------------------------ *
+ * interactive doc assembly (GENIE 2.0): every doc carries ONE interactive block
+ * ------------------------------------------------------------------ */
+
+// The deterministic interactive FLOOR: a validated block doc whose single
+// interactive block is the routed module, its `head` seeded from the brief /
+// use-case so the floor is never generic. This is what generateDoc ALWAYS
+// returns if the LLM tier fails, and what buildFallbackDoc returns as its
+// zero-key floor. Guards on interactiveDocForModule's presence (the pinned
+// email-doc export) — if it is missing at import time, degrade to an empty
+// valid doc rather than throw (the orchestrator's combined suite runs once the
+// export lands; a standalone import must still not crash).
+function interactiveBase({
+  brand, moduleId, brief, useCase, currency,
+}) {
+  const head = headlineFrom({ brief, useCase, brandName: brand.name });
+  if (typeof interactiveDocForModule !== 'function') {
+    // Defensive floor: email-doc's interactive export has not landed yet.
+    const v = validateDoc(assembleDoc({ brand, currency, blocks: [] }));
+    return v.ok ? v.doc : { version: 1, blocks: [] };
+  }
+  return interactiveDocForModule({
+    brand: {
+      name: brand.name,
+      primaryHex: brand.primaryHex,
+      logoUrl: brand.logoUrl,
+    },
+    moduleId,
+    copy: head ? { head } : {},
+    currency,
+  });
+}
+
+// Map ONE raw LLM framing block — ONLY hero / text / footer are allowed around
+// the interactive module (a second header/button/products would double up the
+// module's own header + CTA). Returns null for anything else. Reuses mapBlock's
+// per-type scrubbing so the two stay in lock-step.
+const FRAMING_TYPES = new Set(['hero', 'text', 'footer']);
+function mapFramingBlock(raw, brand) {
+  if (!raw || typeof raw !== 'object' || !FRAMING_TYPES.has(raw.type)) return null;
+  return mapBlock(raw, brand);
+}
+
+// Merge an LLM interactive result onto the base interactive doc: overlay the
+// model's copy onto the interactive block's props (only the module's declared
+// fields survive validateDoc), and prepend/append any valid framing blocks.
+// Then re-validate — anything invalid is dropped. Returns a validated doc that
+// STILL contains exactly one interactive block, or null if nothing usable
+// survived (caller falls back to the base).
+function mergeInteractive({
+  base, raw, brand, moduleId, currency,
+}) {
+  let obj = raw;
+  if (typeof obj === 'string') {
+    try { obj = JSON.parse(obj); } catch { return null; }
+  }
+  if (!obj || typeof obj !== 'object') return null;
+
+  // The interactive block from the base doc (its props are the deterministic
+  // floor's copy, e.g. { head }); overlay the LLM copy for this module's fields.
+  const baseBlock = (base.blocks || []).find((b) => INTERACTIVE_TYPES.has(b.type))
+    || { type: moduleId, props: {} };
+  const fields = (typeof fieldsForModule === 'function') ? fieldsForModule(moduleId) : [];
+  const llmCopy = (obj.copy && typeof obj.copy === 'object' && !Array.isArray(obj.copy)) ? obj.copy : {};
+  const mergedProps = { ...(baseBlock.props || {}) };
+  for (const key of fields) {
+    const v = cleanStr(llmCopy[key], CAPS.body);
+    if (v) mergedProps[key] = v;
+  }
+  const interactiveBlock = { type: moduleId, props: mergedProps };
+
+  const before = (Array.isArray(obj.before) ? obj.before : [])
+    .map((rb) => mapFramingBlock(rb, brand)).filter(Boolean).slice(0, 2);
+  const after = (Array.isArray(obj.after) ? obj.after : [])
+    .map((rb) => mapFramingBlock(rb, brand)).filter(Boolean).slice(0, 2);
+
+  const blocks = [...before, interactiveBlock, ...after];
+  const v = validateDoc(assembleDoc({ brand, currency, blocks }));
+  // Keep the merged doc only if it still holds the interactive block after the
+  // trust boundary (validateDoc keeps at most one interactive block; a doc that
+  // somehow lost it is not a valid interactive doc — fall back to the base).
+  if (!v.ok) return null;
+  const hasInteractive = (v.doc.blocks || []).some((b) => INTERACTIVE_TYPES.has(b.type));
+  return hasInteractive ? v.doc : null;
+}
+
+/* ------------------------------------------------------------------ *
  * buildFallbackDoc — the deterministic floor
  * ------------------------------------------------------------------ */
 
-// A sensible, BRAND-SPECIFIC real doc for the zero-key / LLM-fail / empty
-// path: header + hero (only when a real logo/brand is present, mirroring
-// generate's hero-if-logo) + a text block whose headline is derived from the
-// brief + a products block when the brand/brief carries items + a button +
-// footer. exampleDocForBrand is the ultimate floor (validateDoc guarantees a
-// valid doc even if every heuristic below produced nothing).
+// A sensible, BRAND-SPECIFIC real doc for the zero-key / LLM-fail / empty path.
+// GENIE 2.0 rule: EVERY doc includes exactly ONE interactive block, so the
+// floor is the routed interactive module (its `head` seeded from the brief),
+// optionally framed by a text intro and — when the brand/brief carries items —
+// a products grid. The interactive module renders its own brand header, CTA and
+// footer inside its body, so the fallback deliberately does NOT add a static
+// header/button/footer (that would double them). interactiveBase (via
+// email-doc's interactiveDocForModule) is the guaranteed valid floor even if
+// every framing heuristic below produced nothing.
 function buildFallbackDoc(input) {
   const {
-    brand, brief, useCase, currency,
+    brand, brief, useCase, currency, moduleId,
   } = (input && typeof input === 'object') ? input : {};
   const b = normBrand(brand);
   const cur = coerceCurrencyLike(currency);
-  const headline = headlineFrom({ brief, useCase, brandName: b.name });
+  const modId = resolveModuleId({ moduleId, brief, useCase });
+
+  const base = interactiveBase({
+    brand: b, moduleId: modId, brief, useCase, currency: cur,
+  });
+  const interactiveBlock = (base.blocks || []).find((bl) => INTERACTIVE_TYPES.has(bl.type));
+  // If the interactive export has not landed, base carries no interactive block;
+  // return it (an empty valid doc) rather than fabricating an unrenderable one.
+  if (!interactiveBlock) return base;
+
   const body = bodyFrom({ brief, brandName: b.name, hasItems: b.items.length > 0 });
-
-  const blocks = [{ type: 'header', props: { brandName: b.name } }];
-  // hero-if-logo: a real logo (or at least a real brand identity) earns the
-  // banner; without one the email opens straight into copy, same call generate
-  // makes about a hero it would only be able to placeholder.
-  if (b.logoUrl) blocks.push({ type: 'hero', props: { alt: `${b.name} hero` } });
-  blocks.push({ type: 'text', props: { heading: headline, body } });
+  const framing = [];
+  // A short text intro above the module when the brief gave us real body copy.
+  if (body) framing.push({ type: 'text', props: { heading: '', body } });
+  // The brand's real catalogue, when it has one, rides a products grid below.
+  const after = [];
   if (b.items.length) {
-    blocks.push({ type: 'products', props: { columns: b.items.length === 1 ? 1 : 2, items: b.items } });
+    after.push({ type: 'products', props: { columns: b.items.length === 1 ? 1 : 2, items: b.items } });
   }
-  blocks.push({
-    type: 'button',
-    props: { label: b.items.length ? 'Shop now' : 'Learn more', href: b.site || undefined, align: 'center' },
-  });
-  blocks.push({
-    type: 'footer',
-    props: { brandName: b.name, text: 'You are receiving this because you opted in to updates.' },
-  });
 
+  const blocks = [...framing, interactiveBlock, ...after];
   const v = validateDoc(assembleDoc({ brand: b, currency: cur, blocks }));
   // validateDoc only fails on a fundamentally unusable envelope, which the
-  // assembled shape above never is — but honour the never-throw contract: an
-  // empty valid doc beats a throw. (Unreachable in practice; a safety net.)
-  return v.ok ? v.doc : validateDoc({ brand: { name: b.name }, blocks: [] }).doc;
+  // assembled shape above never is — but honour the never-throw contract, and
+  // ALWAYS keep the interactive block: the base doc (which is already validated
+  // and carries the module) is the floor beneath the floor.
+  if (v.ok && (v.doc.blocks || []).some((bl) => INTERACTIVE_TYPES.has(bl.type))) return v.doc;
+  return base;
 }
 
 // Only currencies email-doc/generate know survive; anything else is dropped so
@@ -458,24 +577,52 @@ function detectProviders() {
  * generateDoc — the public entry
  * ------------------------------------------------------------------ */
 
-// generateDoc({ brand, brief, useCase, currency }, { providers }) -> a
-// VALIDATED doc, ALWAYS. Never throws, never hangs past TIMEOUT_MS. The FIRST
-// configured provider (opts.providers descriptors, else env auto-detect in
-// usecase-engine's order) drafts the doc; its output is mapped + validated;
-// any failure/empty result degrades to buildFallbackDoc.
+// generateDoc({ brand, brief, useCase, moduleId, currency }, { providers }) ->
+// a VALIDATED doc that ALWAYS carries exactly ONE interactive block. Never
+// throws, never hangs past TIMEOUT_MS.
+//
+// The module is resolved FIRST (explicit id > brief router > engagement
+// default) and NEVER chosen by the LLM. interactiveBase is the deterministic
+// floor — a validated doc wrapping that module — and is ALWAYS what we return
+// if the LLM tier fails. When a provider is configured, the FIRST one fills the
+// module's copy fields (and may propose 1-2 plain-text framing blocks); its
+// output is merged onto the base and re-validated, so anything invalid is
+// dropped. If the merged doc fails to validate, loses the interactive block, or
+// the model returned nothing usable, the base is returned unchanged.
 async function generateDoc(input = {}, opts = {}) {
+  const inp = (input && typeof input === 'object') ? input : {};
   const {
     brand, brief, useCase, currency,
-  } = (input && typeof input === 'object') ? input : {};
+  } = inp;
+  const options = (opts && typeof opts === 'object') ? opts : {};
   const b = normBrand(brand);
   const cur = coerceCurrencyLike(currency);
+  // Explicit id from opts wins over the arg; both beat the router/default.
+  const modId = resolveModuleId({
+    moduleId: options.moduleId || inp.moduleId,
+    brief,
+    useCase,
+  });
+
+  // The deterministic floor: ALWAYS a valid interactive doc, returned as-is if
+  // anything below fails.
+  const base = interactiveBase({
+    brand: b, moduleId: modId, brief, useCase, currency: cur,
+  });
 
   try {
-    const providers = Array.isArray(opts.providers) ? opts.providers : detectProviders();
+    const providers = Array.isArray(options.providers) ? options.providers : detectProviders();
     const provider = providers.find((p) => p && typeof p.call === 'function');
-    if (provider) {
-      const schema = docSchema();
-      const prompt = buildPrompt({ brand: b, brief, useCase });
+    // Only run the LLM tier when the base actually carries the interactive
+    // block (i.e. email-doc's interactive export is present); otherwise there
+    // is nothing to enrich and the fallback path owns it.
+    const hasInteractive = (base.blocks || []).some((bl) => INTERACTIVE_TYPES.has(bl.type));
+    if (provider && hasInteractive) {
+      const fields = (typeof fieldsForModule === 'function') ? fieldsForModule(modId) : [];
+      const schema = interactiveDocSchema(fields);
+      const prompt = buildInteractivePrompt({
+        brand: b, brief, useCase, moduleId: modId, fields,
+      });
       // Race the provider ourselves too (defense in depth, exactly as
       // composeContent does): a provider that forgets its own timeout can
       // never keep generateDoc pending past the budget.
@@ -483,44 +630,23 @@ async function generateDoc(input = {}, opts = {}) {
         () => Promise.resolve().then(() => provider.call(prompt, schema, TIMEOUT_MS)),
         TIMEOUT_MS,
       );
-      const doc = docFromRaw(raw, b, cur);
-      // A doc that survived to at least a header + one content block is a real
-      // result; anything thinner (the model returned junk/markup and every
-      // block was dropped by validateDoc) falls through to the fallback.
-      if (doc && isSubstantial(doc)) return doc;
+      const merged = mergeInteractive({
+        base, raw, brand: b, moduleId: modId, currency: cur,
+      });
+      // merged is null unless it validated AND still holds the interactive block.
+      if (merged) return merged;
     }
   } catch (e) {
     // Nothing throws into the caller: a broken provider is a fallback, not a
     // 500. Logged so a misbehaving provider is visible.
     console.error('[doc-ai] generateDoc provider failed:', e && e.message);
   }
+  // The base is already a validated interactive doc; buildFallbackDoc would add
+  // brief-seeded framing, so prefer it (it also guards the no-export case) but
+  // keep the same resolved module so the floor is consistent with the base.
   return buildFallbackDoc({
-    brand: b, brief, useCase, currency: cur,
+    brand: b, brief, useCase, currency: cur, moduleId: modId,
   });
-}
-
-// Parse (string or object), map each block, assemble + validateDoc. Returns a
-// validated doc or null (nothing usable). Never throws.
-function docFromRaw(raw, brand, currency) {
-  let obj = raw;
-  if (typeof obj === 'string') {
-    try { obj = JSON.parse(obj); } catch { return null; }
-  }
-  if (!obj || typeof obj !== 'object') return null;
-  const rawBlocks = Array.isArray(obj.blocks) ? obj.blocks : [];
-  const blocks = rawBlocks.map((rb) => mapBlock(rb, brand)).filter(Boolean).slice(0, MAX_LLM_BLOCKS);
-  if (!blocks.length) return null;
-  const v = validateDoc(assembleDoc({ brand, currency, blocks }));
-  return v.ok ? v.doc : null;
-}
-
-// "Real result" gate: a header alone (or a lone divider) is not an email. Ask
-// for at least one substantive content block — text/hero/products/image/button —
-// so a degenerate LLM response reliably falls back to the seeded doc.
-function isSubstantial(doc) {
-  const substantive = new Set(['text', 'hero', 'products', 'image', 'button']);
-  const blocks = (doc && Array.isArray(doc.blocks)) ? doc.blocks : [];
-  return blocks.some((bl) => substantive.has(bl.type));
 }
 
 module.exports = { generateDoc, buildFallbackDoc };

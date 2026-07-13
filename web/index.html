@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -245,7 +245,7 @@
             <button id="exEditDoc" class="ghost sm hidden" type="button" title="Open this email in the visual block editor"><svg class="ic"><use href="#i-sliders"/></svg> Edit in editor</button>
             <span id="exMsg" class="copy-msg" aria-live="polite"></span>
           </div>
-          <div class="tweak">
+          <div class="tweak" id="exTweakBox">
             <label class="fieldlabel" for="exTweak">Refine with a prompt <span class="hint">parameters only, revalidated, every version kept</span></label>
             <div class="dispatch-row">
               <input id="exTweak" type="text" placeholder="e.g. make it 25% off &middot; switch to the quiz &middot; #112233 &middot; more premium">
@@ -367,8 +367,8 @@
       <aside class="ed-left card">
         <div class="gen-hdr"><svg class="ic accent"><use href="#i-plus"/></svg> Add block</div>
         <div id="edPalette" class="ed-palette"></div>
-        <div class="gen-hdr" style="margin-top:20px"><svg class="ic accent"><use href="#i-folder"/></svg> Assets <span class="hint">drag onto an image block</span></div>
-        <div id="edDrawer" class="ed-drawer"></div>
+        <div class="gen-hdr" style="margin-top:20px"><svg class="ic accent"><use href="#i-folder"/></svg> Asset library <span class="hint">drag onto a block, or Choose from library</span></div>
+        <div id="edLibrary" class="ed-library"><div id="edDrawer" class="ed-drawer"></div></div>
       </aside>
 
       <!-- CENTER: block list -->
@@ -432,6 +432,6 @@
   </main>
 </div>
 
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
