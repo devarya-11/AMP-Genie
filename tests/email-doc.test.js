@@ -10,8 +10,12 @@ delete process.env.OLLAMA_BASE_URL;
 
 const {
   validateDoc, renderDoc, docToAmp, exampleDocForBrand, BLOCK_TYPES,
+  interactiveDocForModule, fieldsForModule, INTERACTIVE_TYPES,
 } = require('../server/email-doc');
 const { validate } = require('../server/validator');
+
+// The eight interactive module ids — the interactive block `type`s.
+const INTERACTIVE_IDS = ['reveal', 'search', 'quiz', 'rating', 'spin', 'poll', 'calc', 'report'];
 
 // A doc exercising EVERY supported static block type.
 function everyBlockDoc(overrides = {}) {
@@ -65,11 +69,15 @@ test('a doc using EVERY block type renders and passes the validator', async () =
   assert.strictEqual(v.errorCount, 0);
 });
 
-test('BLOCK_TYPES lists exactly the eight supported static types and each renders valid alone', async () => {
-  assert.deepStrictEqual(
-    [...BLOCK_TYPES].sort(),
-    ['button', 'divider', 'footer', 'header', 'hero', 'image', 'products', 'text'].sort(),
-  );
+const STATIC_TYPES = ['button', 'divider', 'footer', 'header', 'hero', 'image', 'products', 'text'];
+
+test('BLOCK_TYPES registers the eight static types plus the eight interactive modules; each renders valid alone', async () => {
+  // The static layout blocks are all present...
+  for (const t of STATIC_TYPES) assert.ok(BLOCK_TYPES.includes(t), `static type ${t} is registered`);
+  // ...and so are the eight interactive module ids (so the palette lists them).
+  for (const t of INTERACTIVE_IDS) assert.ok(BLOCK_TYPES.includes(t), `interactive type ${t} is registered`);
+  assert.strictEqual(BLOCK_TYPES.length, STATIC_TYPES.length + INTERACTIVE_IDS.length, 'no extra/duplicate types');
+  // Every registered type renders a validator-clean doc when it is the sole block.
   for (const type of BLOCK_TYPES) {
     const doc = { version: 1, brand: { name: 'Solo', primaryHex: '#0aa' }, blocks: [{ id: 't', type, props: {} }] };
     const { ampHtml } = docToAmp(doc);
@@ -297,4 +305,234 @@ test('renderDoc emits warnings for each placeholdered product image but still va
   assert.ok(ampHtml.includes('https://placehold.co/300x200/'), 'placeholder tiles are used');
   const v = await validate(ampHtml);
   assert.strictEqual(v.pass, true);
+});
+
+/* ================================================================== *
+ * INTERACTIVE BLOCKS (Genie 2.0 phase 4): the 8 interactive modules
+ * as editable blocks composed into the block document.
+ * ================================================================== */
+
+function interactiveBlockDoc(type, props = {}, overrides = {}) {
+  return {
+    version: 1,
+    brand: { name: 'Acme', primaryHex: '#4f46e5' },
+    currency: 'INR',
+    blocks: [{ id: 'ib_' + type, type, props }],
+    ...overrides,
+  };
+}
+
+// ---- each interactive block ALONE passes the REAL validator ------------------
+
+test('each of the eight interactive blocks renders alone and PASSES the real validator (zero errors)', async () => {
+  for (const type of INTERACTIVE_IDS) {
+    const { ampHtml } = docToAmp(interactiveBlockDoc(type));
+    const v = await validate(ampHtml);
+    assert.strictEqual(v.pass, true, `${type} interactive block failed: ${JSON.stringify(v.errors, null, 2)}`);
+    assert.strictEqual(v.errorCount, 0, `${type} has zero hard errors`);
+    // it is genuinely interactive: carries amp-bind + an amp-state + a handler.
+    assert.ok(/amp-bind/.test(ampHtml), `${type} pulls in amp-bind`);
+    assert.ok(/<amp-state/.test(ampHtml), `${type} declares an amp-state`);
+  }
+});
+
+test('an interactive block carries exactly ONE <style amp-custom>, one v0.js and one amp-bind script', () => {
+  for (const type of INTERACTIVE_IDS) {
+    const { ampHtml } = docToAmp(interactiveBlockDoc(type));
+    assert.strictEqual((ampHtml.match(/<style amp-custom>/g) || []).length, 1, `${type}: one amp-custom`);
+    assert.strictEqual((ampHtml.match(/cdn\.ampproject\.org\/v0\.js/g) || []).length, 1, `${type}: one v0.js`);
+    assert.strictEqual((ampHtml.match(/amp-bind-0\.1\.js/g) || []).length, 1, `${type}: one amp-bind`);
+  }
+});
+
+test('only the search interactive block pulls in amp-form; the other seven do not', () => {
+  for (const type of INTERACTIVE_IDS) {
+    const { ampHtml } = docToAmp(interactiveBlockDoc(type));
+    const forms = (ampHtml.match(/amp-form-0\.1\.js/g) || []).length;
+    if (type === 'search') assert.strictEqual(forms, 1, 'search carries amp-form exactly once');
+    else assert.strictEqual(forms, 0, `${type} carries no amp-form`);
+  }
+});
+
+// ---- an interactive block composed with static blocks ------------------------
+
+test('a quiz composed with static header+text+footer renders, passes, and has one amp-custom/v0.js/amp-bind', async () => {
+  const doc = {
+    version: 1, brand: { name: 'Zomato', primaryHex: '#e23744' }, currency: 'INR',
+    blocks: [
+      { id: 'h', type: 'header', props: { brandName: 'Zomato', link: 'https://zomato.com' } },
+      { id: 't', type: 'text', props: { heading: 'Take our quiz', body: 'Find your match in ten seconds.' } },
+      { id: 'q', type: 'quiz', props: { head: 'Find your match', question: 'What are you in the mood for?' } },
+      { id: 'f', type: 'footer', props: { brandName: 'Zomato', text: 'You opted in.' } },
+    ],
+  };
+  const { ampHtml, warnings } = renderDoc(doc);
+  const v = await validate(ampHtml);
+  assert.strictEqual(v.pass, true, `composed quiz doc failed: ${JSON.stringify(v.errors, null, 2)}`);
+  assert.strictEqual((ampHtml.match(/<style amp-custom>/g) || []).length, 1, 'exactly one amp-custom');
+  assert.strictEqual((ampHtml.match(/cdn\.ampproject\.org\/v0\.js/g) || []).length, 1, 'exactly one v0.js');
+  assert.strictEqual((ampHtml.match(/amp-bind-0\.1\.js/g) || []).length, 1, 'exactly one amp-bind');
+  assert.strictEqual((ampHtml.match(/amp-form-0\.1\.js/g) || []).length, 0, 'no amp-form (quiz needs none)');
+  // the static text block still rendered alongside the interactive one
+  assert.ok(ampHtml.includes('Take our quiz'), 'the static text heading is present');
+  assert.ok(Array.isArray(warnings), 'warnings is an array');
+  // amp-custom still under the 75KB cap with a full interactive module + statics
+  const cssMatch = ampHtml.match(/<style amp-custom>([\s\S]*?)<\/style>/);
+  assert.ok(Buffer.byteLength(cssMatch[1], 'utf8') < 75 * 1024, 'merged amp-custom under 75KB');
+});
+
+test('a search block composed with static blocks carries the amp-form script exactly once', async () => {
+  const doc = {
+    version: 1, brand: { name: 'Acme', primaryHex: '#0a7' }, currency: 'USD',
+    blocks: [
+      { id: 'h', type: 'header', props: { brandName: 'Acme' } },
+      { id: 's', type: 'search', props: { head: 'Search the catalogue' } },
+      { id: 'f', type: 'footer', props: { brandName: 'Acme' } },
+    ],
+  };
+  const { ampHtml } = renderDoc(doc);
+  const v = await validate(ampHtml);
+  assert.strictEqual(v.pass, true, `composed search doc failed: ${JSON.stringify(v.errors, null, 2)}`);
+  assert.strictEqual((ampHtml.match(/amp-form-0\.1\.js/g) || []).length, 1, 'amp-form appears exactly once');
+  assert.strictEqual((ampHtml.match(/amp-bind-0\.1\.js/g) || []).length, 1, 'amp-bind appears exactly once');
+  assert.strictEqual((ampHtml.match(/<style amp-custom>/g) || []).length, 1, 'exactly one amp-custom');
+});
+
+// ---- one interactive block per doc enforced ----------------------------------
+
+test('two interactive blocks: validateDoc keeps the first, drops the rest, and notes it', async () => {
+  const v = validateDoc({
+    version: 1, brand: { name: 'Acme' },
+    blocks: [
+      { id: 'q', type: 'quiz', props: { question: 'A?' } },
+      { id: 'p', type: 'poll', props: { question: 'B?' } },
+      { id: 's', type: 'spin', props: {} },
+    ],
+  });
+  assert.strictEqual(v.ok, true);
+  const interactive = v.doc.blocks.filter((b) => INTERACTIVE_TYPES.has(b.type));
+  assert.strictEqual(interactive.length, 1, 'only one interactive block survives');
+  assert.strictEqual(interactive[0].type, 'quiz', 'the FIRST interactive block is the one kept');
+  assert.ok((v.doc.notes || []).some((n) => /only one interactive block/.test(n)), 'a note records the drop');
+  const { ampHtml } = renderDoc(v.doc);
+  const verdict = await validate(ampHtml);
+  assert.strictEqual(verdict.pass, true, 'the surviving single-interactive doc still validates');
+  assert.strictEqual((ampHtml.match(/<amp-state id="s"/g) || []).length, 1, "only one amp-state id 's' — no collision");
+});
+
+test('an interactive block interleaved with statics still yields at most one interactive after validation', () => {
+  const v = validateDoc({
+    version: 1, brand: { name: 'Acme' },
+    blocks: [
+      { id: 'h', type: 'header', props: {} },
+      { id: 'r', type: 'reveal', props: {} },
+      { id: 't', type: 'text', props: { body: 'between' } },
+      { id: 'c', type: 'calc', props: {} },
+      { id: 'f', type: 'footer', props: {} },
+    ],
+  });
+  const kinds = v.doc.blocks.map((b) => b.type);
+  assert.deepStrictEqual(kinds, ['header', 'reveal', 'text', 'footer'], 'reveal kept, calc dropped, statics untouched');
+  assert.ok((v.doc.notes || []).some((n) => /only one interactive block/.test(n)));
+});
+
+// ---- interactive props sanitize ----------------------------------------------
+
+test('interactive props sanitize: a quiz question with <script> is stripped/encoded and still validates', async () => {
+  const v = validateDoc(interactiveBlockDoc('quiz', {
+    question: '<script>alert(1)</script>Which mood?',
+    unknownProp: 'must be dropped',
+    footerText: 'x'.repeat(500), // over the 200 cap
+  }));
+  assert.strictEqual(v.ok, true);
+  const props = v.doc.blocks[0].props;
+  assert.ok(!/[<>]/.test(props.question), "angle brackets stripped from the interactive block's question");
+  assert.ok(!('unknownProp' in props), 'an unknown prop key is dropped');
+  assert.ok(props.footerText.length <= 200, 'over-long field capped at 200 chars');
+  const { ampHtml } = renderDoc(v.doc);
+  assert.ok(!ampHtml.includes('<script>alert(1)'), 'no raw <script> reaches the markup');
+  const verdict = await validate(ampHtml);
+  assert.strictEqual(verdict.pass, true, 'the sanitized interactive doc still validates');
+});
+
+test('interactive props keep only the module MODULE_FIELDS keys (poll optionA/optionB survive, junk drops)', () => {
+  const v = validateDoc(interactiveBlockDoc('poll', {
+    optionA: 'Sweet', optionB: 'Savoury', question: 'Which?',
+    head: 'Vote', footerText: 'done', bogus: 'no', discount: 999,
+  }));
+  const props = v.doc.blocks[0].props;
+  assert.deepStrictEqual(
+    Object.keys(props).sort(),
+    ['footerText', 'head', 'optionA', 'optionB', 'question'].sort(),
+    'exactly the poll field keys survive',
+  );
+  assert.strictEqual(props.optionA, 'Sweet');
+  assert.strictEqual(props.optionB, 'Savoury');
+});
+
+// ---- interactiveDocForModule + fieldsForModule -------------------------------
+
+test('interactiveDocForModule for every module id validates and passes the real validator', async () => {
+  for (const id of INTERACTIVE_IDS) {
+    const doc = interactiveDocForModule({ brand: { name: 'Groww', primaryHex: '#00b386' }, moduleId: id, currency: 'INR' });
+    const vd = validateDoc(doc);
+    assert.strictEqual(vd.ok, true, `${id}: interactiveDocForModule is validateDoc-clean`);
+    assert.ok(doc.blocks.length === 1 && doc.blocks[0].type === id, `${id}: doc is the single interactive block`);
+    const { ampHtml } = renderDoc(doc);
+    const v = await validate(ampHtml);
+    assert.strictEqual(v.pass, true, `${id}: interactiveDocForModule render failed: ${JSON.stringify(v.errors, null, 2)}`);
+  }
+});
+
+test('interactiveDocForModule threads brand colour + copy and falls back on a bad module id', () => {
+  const doc = interactiveDocForModule({
+    brand: { name: 'Zomato', primaryHex: '#e23744' }, moduleId: 'quiz',
+    copy: { head: 'Find your dish', question: 'Spice level?' }, currency: 'USD',
+  });
+  assert.strictEqual(doc.brand.name, 'Zomato');
+  assert.strictEqual(doc.brand.primaryHex, '#e23744', 'brand colour rides into the doc');
+  assert.strictEqual(doc.currency, 'USD');
+  assert.strictEqual(doc.blocks[0].props.head, 'Find your dish', 'copy lands as the block props');
+  // a bogus module id degrades to the first module, never an invalid doc
+  const bad = interactiveDocForModule({ brand: { name: 'Acme' }, moduleId: 'nope' });
+  assert.ok(INTERACTIVE_TYPES.has(bad.blocks[0].type), 'a bad module id falls back to a real interactive type');
+  assert.strictEqual(validateDoc(bad).ok, true, 'the fallback doc validates');
+});
+
+test('fieldsForModule returns the editable copy field names for each module (a fresh array)', () => {
+  assert.deepStrictEqual(fieldsForModule('quiz'), ['head', 'question', 'footerText']);
+  assert.deepStrictEqual(fieldsForModule('poll'), ['head', 'question', 'optionA', 'optionB', 'footerText']);
+  assert.deepStrictEqual(fieldsForModule('rating'), ['head', 'prompt', 'footerText']);
+  assert.deepStrictEqual(fieldsForModule('nope'), [], 'a non-module id yields an empty list');
+  const a = fieldsForModule('quiz');
+  a.push('mutated');
+  assert.deepStrictEqual(fieldsForModule('quiz'), ['head', 'question', 'footerText'], 'the returned array is a copy, not the internal one');
+});
+
+test('INTERACTIVE_TYPES is a Set of exactly the eight module ids', () => {
+  assert.ok(INTERACTIVE_TYPES instanceof Set, 'it is a Set');
+  assert.strictEqual(INTERACTIVE_TYPES.size, 8);
+  for (const id of INTERACTIVE_IDS) assert.ok(INTERACTIVE_TYPES.has(id), `${id} is a member`);
+  assert.ok(!INTERACTIVE_TYPES.has('header'), 'a static type is not a member');
+});
+
+// ---- determinism (interactive) -----------------------------------------------
+
+test('determinism: an interactive doc renders byte-identical ampHtml twice', () => {
+  for (const id of INTERACTIVE_IDS) {
+    const doc = interactiveDocForModule({ brand: { name: 'Acme', primaryHex: '#4f46e5' }, moduleId: id, currency: 'INR' });
+    assert.strictEqual(renderDoc(doc).ampHtml, renderDoc(doc).ampHtml, `${id} is byte-stable`);
+  }
+});
+
+test('determinism: a composed interactive+static doc is byte-identical across renders', () => {
+  const doc = {
+    version: 1, brand: { name: 'Acme', primaryHex: '#123456' }, currency: 'INR',
+    blocks: [
+      { id: 'h', type: 'header', props: { brandName: 'Acme' } },
+      { id: 'c', type: 'calc', props: { head: 'Plan it' } },
+      { id: 'f', type: 'footer', props: { brandName: 'Acme' } },
+    ],
+  };
+  assert.strictEqual(renderDoc(doc).ampHtml, renderDoc(doc).ampHtml);
 });

@@ -26,7 +26,10 @@
 // semantics, ph()/validImgUrl()/siteGuess()) is NOT exported there, so it is
 // REPLICATED locally below with a comment pointing at the original — a
 // deviation to reconcile later by exporting those helpers from generate.js.
-const { enc, formatPrice, CURRENCIES, derivePalette } = require('./generate');
+const {
+  enc, formatPrice, CURRENCIES, derivePalette,
+  buildModuleFragment, MODULE_FIELDS, MODULE_IDS,
+} = require('./generate');
 const { newId } = require('./store');
 
 /* ------------------------------------------------------------------ *
@@ -134,7 +137,20 @@ const HEX_ANY = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 // The supported STATIC block types (v1). Order here is the palette order the
 // editor can show; it does not constrain block order in a doc.
-const BLOCK_TYPES = ['header', 'hero', 'text', 'image', 'button', 'products', 'divider', 'footer'];
+const STATIC_BLOCK_TYPES = ['header', 'hero', 'text', 'image', 'button', 'products', 'divider', 'footer'];
+
+// The INTERACTIVE block types (Genie 2.0 phase 4): the 8 interactive modules
+// from server/generate.js, each addressable AS a block whose `type` is EXACTLY
+// the module id. A doc may hold at most ONE (validateDoc enforces it) because
+// every module builder shares the amp-state id 's' — two would collide.
+// INTERACTIVE_TYPES is the fast membership test used throughout below.
+const INTERACTIVE_TYPES = new Set(MODULE_IDS);
+
+// The full palette the editor lists: the eight static layout blocks first, then
+// the eight interactive modules. Registering the interactive ids here (a) lets
+// the palette surface them and (b) makes validateDoc/renderDoc treat them as
+// first-class block types alongside the static ones.
+const BLOCK_TYPES = STATIC_BLOCK_TYPES.concat(MODULE_IDS);
 
 // A short client string, scrubbed the same way store.js:cleanStr does before it
 // is ever enc()'d into markup: strip '<'/'>' outright (the markup rule), trim,
@@ -251,6 +267,24 @@ const BLOCK_SANITIZERS = {
   },
 };
 
+// An interactive block's props are the module's MODULE_FIELDS keys ONLY, each a
+// plain client string: '<'/'>' stripped (cleanStr) and capped at 200 chars.
+// Unknown props are dropped, empty ones omitted. The module builder enc()'s
+// everything again at render (defense in depth) — this keeps the stored doc
+// tidy and bounds the payload. `options`/`optionA`/`optionB` are strings too
+// (poll's optionA/optionB live in MODULE_FIELDS) and get the same 200-char cap;
+// no MODULE_FIELDS key is an array, so there is no list to walk.
+const INTERACTIVE_FIELD_CAP = 200;
+function sanitizeInteractiveProps(type, props = {}) {
+  const fields = MODULE_FIELDS[type] || [];
+  const out = {};
+  for (const key of fields) {
+    const v = cleanStr(props[key], INTERACTIVE_FIELD_CAP);
+    if (v) out[key] = v;
+  }
+  return out;
+}
+
 function validateDoc(doc) {
   try {
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
@@ -268,6 +302,9 @@ function validateDoc(doc) {
 
     const notes = [];
     const blocks = [];
+    // At most ONE interactive block per doc: every module builder uses the same
+    // amp-state id ('s'), so two would collide. Keep the FIRST, drop the rest.
+    let interactiveSeen = false;
     for (const raw of doc.blocks) {
       if (blocks.length >= MAX_BLOCKS) {
         notes.push(`blocks capped at ${MAX_BLOCKS}; extras dropped`);
@@ -275,9 +312,15 @@ function validateDoc(doc) {
       }
       if (!raw || typeof raw !== 'object') { notes.push('dropped a non-object block'); continue; }
       const type = raw.type;
+      const id = (typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(raw.id)) ? raw.id : newId();
+      if (INTERACTIVE_TYPES.has(type)) {
+        if (interactiveSeen) { notes.push('only one interactive block per email'); continue; }
+        interactiveSeen = true;
+        blocks.push({ id, type, props: sanitizeInteractiveProps(type, raw.props || {}) });
+        continue;
+      }
       const sanitize = BLOCK_SANITIZERS[type];
       if (!sanitize) { notes.push(`dropped unknown block type "${cleanStr(type, 40)}"`); continue; }
-      const id = (typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(raw.id)) ? raw.id : newId();
       blocks.push({ id, type, props: sanitize(raw.props || {}) });
     }
     out.blocks = blocks;
@@ -444,6 +487,39 @@ function renderFooter(props, ctx) {
   return { html, css: [once('base', baseCss(p))] };
 }
 
+// An interactive block: delegate to generate.js's buildModuleFragment, which
+// returns the SAME { scripts, css, body } an interactive module contributes to a
+// standalone generate() document. The fragment's copy is the block's sanitized
+// props (the builder enc()'s each field again at render). Returns the fragment's
+// html/css AND its scripts so renderDoc can dedupe the extra custom-element
+// <script> tags into the head. Never throws: an unknown module id yields null,
+// which renderDoc skips with a warning.
+function renderInteractive(block, ctx, warnings) {
+  const p = ctx.palette;
+  const fragment = buildModuleFragment(block.type, {
+    brand: ctx.brandName || undefined,
+    color: ctx.primaryHex || undefined,
+    currency: ctx.currency,
+    copy: block.props || {},
+  });
+  if (!fragment) {
+    warnings.push(`interactive: unknown module id "${block.type}" — skipped`);
+    return null;
+  }
+  // The module css already begins with generate.js:baseCss (byte-identical to
+  // this module's own baseCss for the same palette). We register it whole under
+  // a per-module `once` key. mergeCss dedupes by KEY, not by rule, so it cannot
+  // fold the module's inline base copy into a sibling static block's own
+  // once('base') base — we ACCEPT that identical, valid duplicate: the base
+  // rules are byte-for-byte the same and one interactive block keeps the merged
+  // stylesheet far under the 75KB amp-custom cap.
+  return {
+    html: fragment.body,
+    css: [once('mod-' + block.type, fragment.css)],
+    scripts: fragment.scripts || [],
+  };
+}
+
 const BLOCK_RENDERERS = {
   header: renderHeader,
   hero: renderHero,
@@ -485,15 +561,42 @@ function renderDoc(doc) {
   const brandName = (d.brand && d.brand.name) || '';
   const ctx = {
     palette,
+    primaryHex,
     currency: d.currency || 'INR',
     brandName,
     logoUrl: (d.brand && d.brand.logoUrl) || undefined,
     site: (d.brand && d.brand.site) || undefined,
   };
 
+  // A doc that reached here still holding 2+ interactive blocks was rendered
+  // WITHOUT going through validateDoc's one-interactive enforcement (renderDoc
+  // tolerates a pre-sanitized doc). Warn, but render only the FIRST so the
+  // shared amp-state id 's' never collides.
+  const interactiveCount = d.blocks.filter((b) => INTERACTIVE_TYPES.has(b.type)).length;
+  if (interactiveCount > 1) warnings.push('more than one interactive block; only the first was rendered');
+  let interactiveRendered = false;
+
   const bodies = [];
   const cssParts = [];
+  // Extra custom-element scripts (amp-bind for every interactive module,
+  // amp-form only for search), collected here and deduped so the head lists
+  // each exactly once regardless of how the (single) interactive block needs
+  // them. Order preserved so the head is byte-deterministic.
+  const scripts = [];
+  const seenScript = new Set();
+  const addScript = (s) => { if (s && !seenScript.has(s)) { seenScript.add(s); scripts.push(s); } };
+
   for (const block of d.blocks) {
+    if (INTERACTIVE_TYPES.has(block.type)) {
+      if (interactiveRendered) continue; // belt-and-braces: at most one
+      const out = renderInteractive(block, ctx, warnings);
+      if (!out) continue;
+      interactiveRendered = true;
+      bodies.push(out.html);
+      for (const c of out.css) cssParts.push(c);
+      for (const s of out.scripts) addScript(s);
+      continue;
+    }
     const render = BLOCK_RENDERERS[block.type];
     if (!render) continue; // validateDoc already dropped unknowns; belt-and-braces
     const out = render(block.props || {}, ctx, warnings);
@@ -502,11 +605,10 @@ function renderDoc(doc) {
   }
 
   const css = mergeCss(cssParts);
-  // INTERACTIVE_SEAM: v1 emits no extra scripts. Interactive blocks (next
-  // phase) will collect their required custom-element <script> tags here (e.g.
-  // amp-bind) and a single merged <amp-state>, then pass the scripts array into
-  // shell() and prepend the amp-state to `body`. Nothing above changes.
-  const scripts = [];
+  // The head carries v0.js (always, added by shell) + the deduped
+  // custom-element scripts collected above + the boilerplate + ONE
+  // <style amp-custom> — exactly what shell() already emits. A static-only doc
+  // keeps `scripts` empty, so its output is byte-identical to before.
   const body = bodies.join('\n');
   const ampHtml = shell({ scripts, css, body });
   return { ampHtml, css, warnings };
@@ -580,4 +682,42 @@ function exampleDocForBrand(brand = {}) {
   };
 }
 
-module.exports = { validateDoc, renderDoc, docToAmp, exampleDocForBrand, BLOCK_TYPES };
+/* ------------------------------------------------------------------ *
+ * interactiveDocForModule — a one-block doc wrapping ONE interactive module.
+ * The backend uses this to turn a freshly generated interactive example into an
+ * editable block document: the module's own builder already renders a header
+ * (brand logo + headline) and a footer inside its body, so the doc is JUST the
+ * interactive block — no static header/footer to double them up. Always
+ * validates (validateDoc sanitizes the copy into the module's field keys).
+ * ------------------------------------------------------------------ */
+
+function interactiveDocForModule({ brand = {}, moduleId, copy = {}, currency } = {}) {
+  const id = INTERACTIVE_TYPES.has(moduleId) ? moduleId : MODULE_IDS[0];
+  const name = cleanStr(brand.name, 80) || 'Acme';
+  const primaryHex = coerceHex(brand.primaryHex) || DEFAULT_PRIMARY;
+  const logoUrl = validImgUrl(brand.logoUrl) || undefined;
+  const docBrand = { name, primaryHex };
+  if (logoUrl) docBrand.logoUrl = logoUrl;
+  const cur = coerceCurrency(currency);
+  const doc = {
+    version: DOC_VERSION,
+    brand: docBrand,
+    blocks: [{ id: 'b_' + id, type: id, props: (copy && typeof copy === 'object') ? copy : {} }],
+  };
+  if (cur) doc.currency = cur;
+  // Round-trip through the trust boundary so the returned doc is always a
+  // normalized, render-safe one (copy sanitized to the module's field keys).
+  const v = validateDoc(doc);
+  return v.ok ? v.doc : doc;
+}
+
+// The editable copy field names for a module (the editor/backend surfaces these
+// as the interactive block's inputs). Empty array for a non-module id.
+function fieldsForModule(moduleId) {
+  return (MODULE_FIELDS[moduleId] || []).slice();
+}
+
+module.exports = {
+  validateDoc, renderDoc, docToAmp, exampleDocForBrand, BLOCK_TYPES,
+  interactiveDocForModule, fieldsForModule, INTERACTIVE_TYPES,
+};
