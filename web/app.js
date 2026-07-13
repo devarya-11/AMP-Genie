@@ -13,6 +13,12 @@
     pitch: null, examples: [], brand: null, assets: [], contacts: [],
     example: null, versions: [], proposals: [],
     keysLoaded: false,
+    // ---- visual block editor ----
+    doc: null,             // { version, brand?, currency?, blocks:[{id,type,props}] }
+    editingExampleId: null,// example id being edited in place (null = new)
+    edSelId: null,         // id of the selected block
+    edDirty: false,        // unsaved changes since last save/load
+    edIdSeq: 1,            // client-side block-id counter (Date.now-free)
   };
 
   // ---------- identity: attribution, not auth ----------
@@ -599,6 +605,10 @@
       open.classList.add('hidden');
       share.classList.add('hidden');
     }
+    // Doc examples (built in the visual editor) get an "Edit in editor" button.
+    const isDoc = (x.module_id || x.moduleId) === 'doc' && (x.doc_json != null || x.docJson != null);
+    $('exEditDoc').classList.toggle('hidden', !isDoc);
+
     $('exMsg').textContent = '';
     $('exTweakMsg').textContent = ''; $('exTweakMsg').className = 'dispatch-msg';
     $('exTweak').value = '';
@@ -818,6 +828,437 @@
   }
 
   // ======================================================================
+  // VIEW — VISUAL BLOCK EDITOR (Genie 2.0 Phase 4)
+  // ======================================================================
+  // Block registry: label for the palette + a factory for default props +
+  // a one-line summary for the block-list card. Types & props mirror the
+  // backend v1 static set exactly.
+  const BLOCK_TYPES = [
+    { type: 'header',   label: 'Header',   glyph: 'H',
+      make: () => ({ brandName: (S.brand && S.brand.name) || 'Brand', logoUrl: (S.brand && S.brand.logo_url) || '', link: '' }),
+      summary: (p) => p.brandName || 'Header' },
+    { type: 'hero',     label: 'Hero image', glyph: '▦',
+      make: () => ({ imageUrl: (S.brand && S.brand.hero_url) || '', alt: '', height: '' }),
+      summary: (p) => p.imageUrl ? shortUrl(p.imageUrl) : 'No image yet' },
+    { type: 'text',     label: 'Text',     glyph: 'T',
+      make: () => ({ heading: 'Heading', body: 'Body copy goes here.' }),
+      summary: (p) => p.heading || p.body || 'Text' },
+    { type: 'image',    label: 'Image',    glyph: '▤',
+      make: () => ({ imageUrl: '', alt: '', href: '' }),
+      summary: (p) => p.imageUrl ? shortUrl(p.imageUrl) : 'No image yet' },
+    { type: 'button',   label: 'Button',   glyph: '⬢',
+      make: () => ({ label: 'Shop now', href: '', align: 'center' }),
+      summary: (p) => p.label || 'Button' },
+    { type: 'products', label: 'Products', glyph: '▧',
+      make: () => ({ items: productSeed(), columns: 2 }),
+      summary: (p) => ((p.items && p.items.length) || 0) + ' product' + (((p.items && p.items.length) || 0) === 1 ? '' : 's') },
+    { type: 'divider',  label: 'Divider',  glyph: '—',
+      make: () => ({}),
+      summary: () => 'Horizontal rule' },
+    { type: 'footer',   label: 'Footer',   glyph: 'F',
+      make: () => ({ brandName: (S.brand && S.brand.name) || 'Brand', text: 'You are receiving this because you subscribed.' }),
+      summary: (p) => p.text || p.brandName || 'Footer' },
+  ];
+  function blockDef(type) { return BLOCK_TYPES.find((b) => b.type === type); }
+  function shortUrl(u) { const s = String(u); return s.length > 34 ? '…' + s.slice(-32) : s; }
+  function productSeed() {
+    const prods = (S.brand && Array.isArray(S.brand.products) ? S.brand.products : []).slice(0, 2);
+    if (!prods.length) return [{ name: 'Product', price: '', imageUrl: '' }];
+    return prods.map((p) => typeof p === 'string'
+      ? { name: p, price: '', imageUrl: '' }
+      : { name: p.name || 'Product', price: p.price != null ? String(p.price) : '', imageUrl: p.image || p.imageUrl || '' });
+  }
+  function nextBlockId() { return 'b' + (S.edIdSeq++); }
+  // Adopt server ids on load; keep the counter ahead of any numeric client id.
+  function seedIdSeq(doc) {
+    let max = S.edIdSeq;
+    (doc.blocks || []).forEach((b) => { const m = /^b(\d+)$/.exec(b.id || ''); if (m) max = Math.max(max, Number(m[1]) + 1); });
+    S.edIdSeq = max;
+  }
+  function ensureBlockIds(doc) {
+    (doc.blocks || []).forEach((b) => { if (!b.id) b.id = nextBlockId(); });
+  }
+
+  // ---- open the editor: fresh (from ai-doc) or from an existing doc example.
+  async function openEditorNew() {
+    if (!S.pitch) return;
+    const btn = $('edNew');
+    busy(btn, true, 'Drafting…');
+    setLine('edNewStatus', 'Asking the genie for a starting layout…', true);
+    try {
+      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/ai-doc', {
+        brief: (S.pitch && S.pitch.brief) || '', author: author(),
+      });
+      if (out && out.error) { setLine('edNewStatus', 'Error: ' + out.error); return; }
+      const doc = (out && out.doc) || { version: 1, blocks: [] };
+      setLine('edNewStatus', '');
+      enterEditor(doc, null, (S.pitch && S.pitch.title) || 'New email');
+    } catch (e) { setLine('edNewStatus', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+  function openEditorForExample() {
+    const x = S.example; if (!x) return;
+    let doc = null;
+    const raw = x.doc_json != null ? x.doc_json : x.docJson;
+    try { doc = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { doc = null; }
+    if (!doc || !Array.isArray(doc.blocks)) { setLine('exStatus', 'Error: this example has no editable block document.'); return; }
+    enterEditor(doc, x.id, x.title || 'Email');
+  }
+  function enterEditor(doc, exampleId, title) {
+    S.doc = doc && typeof doc === 'object' ? doc : { version: 1, blocks: [] };
+    if (!Array.isArray(S.doc.blocks)) S.doc.blocks = [];
+    seedIdSeq(S.doc);
+    ensureBlockIds(S.doc);
+    S.editingExampleId = exampleId || null;
+    S.edSelId = S.doc.blocks.length ? S.doc.blocks[0].id : null;
+    S.edDirty = false;
+    $('edTitle').value = title || '';
+    setLine('edSaveErr', '');
+    switchView('editor');
+    renderPalette();
+    renderDrawer();
+    renderBlocks();
+    renderProps();
+    setSaved();
+    renderPreview();
+  }
+  function leaveEditor() {
+    switchView('pitch');
+    switchWTab('examples');
+    showExDetail(false);
+    refreshPitch();
+  }
+
+  // ---- dirty tracking + save indicator ----
+  function markDirty() { S.edDirty = true; setSaved(); scheduleRender(); }
+  function setSaved() {
+    const el0 = $('edSaved');
+    if (S.edDirty) { el0.textContent = '• unsaved'; el0.className = 'ed-saved unsaved'; }
+    else { el0.textContent = S.editingExampleId ? 'Saved' : 'Not saved yet'; el0.className = 'ed-saved' + (S.editingExampleId ? ' saved' : ''); }
+  }
+
+  // ---- LEFT: palette ----
+  function renderPalette() {
+    const box = $('edPalette'); box.innerHTML = '';
+    BLOCK_TYPES.forEach((def) => {
+      const b = el('button', 'ed-add-btn'); b.type = 'button';
+      b.appendChild(el('span', 'ed-add-ic', def.glyph));
+      b.appendChild(el('span', '', def.label));
+      b.onclick = () => addBlock(def.type);
+      box.appendChild(b);
+    });
+  }
+  function addBlock(type) {
+    const def = blockDef(type); if (!def) return;
+    const block = { id: nextBlockId(), type, props: def.make() };
+    const idx = S.doc.blocks.findIndex((b) => b.id === S.edSelId);
+    if (idx >= 0) S.doc.blocks.splice(idx + 1, 0, block);
+    else S.doc.blocks.push(block);
+    S.edSelId = block.id;
+    renderBlocks(); renderProps();
+    markDirty();
+  }
+
+  // ---- LEFT: asset drawer (draggable thumbnails) ----
+  function renderDrawer() {
+    const box = $('edDrawer'); box.innerHTML = '';
+    const assets = (S.assets || []).filter((a) => assetUrl(a));
+    if (!assets.length) { box.appendChild(el('div', 'empty-note', 'No brand assets — add some in the Assets tab.')); return; }
+    assets.forEach((a) => {
+      const cell = el('div', 'ed-asset'); cell.draggable = true; cell.title = a.filename || 'asset';
+      const img = el('img'); img.src = assetUrl(a); img.loading = 'lazy'; img.alt = a.filename || 'asset';
+      cell.appendChild(img);
+      cell.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/asset-url', assetUrl(a));
+        e.dataTransfer.setData('text/plain', assetUrl(a));
+        e.dataTransfer.effectAllowed = 'copy';
+      });
+      box.appendChild(cell);
+    });
+  }
+
+  // ---- CENTER: block list (select / delete / duplicate / reorder) ----
+  function renderBlocks() {
+    const box = $('edBlocks'); box.innerHTML = '';
+    if (!S.doc.blocks.length) { box.appendChild(el('div', 'empty-note', 'Empty email — add a block from the left.')); return; }
+    S.doc.blocks.forEach((blk, i) => {
+      const def = blockDef(blk.type);
+      const card = el('div', 'ed-block' + (blk.id === S.edSelId ? ' sel' : ''));
+      card.dataset.id = blk.id;
+      const canDropAsset = /^(hero|image|header|products)$/.test(blk.type);
+
+      const handle = el('span', 'ed-handle', '⋮⋮'); handle.title = 'Drag to reorder';
+      card.appendChild(handle);
+
+      const body = el('div', 'ed-block-body');
+      body.appendChild(el('div', 'ed-block-type', (def && def.label) || blk.type));
+      body.appendChild(el('div', 'ed-block-sum', (def && def.summary(blk.props || {})) || ''));
+      body.onclick = () => { S.edSelId = blk.id; renderBlocks(); renderProps(); };
+      card.appendChild(body);
+
+      const acts = el('div', 'ed-block-acts');
+      const up = el('button', 'ed-iconbtn', '↑'); up.type = 'button'; up.title = 'Move up'; up.disabled = i === 0;
+      up.onclick = () => moveBlock(blk.id, -1);
+      const down = el('button', 'ed-iconbtn', '↓'); down.type = 'button'; down.title = 'Move down'; down.disabled = i === S.doc.blocks.length - 1;
+      down.onclick = () => moveBlock(blk.id, 1);
+      const dup = el('button', 'ed-iconbtn', '⧉'); dup.type = 'button'; dup.title = 'Duplicate';
+      dup.onclick = () => duplicateBlock(blk.id);
+      const del = el('button', 'ed-iconbtn danger', '✕'); del.type = 'button'; del.title = 'Delete';
+      del.onclick = () => deleteBlock(blk.id);
+      [up, down, dup, del].forEach((b) => acts.appendChild(b));
+      card.appendChild(acts);
+
+      // HTML5 drag-reorder (up/down buttons above are the reliable fallback).
+      handle.draggable = true;
+      handle.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/block-id', blk.id);
+        e.dataTransfer.effectAllowed = 'move';
+        card.classList.add('dragging');
+      });
+      handle.addEventListener('dragend', () => card.classList.remove('dragging'));
+      card.addEventListener('dragover', (e) => {
+        const types = e.dataTransfer.types || [];
+        const isBlock = types.indexOf && types.indexOf('text/block-id') >= 0;
+        const isAsset = types.indexOf && types.indexOf('text/asset-url') >= 0;
+        if (isBlock) { e.preventDefault(); card.classList.add('drag-over'); }
+        else if (isAsset && canDropAsset) { e.preventDefault(); card.classList.add('drop-armed'); }
+      });
+      card.addEventListener('dragleave', () => { card.classList.remove('drag-over'); card.classList.remove('drop-armed'); });
+      card.addEventListener('drop', (e) => {
+        card.classList.remove('drag-over'); card.classList.remove('drop-armed');
+        const movedId = e.dataTransfer.getData('text/block-id');
+        const assetUrl0 = e.dataTransfer.getData('text/asset-url');
+        if (movedId) { e.preventDefault(); reorderBlock(movedId, blk.id); }
+        else if (assetUrl0 && canDropAsset) { e.preventDefault(); dropAssetOnBlock(blk, assetUrl0); }
+      });
+
+      box.appendChild(card);
+    });
+  }
+  function blockIndex(id) { return S.doc.blocks.findIndex((b) => b.id === id); }
+  function moveBlock(id, dir) {
+    const i = blockIndex(id); if (i < 0) return;
+    const j = i + dir; if (j < 0 || j >= S.doc.blocks.length) return;
+    const [b] = S.doc.blocks.splice(i, 1); S.doc.blocks.splice(j, 0, b);
+    S.edSelId = id; renderBlocks(); renderProps(); markDirty();
+  }
+  function reorderBlock(movedId, targetId) {
+    if (movedId === targetId) return;
+    const from = blockIndex(movedId), to = blockIndex(targetId);
+    if (from < 0 || to < 0) return;
+    const [b] = S.doc.blocks.splice(from, 1);
+    S.doc.blocks.splice(blockIndex(targetId) + (from < to ? 1 : 0), 0, b);
+    S.edSelId = movedId; renderBlocks(); renderProps(); markDirty();
+  }
+  function duplicateBlock(id) {
+    const i = blockIndex(id); if (i < 0) return;
+    const src = S.doc.blocks[i];
+    const copy = { id: nextBlockId(), type: src.type, props: JSON.parse(JSON.stringify(src.props || {})) };
+    S.doc.blocks.splice(i + 1, 0, copy);
+    S.edSelId = copy.id; renderBlocks(); renderProps(); markDirty();
+  }
+  function deleteBlock(id) {
+    const i = blockIndex(id); if (i < 0) return;
+    S.doc.blocks.splice(i, 1);
+    if (S.edSelId === id) S.edSelId = S.doc.blocks.length ? S.doc.blocks[Math.min(i, S.doc.blocks.length - 1)].id : null;
+    renderBlocks(); renderProps(); markDirty();
+  }
+  function dropAssetOnBlock(blk, url) {
+    if (blk.type === 'products') {
+      blk.props.items = blk.props.items && blk.props.items.length ? blk.props.items : [{ name: 'Product', price: '', imageUrl: '' }];
+      blk.props.items[0].imageUrl = url;
+    } else if (blk.type === 'header') {
+      blk.props.logoUrl = url;
+    } else {
+      blk.props.imageUrl = url; // hero + image
+    }
+    renderBlocks();
+    if (S.edSelId === blk.id) renderProps();
+    markDirty();
+  }
+
+  // ---- RIGHT: properties for the selected block ----
+  function selectedBlock() { return S.doc.blocks.find((b) => b.id === S.edSelId) || null; }
+  function renderProps() {
+    const box = $('edProps'); box.innerHTML = '';
+    const blk = selectedBlock();
+    if (!blk) { box.appendChild(el('div', 'ed-props-empty', 'Select a block to edit its content, or add one from the left.')); return; }
+    const def = blockDef(blk.type);
+    box.appendChild(el('div', 'ed-block-type', (def && def.label) || blk.type));
+    const set = (key, val) => { blk.props[key] = val; renderBlocks(); markDirty(); };
+    switch (blk.type) {
+      case 'header':
+        box.appendChild(field('Brand name', blk.props.brandName || '', (v) => set('brandName', v)));
+        box.appendChild(urlField('Logo URL', blk.props.logoUrl || '', (v) => set('logoUrl', v)));
+        box.appendChild(field('Link (href)', blk.props.link || '', (v) => set('link', v)));
+        break;
+      case 'hero':
+        box.appendChild(urlField('Image URL', blk.props.imageUrl || '', (v) => set('imageUrl', v)));
+        box.appendChild(field('Alt text', blk.props.alt || '', (v) => set('alt', v)));
+        box.appendChild(field('Height (px)', blk.props.height || '', (v) => set('height', v)));
+        break;
+      case 'text':
+        box.appendChild(field('Heading', blk.props.heading || '', (v) => set('heading', v)));
+        box.appendChild(areaField('Body', blk.props.body || '', (v) => set('body', v)));
+        break;
+      case 'image':
+        box.appendChild(urlField('Image URL', blk.props.imageUrl || '', (v) => set('imageUrl', v)));
+        box.appendChild(field('Alt text', blk.props.alt || '', (v) => set('alt', v)));
+        box.appendChild(field('Link (href)', blk.props.href || '', (v) => set('href', v)));
+        break;
+      case 'button':
+        box.appendChild(field('Label', blk.props.label || '', (v) => set('label', v)));
+        box.appendChild(field('Link (href)', blk.props.href || '', (v) => set('href', v)));
+        box.appendChild(selectField('Align', ['left', 'center', 'right'], blk.props.align || 'center', (v) => set('align', v)));
+        break;
+      case 'products':
+        box.appendChild(productsEditor(blk));
+        box.appendChild(selectField('Columns', ['1', '2', '3'], String(blk.props.columns || 2), (v) => set('columns', Number(v))));
+        break;
+      case 'footer':
+        box.appendChild(field('Brand name', blk.props.brandName || '', (v) => set('brandName', v)));
+        box.appendChild(areaField('Text', blk.props.text || '', (v) => set('text', v)));
+        break;
+      case 'divider':
+        box.appendChild(el('div', 'ed-props-empty', 'A divider has no settings — reorder or delete it.'));
+        break;
+      default:
+        box.appendChild(el('div', 'ed-props-empty', 'No editor for this block type.'));
+    }
+  }
+  // property-field builders (label + input, live oninput)
+  function ctrl(labelText) { const c = el('div', 'ctrl'); c.appendChild(el('label', '', labelText)); return c; }
+  function field(labelText, value, onChange) {
+    const c = ctrl(labelText); const i = el('input'); i.type = 'text'; i.value = value;
+    i.oninput = () => onChange(i.value); c.appendChild(i); return c;
+  }
+  function areaField(labelText, value, onChange) {
+    const c = ctrl(labelText); const t = el('textarea'); t.rows = 3; t.value = value;
+    t.oninput = () => onChange(t.value); c.appendChild(t); return c;
+  }
+  function selectField(labelText, opts, value, onChange) {
+    const c = ctrl(labelText); const s = el('select');
+    opts.forEach((o) => { const op = el('option', '', o); op.value = o; if (o === value) op.selected = true; s.appendChild(op); });
+    s.onchange = () => onChange(s.value); c.appendChild(s); return c;
+  }
+  // URL field with a "Choose from assets" affordance: reveals the drawer, then
+  // arms the next drawer click to fill THIS field (in addition to drag-drop).
+  function urlField(labelText, value, onChange) {
+    const c = ctrl(labelText);
+    const row = el('div', 'ed-url-row');
+    const i = el('input'); i.type = 'text'; i.value = value; i.placeholder = 'https://…';
+    i.oninput = () => onChange(i.value);
+    const pick = el('button', 'ghost sm', 'Assets'); pick.type = 'button'; pick.title = 'Choose from brand assets';
+    pick.onclick = () => armAssetPick((url) => { i.value = url; onChange(url); });
+    row.appendChild(i); row.appendChild(pick); c.appendChild(row);
+    return c;
+  }
+  // Repeatable products editor: name / price / image rows + add/remove.
+  function productsEditor(blk) {
+    const wrap = ctrl('Products');
+    const rows = el('div', 'ed-prod-rows');
+    if (!Array.isArray(blk.props.items)) blk.props.items = [];
+    blk.props.items.forEach((item, idx) => {
+      const row = el('div', 'ed-prod-row');
+      const name = el('input'); name.type = 'text'; name.placeholder = 'Name'; name.value = item.name || '';
+      name.oninput = () => { item.name = name.value; renderBlocks(); markDirty(); };
+      const price = el('input'); price.type = 'text'; price.placeholder = 'Price'; price.value = item.price != null ? String(item.price) : '';
+      price.oninput = () => { item.price = price.value; markDirty(); };
+      const img = el('input'); img.type = 'text'; img.placeholder = 'Image URL'; img.value = item.imageUrl || item.image || '';
+      img.oninput = () => { item.imageUrl = img.value; markDirty(); };
+      const rm = el('button', 'ed-iconbtn danger', '✕'); rm.type = 'button'; rm.title = 'Remove';
+      rm.onclick = () => { blk.props.items.splice(idx, 1); renderProps(); renderBlocks(); markDirty(); };
+      [name, price, img, rm].forEach((n) => row.appendChild(n));
+      rows.appendChild(row);
+    });
+    wrap.appendChild(rows);
+    const add = el('button', 'ghost sm', '+ add product'); add.type = 'button'; add.style.marginTop = '8px'; add.style.alignSelf = 'flex-start';
+    add.onclick = () => { blk.props.items.push({ name: 'Product', price: '', imageUrl: '' }); renderProps(); renderBlocks(); markDirty(); };
+    wrap.appendChild(add);
+    return wrap;
+  }
+  // asset-pick arming: the drawer thumbnails also respond to a plain click
+  // while a URL field is waiting for one.
+  let _assetPickCb = null;
+  function armAssetPick(cb) {
+    _assetPickCb = cb;
+    const box = $('edDrawer');
+    box.querySelectorAll('.ed-asset').forEach((cell) => {
+      cell.classList.add('drop-armed');
+      cell.onclick = () => {
+        const img = cell.querySelector('img');
+        if (_assetPickCb && img) _assetPickCb(img.src);
+        _assetPickCb = null;
+        box.querySelectorAll('.ed-asset').forEach((c) => { c.classList.remove('drop-armed'); c.onclick = null; });
+      };
+    });
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ---- PREVIEW: debounced POST /api/docs/render ----
+  let _renderTimer = null;
+  function scheduleRender() { clearTimeout(_renderTimer); _renderTimer = setTimeout(renderPreview, 400); }
+  async function renderPreview() {
+    clearTimeout(_renderTimer);
+    if (!S.doc) return;
+    const chip0 = $('edChip'); chip0.className = 'chip rendering'; chip0.textContent = 'rendering…';
+    try {
+      const out = await api('/api/docs/render', { doc: S.doc });
+      if (out && out.error && !out.ampHtml) { chip0.className = 'chip fail'; chip0.textContent = 'render error'; $('edWarn').textContent = out.error; return; }
+      $('edFrame').srcdoc = out.ampHtml || '';
+      // Prefer the server's sanitized doc so ids/shape stay in lockstep.
+      if (out.doc && Array.isArray(out.doc.blocks)) mergeSanitized(out.doc);
+      const v = out.validation || {};
+      if (v.pass) { chip0.className = 'chip pass'; chip0.textContent = 'PASS'; }
+      else { chip0.className = 'chip fail'; chip0.textContent = 'FAIL' + (v.errorCount != null ? ' · ' + v.errorCount : ''); }
+      const warns = Array.isArray(out.warnings) ? out.warnings : [];
+      $('edWarn').textContent = warns.length ? warns.map((w) => (typeof w === 'string' ? w : (w.message || JSON.stringify(w)))).join(' · ') : '';
+    } catch (e) {
+      chip0.className = 'chip fail'; chip0.textContent = 'render error';
+      $('edWarn').textContent = e.message;
+    }
+  }
+  // Adopt the server's sanitized doc without clobbering focus/selection: only
+  // reconcile when the block set (ids+types) matches, so live typing is safe.
+  function mergeSanitized(sdoc) {
+    const a = S.doc.blocks, b = sdoc.blocks;
+    if (a.length !== b.length) return;
+    for (let i = 0; i < a.length; i++) if (a[i].id !== b[i].id || a[i].type !== b[i].type) return;
+    if (sdoc.brand !== undefined) S.doc.brand = sdoc.brand;
+    if (sdoc.currency !== undefined) S.doc.currency = sdoc.currency;
+    if (sdoc.version !== undefined) S.doc.version = sdoc.version;
+  }
+
+  // ---- SAVE: PATCH existing doc example, else POST a new one ----
+  async function saveDoc() {
+    if (!S.doc) return;
+    const title = $('edTitle').value.trim() || 'Untitled email';
+    const btn = $('edSave');
+    busy(btn, true, 'Saving…');
+    setLine('edSaveErr', '');
+    try {
+      let out;
+      if (S.editingExampleId) {
+        out = await req('PATCH', '/api/examples/' + encodeURIComponent(S.editingExampleId) + '/doc', { doc: S.doc, author: author() });
+      } else {
+        out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/doc-examples', { title, doc: S.doc, author: author() });
+      }
+      if (!out || out.error) {
+        const val = out && out.validation;
+        let msg = 'Error: ' + ((out && out.error) || 'save failed');
+        if (val && val.errorCount != null) msg += ' — ' + val.errorCount + ' AMP validation error' + (val.errorCount === 1 ? '' : 's') + ' (your work is safe; fix and re-save)';
+        setLine('edSaveErr', msg);
+        return;
+      }
+      const ex = out.example || (out.build && out.build.example) || out;
+      if (ex && ex.id) S.editingExampleId = ex.id; // subsequent saves PATCH in place
+      S.edDirty = false; setSaved();
+      setLine('edSaveErr', '');
+    } catch (e) { setLine('edSaveErr', 'Error: ' + e.message); }
+    finally { busy(btn, false); }
+  }
+
+  // ======================================================================
   // VIEW 4 — SETTINGS: LLM key pool
   // ======================================================================
   async function loadKeys() {
@@ -947,6 +1388,13 @@
     $('exCopyAmp').onclick = copyExampleAmp;
     $('exTweakGo').onclick = tweakExample;
     $('exTweak').onkeydown = (e) => { if (e.key === 'Enter') tweakExample(); };
+    $('exEditDoc').onclick = openEditorForExample;
+
+    // visual block editor
+    $('edNew').onclick = openEditorNew;
+    $('edBack').onclick = leaveEditor;
+    $('edSave').onclick = saveDoc;
+    $('edTitle').oninput = () => { S.edDirty = true; setSaved(); };
 
     // assets + contacts
     wireDropzone($('assetDrop'), $('assetFile'), assetsUpload);

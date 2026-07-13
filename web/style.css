@@ -350,3 +350,90 @@ a.linkbtn{color:var(--ink-2)}
 @media(prefers-reduced-motion:reduce){
   *{animation-duration:.001ms !important;transition-duration:.001ms !important}
 }
+
+/* ============================================================================
+   Visual block editor (Genie 2.0 Phase 4) — Mailchimp-style three columns:
+   palette + drawer / block list / properties, with a live phone preview.
+   ========================================================================== */
+.ed-topbar{display:flex;align-items:center;gap:14px;padding:14px 18px}
+.ed-topbar .backlink{flex:0 0 auto}
+.ed-title-input{flex:1;min-width:0;font-size:16px;font-weight:700;padding:9px 12px}
+.ed-saved{font-size:12px;color:var(--muted);white-space:nowrap;flex:0 0 auto}
+.ed-saved.unsaved{color:var(--warn)}
+.ed-saved.saved{color:var(--ok)}
+
+/* minmax(0,1fr), not 1fr: a bare 1fr is minmax(auto,1fr) whose min is the
+   center column's min-content, which refused to shrink and shoved the
+   properties column off the right edge (~53px overflow at 1280). */
+.ed-grid{display:grid;grid-template-columns:220px minmax(0,1fr) 290px;gap:16px;align-items:start}
+.ed-left,.ed-right,.ed-center{padding:16px}
+.ed-left,.ed-right{position:sticky;top:16px}
+
+/* palette */
+.ed-palette{display:flex;flex-direction:column;gap:7px}
+.ed-add-btn{display:flex;align-items:center;gap:9px;background:#ffffff08;border:1px solid var(--line);color:var(--ink-2);
+  border-radius:var(--r-md);padding:10px 12px;font-weight:600;font-size:13px;text-align:left;width:100%;
+  transition:border-color var(--tr),color var(--tr),background var(--tr)}
+.ed-add-btn:hover{border-color:#e7812966;color:var(--ink);background:#ffffff0f}
+.ed-add-btn:focus-visible{outline:none;box-shadow:var(--ring)}
+.ed-add-btn .ed-add-ic{width:22px;height:22px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:6px;background:#e7812922;color:var(--accent);font-size:12px;font-weight:800}
+
+/* asset drawer */
+.ed-drawer{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;max-height:230px;overflow-y:auto}
+.ed-drawer .ed-asset{aspect-ratio:1;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;background:#fff;
+  cursor:grab;transition:border-color var(--tr),transform var(--tr)}
+.ed-drawer .ed-asset:hover{border-color:var(--accent);transform:translateY(-1px)}
+.ed-drawer .ed-asset img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.ed-drawer .empty-note{grid-column:1/-1}
+
+/* block list */
+.ed-blocks{display:flex;flex-direction:column;gap:9px;min-height:120px}
+.ed-block{border:1px solid var(--line);border-radius:var(--r-md);background:#ffffff05;padding:11px 12px;
+  display:flex;align-items:center;gap:10px;transition:border-color var(--tr),background var(--tr),box-shadow var(--tr)}
+.ed-block:hover{border-color:#ffffff33;background:#ffffff08}
+.ed-block.sel{border-color:var(--accent);background:#e7812914;box-shadow:var(--ring)}
+.ed-block.drag-over{border-color:var(--accent);border-style:dashed}
+.ed-block.dragging{opacity:.4}
+.ed-block.drop-armed{border-color:var(--ok);border-style:dashed;background:#34d27b14}
+.ed-handle{cursor:grab;color:var(--faint);font-size:15px;flex:0 0 auto;line-height:1;user-select:none;letter-spacing:-2px}
+.ed-handle:active{cursor:grabbing}
+.ed-block-body{flex:1;min-width:0;cursor:pointer}
+.ed-block-type{font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.5px}
+.ed-block-sum{font-size:13px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.ed-block-acts{display:flex;gap:3px;flex:0 0 auto}
+.ed-iconbtn{background:transparent;border:0;color:var(--faint);width:26px;height:26px;border-radius:6px;font-size:14px;
+  display:inline-flex;align-items:center;justify-content:center;transition:color var(--tr),background var(--tr)}
+.ed-iconbtn:hover{color:var(--ink);background:#ffffff12}
+.ed-iconbtn:disabled{opacity:.3;cursor:default}
+.ed-iconbtn.danger:hover{color:var(--bad);background:#ff5b6e14}
+
+/* properties */
+.ed-props{display:flex;flex-direction:column;gap:12px}
+.ed-props .ctrl input,.ed-props .ctrl textarea,.ed-props .ctrl select{padding:9px 11px;font-size:13px}
+.ed-props-empty{color:var(--faint);font-size:13px;font-style:italic;line-height:1.6}
+.ed-url-row{display:flex;gap:6px}
+.ed-url-row input{flex:1;min-width:0}
+.ed-prod-rows{display:flex;flex-direction:column;gap:8px}
+.ed-prod-row{display:grid;grid-template-columns:1fr 70px 1fr 26px;gap:6px;align-items:center}
+.ed-prod-row input{padding:8px 9px;font-size:12px;min-width:0}
+.ed-prod-row .ed-iconbtn{justify-self:center}
+
+/* preview */
+.ed-preview{padding:20px;background:radial-gradient(420px 300px at 50% 12%, #e7812914, transparent 70%)}
+.ed-preview-hdr{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.ed-warn{color:var(--warn);font-size:12px;line-height:1.5;margin-bottom:10px;min-height:0}
+.ed-warn:empty{display:none}
+.chip.rendering{color:var(--muted)}
+
+@media(max-width:1100px){
+  .ed-grid{grid-template-columns:1fr}
+  .ed-left,.ed-right{position:static}
+  .ed-drawer{grid-template-columns:repeat(6,1fr);max-height:none}
+}
+@media(max-width:640px){
+  .ed-topbar{flex-wrap:wrap}
+  .ed-title-input{order:3;flex-basis:100%}
+  .ed-drawer{grid-template-columns:repeat(4,1fr)}
+  .ed-prod-row{grid-template-columns:1fr 1fr}
+}

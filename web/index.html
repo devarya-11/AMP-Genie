@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 
@@ -221,6 +221,9 @@
               <button id="ideaGo" class="primary" type="button" title="Build your idea as a validated AMP example"><svg class="ic"><use href="#i-sparkle"/></svg></button>
             </div>
             <div id="ideaStatus" class="statusline"></div>
+            <div class="gen-hdr" style="margin-top:16px"><svg class="ic accent"><use href="#i-doc"/></svg> Design it yourself</div>
+            <button id="edNew" class="ghost sm" type="button" style="align-self:flex-start" title="Build a block-based AMP email in the visual editor"><svg class="ic"><use href="#i-plus"/></svg> New email (visual editor)</button>
+            <div id="edNewStatus" class="statusline" style="margin-top:0"></div>
           </div>
         </div>
 
@@ -239,6 +242,7 @@
             <a id="exOpenShare" class="ghost sm linkbtn" target="_blank" rel="noopener"><svg class="ic"><use href="#i-open"/></svg> Open share page</a>
             <button id="exDownload" class="ghost sm" type="button"><svg class="ic"><use href="#i-download"/></svg> Download AMP</button>
             <button id="exCopyAmp" class="ghost sm" type="button"><svg class="ic"><use href="#i-copy"/></svg> Copy AMP</button>
+            <button id="exEditDoc" class="ghost sm hidden" type="button" title="Open this email in the visual block editor"><svg class="ic"><use href="#i-sliders"/></svg> Edit in editor</button>
             <span id="exMsg" class="copy-msg" aria-live="polite"></span>
           </div>
           <div class="tweak">
@@ -348,6 +352,55 @@
     </div>
   </section>
 
+  <!-- ======================= VISUAL BLOCK EDITOR ======================= -->
+  <section id="view-editor" class="view">
+    <div class="ed-topbar card">
+      <button id="edBack" class="backlink" type="button">&larr; Back to pitch</button>
+      <input id="edTitle" class="ed-title-input" type="text" maxlength="200" placeholder="Email title" aria-label="Email title">
+      <span id="edSaved" class="ed-saved" aria-live="polite"></span>
+      <button id="edSave" class="primary sm" type="button"><svg class="ic"><use href="#i-check"/></svg> Save</button>
+    </div>
+    <div id="edSaveErr" class="statusline" style="margin-top:0"></div>
+
+    <div class="ed-grid">
+      <!-- LEFT: palette + asset drawer -->
+      <aside class="ed-left card">
+        <div class="gen-hdr"><svg class="ic accent"><use href="#i-plus"/></svg> Add block</div>
+        <div id="edPalette" class="ed-palette"></div>
+        <div class="gen-hdr" style="margin-top:20px"><svg class="ic accent"><use href="#i-folder"/></svg> Assets <span class="hint">drag onto an image block</span></div>
+        <div id="edDrawer" class="ed-drawer"></div>
+      </aside>
+
+      <!-- CENTER: block list -->
+      <div class="ed-center card">
+        <div class="gen-hdr"><svg class="ic accent"><use href="#i-doc"/></svg> Blocks</div>
+        <div id="edBlocks" class="ed-blocks"></div>
+      </div>
+
+      <!-- RIGHT: properties -->
+      <aside class="ed-right card">
+        <div class="gen-hdr"><svg class="ic accent"><use href="#i-sliders"/></svg> Properties</div>
+        <div id="edProps" class="ed-props"></div>
+      </aside>
+    </div>
+
+    <!-- PREVIEW: phone frame -->
+    <div class="ed-preview card">
+      <div class="ed-preview-hdr">
+        <div class="gen-hdr" style="margin:0"><svg class="ic accent"><use href="#i-lamp"/></svg> Live preview</div>
+        <span id="edChip" class="chip">rendering…</span>
+      </div>
+      <div id="edWarn" class="ed-warn"></div>
+      <div class="stage">
+        <div class="phone">
+          <div class="phone-screen">
+            <iframe id="edFrame" class="amp-frame" sandbox="allow-scripts allow-same-origin" title="Live AMP email preview"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ======================= SETTINGS ======================= -->
   <section id="view-settings" class="view">
     <div class="view-hdr">
@@ -379,6 +432,6 @@
   </main>
 </div>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
