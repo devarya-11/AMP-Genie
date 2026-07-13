@@ -91,7 +91,10 @@ function loginResponseHeaders(token) {
 //                       clients fetch these with no cookie at all
 // Notably NOT public: '/', the app shell (app.js/style.css/index.html) and
 // every API route.
-const PUBLIC_EXACT = ['/login.html', '/favicon.ico'];
+// BOTH spellings of the login page are public: Cloudflare Pages' pretty-URL
+// normalization 308s /login.html -> /login, so allowing only the .html form
+// live-looped 308 -> gate 302 -> 308 forever (found on the real deployment).
+const PUBLIC_EXACT = ['/login.html', '/login', '/favicon.ico'];
 const PUBLIC_PREFIXES = ['/b/', '/s/', '/build/', '/assets/'];
 
 function isPublicPath(pathname) {
@@ -144,7 +147,9 @@ async function gateDecision(args = {}) {
   // redirect its caller would choke on.
   const accept = typeof a.acceptHeader === 'string' ? a.acceptHeader : '';
   if (method === 'GET' && accept.includes('text/html')) {
-    return { action: 'redirect', location: '/login.html' };
+    // Redirect to the CANONICAL pretty form — pointing at /login.html would
+    // add a 308 hop on Pages before every login-page paint.
+    return { action: 'redirect', location: '/login' };
   }
   return { action: 'deny' };
 }

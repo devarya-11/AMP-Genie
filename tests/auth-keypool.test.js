@@ -46,7 +46,7 @@ test('loginResponseHeaders builds a cookie isAuthed accepts (HttpOnly, 30d)', as
 // ---- auth: the public-path allowlist ----------------------------------------
 
 test('isPublicPath: share pages, downloads, assets and the login page are public; the app is not', () => {
-  for (const p of ['/login.html', '/b/abc123def456', '/s/abc123def456', '/build/abc123def456', '/assets/abc123def456', '/favicon.ico']) {
+  for (const p of ['/login.html', '/login', '/b/abc123def456', '/s/abc123def456', '/build/abc123def456', '/assets/abc123def456', '/favicon.ico']) {
     assert.strictEqual(isPublicPath(p), true, p + ' must be public');
   }
   for (const p of ['/', '/index.html', '/generate', '/slates', '/usecases', '/tweak', '/settings/keys', '/app.js']) {
@@ -78,7 +78,7 @@ test('gateDecision: an unauthenticated browser page load redirects, an API call 
     method: 'GET', pathname: '/', password: PW, acceptHeader: 'text/html,application/xhtml+xml',
   });
   assert.strictEqual(page.action, 'redirect');
-  assert.strictEqual(page.location, '/login.html');
+  assert.strictEqual(page.location, '/login');
   const api = await gateDecision({
     method: 'GET', pathname: '/slates', password: PW, acceptHeader: '*/*',
   });
