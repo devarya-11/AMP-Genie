@@ -25,6 +25,16 @@ const { createBuild, buildHistoryEntry } = require('./build-pipeline');
 const { createSlate } = require('./slate-core');
 const { applyTweak, readVersions } = require('./tweak-engine');
 const { buildDossier, hasResearchProvider } = require('./brand-research');
+const { gateDecision } = require('./auth');
+const { createSupabaseRepo, bindLocalRepo } = require('./repo-supabase');
+const { createLocalDb, MIGRATIONS } = require('./db');
+const {
+  validateUpload, b64ToBytes, createSupabaseStorage,
+  putAssetBytes, getAssetBytes, delAssetBytes,
+} = require('./asset-store');
+const {
+  sanitizePoolEntry, maskKey, getMergedProviders, resetPoolCache, PROVIDER_ORDER, POOL_SETTINGS_KEY,
+} = require('./key-pool');
 const { proposeUseCases, shapeUserIdea } = require('./usecase-engine');
 const {
   getBuild, getSlate, readSlateIndex, normalizeBrief,
@@ -37,6 +47,44 @@ const { buildPageHtml, slatePageHtml, notFoundPageHtml } = require('./share-page
 // Pages Functions back with the HISTORY KV namespace, here backed by a
 // git-ignored .data/ directory — so share links work in local dev too.
 const kv = createFsKv(path.join(__dirname, '..', '.data'));
+
+// Genie 2.0 system of record: Supabase when configured (the shared team
+// database — same rows whichever runtime serves the request), else a local
+// node:sqlite file so a bare checkout still fully works offline. The two
+// expose one bound-object repo shape (see server/repo-supabase.js).
+const supabaseCfg = {
+  url: process.env.SUPABASE_URL,
+  secretKey: process.env.SUPABASE_SECRET_KEY,
+};
+let repo = createSupabaseRepo(supabaseCfg);
+let storage = createSupabaseStorage({ ...supabaseCfg, bucket: 'brand-assets' });
+if (!repo) {
+  const localDb = createLocalDb(path.join(__dirname, '..', '.data', 'genie.db'));
+  // Fire-and-remember: routes await this once before first use.
+  const migrated = localDb.applyMigrations(MIGRATIONS).catch((e) => {
+    console.error('[index] local migrations failed:', e && e.message);
+  });
+  const bound = bindLocalRepo(localDb);
+  repo = new Proxy(bound, {
+    get(target, prop) {
+      const fn = target[prop];
+      if (typeof fn !== 'function') return fn;
+      return async (...args) => { await migrated; return fn(...args); };
+    },
+  });
+}
+
+// Pool-aware providers for every LLM-tier call: when the team has pasted keys
+// they are the explicit choice and take over; with an empty pool the engines
+// keep their own env-key detection untouched (providers stays undefined).
+async function llmProviders() {
+  try {
+    const merged = await getMergedProviders(repo, []);
+    return merged.length ? merged : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -53,6 +101,33 @@ app.use((req, res, next) => {
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
+});
+
+// ---- team gate (Genie 2.0) ---------------------------------------------------
+// One shared password (env TEAM_PASSWORD; gate is fully open when unset — dev
+// and test default). gateDecision (server/auth.js) owns every branch and is
+// shared verbatim with the Workers runtime (functions/_middleware.js) so the
+// two front doors can never drift; this middleware only translates req/res.
+app.use(async (req, res, next) => {
+  const decision = await gateDecision({
+    method: req.method,
+    pathname: req.path,
+    cookieHeader: req.headers.cookie,
+    acceptHeader: req.headers.accept,
+    password: process.env.TEAM_PASSWORD,
+    suppliedPassword: (req.method === 'POST' && req.path === '/login' && req.body)
+      ? req.body.password
+      : undefined,
+  });
+  switch (decision.action) {
+    case 'open': return next();
+    case 'login-ok':
+      if (decision.setCookie) res.setHeader('Set-Cookie', decision.setCookie);
+      return res.json({ ok: true });
+    case 'login-fail': return res.status(401).json({ error: 'wrong password' });
+    case 'redirect': return res.redirect(302, decision.location);
+    default: return res.status(401).json({ error: 'authentication required' });
+  }
 });
 
 // ---- metadata for the UI's dropdowns ---------------------------------------
@@ -86,7 +161,9 @@ app.post('/generate', async (req, res) => {
   try {
     const b = req.body || {};
     const author = typeof b.author === 'string' ? b.author.slice(0, 60) : null;
-    const { response, build } = await createBuild(b, { validate, kv, author });
+    const { response, build } = await createBuild(b, {
+      validate, kv, author, providers: await llmProviders(),
+    });
     appendHistory(buildHistoryEntry(build));
     res.json(response);
   } catch (e) {
@@ -98,7 +175,9 @@ app.post('/generate', async (req, res) => {
 app.post('/slate', async (req, res) => {
   try {
     const b = req.body || {};
-    const { builds, response } = await createSlate(b, { validate, kv });
+    const { builds, response } = await createSlate(b, {
+      validate, kv, providers: await llmProviders(),
+    });
     // Slate builds land in the Recent-builds panel too, oldest first so the
     // panel (newest-first) ends up showing them in slate order.
     for (const built of builds.slice().reverse()) appendHistory(buildHistoryEntry(built));
@@ -117,7 +196,8 @@ app.post('/usecases', async (req, res) => {
     const b = req.body || {};
     const brandName = (b.brand || '').trim() || 'Acme';
     const notes = typeof b.notes === 'string' ? b.notes.slice(0, 4000) : null;
-    const dossier = await buildDossier({ brandName, notes, kv, force: !!b.forceResearch });
+    const providers = await llmProviders();
+    const dossier = await buildDossier({ brandName, notes, kv, force: !!b.forceResearch }, { providers });
     // The brand kit (if the team saved one) lends its pasted voice sample to
     // every ideation prompt; the response carries boolean UI hints only.
     const kit = await getBrandKit(kv, brandSlug(brandName));
@@ -128,7 +208,7 @@ app.post('/usecases', async (req, res) => {
         || (Array.isArray(kit.products) && kit.products.length))),
       // lets the UI tell "heuristic because no key" from "heuristic because
       // the LLM call didn't land this time" — the label was lying before.
-      llmConfigured: hasResearchProvider(),
+      llmConfigured: hasResearchProvider({ providers }),
     };
     const publicDossier = {
       name: dossier.name,
@@ -145,7 +225,7 @@ app.post('/usecases', async (req, res) => {
       researchedAt: dossier.researchedAt,
     };
     if (typeof b.idea === 'string' && b.idea.trim()) {
-      const useCase = await shapeUserIdea({ idea: b.idea, dossier, voiceSample });
+      const useCase = await shapeUserIdea({ idea: b.idea, dossier, voiceSample }, { providers });
       return res.json({ useCase, dossier: { ...publicDossier, ...kitFlags } });
     }
     const { useCases, source } = await proposeUseCases({
@@ -155,7 +235,7 @@ app.post('/usecases', async (req, res) => {
       feedback: typeof b.feedback === 'string' ? b.feedback.slice(0, 500) : null,
       prior: Array.isArray(b.prior) ? b.prior.slice(0, 16).map(String) : null,
       voiceSample,
-    });
+    }, { providers });
     res.json({ useCases, source, dossier: { ...publicDossier, ...kitFlags } });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -193,6 +273,126 @@ app.post('/brandkit/:slug', async (req, res) => {
   res.json({ ok: true, kit: record });
 });
 
+// ---- settings: the LLM key pool ----------------------------------------------
+// GET returns masked keys only — a stored key never travels back to a browser.
+app.get('/settings/keys', async (req, res) => {
+  const pool = (await repo.getSetting(POOL_SETTINGS_KEY)) || [];
+  res.json({
+    keys: (Array.isArray(pool) ? pool : []).map((e) => ({
+      id: e.id, provider: e.provider, key: maskKey(e.key), label: e.label || null, model: e.model || null,
+      addedBy: e.addedBy || null, addedAt: e.addedAt || null,
+    })),
+    providers: PROVIDER_ORDER,
+  });
+});
+
+app.post('/settings/keys', async (req, res) => {
+  const entry = sanitizePoolEntry({
+    provider: (req.body || {}).provider,
+    key: (req.body || {}).key,
+    label: (req.body || {}).label,
+    model: (req.body || {}).model,
+    addedBy: (req.body || {}).author,
+  });
+  if (!entry) return res.status(400).json({ error: 'invalid key entry (provider must be one of: ' + PROVIDER_ORDER.join(', ') + ')' });
+  const pool = (await repo.getSetting(POOL_SETTINGS_KEY)) || [];
+  pool.push(entry);
+  if (!(await repo.putSetting(POOL_SETTINGS_KEY, pool))) {
+    return res.status(500).json({ error: 'could not persist the key' });
+  }
+  resetPoolCache(); // a freshly pasted key is live on the next request
+  repo.logActivity({ actor: entry.addedBy, verb: 'key-added', detail: entry.provider + ' ' + maskKey(entry.key) });
+  res.json({ ok: true, id: entry.id });
+});
+
+app.delete('/settings/keys/:id', async (req, res) => {
+  const pool = (await repo.getSetting(POOL_SETTINGS_KEY)) || [];
+  const next = (Array.isArray(pool) ? pool : []).filter((e) => e && e.id !== req.params.id);
+  if (next.length === pool.length) return res.status(404).json({ error: 'no such key' });
+  await repo.putSetting(POOL_SETTINGS_KEY, next);
+  resetPoolCache();
+  res.json({ ok: true });
+});
+
+// ---- assets: desktop image uploads -> Supabase Storage ------------------------
+// Bytes go to the public bucket (permanent CDN URL, email-safe); the metadata
+// row goes to the assets table. Without Supabase configured, bytes fall back
+// to the KV/fs store and are served through GET /assets/:id instead.
+app.post('/assets', async (req, res) => {
+  const b = req.body || {};
+  const vetted = validateUpload(b);
+  if (!vetted.ok) return res.status(400).json({ error: vetted.error });
+  const brand = await repo.getBrandById(b.brandId);
+  if (!brand) return res.status(400).json({ error: 'unknown brandId' });
+
+  const { newId } = require('./store');
+  const id = newId();
+  let storageKey;
+  let url;
+  if (storage) {
+    const objPath = storage.objectPath(brand.slug, id, vetted.filename);
+    url = await storage.putObject(objPath, b64ToBytes(b.dataBase64), vetted.mime);
+    if (!url) return res.status(502).json({ error: 'storage upload failed' });
+    storageKey = 'supabase:' + objPath;
+  } else {
+    if (!(await putAssetBytes(kv, id, { base64: b.dataBase64, mime: vetted.mime }))) {
+      return res.status(502).json({ error: 'storage upload failed' });
+    }
+    storageKey = 'kv:' + id;
+    url = '/assets/' + id;
+  }
+  const row = await repo.insertAsset({
+    brandId: brand.id,
+    kind: b.kind,
+    filename: vetted.filename,
+    mime: vetted.mime,
+    size: vetted.size,
+    storageKey,
+    uploadedBy: typeof b.author === 'string' ? b.author : null,
+  });
+  if (!row) return res.status(500).json({ error: 'could not record the asset' });
+  repo.logActivity({ actor: b.author, brandId: brand.id, verb: 'asset-uploaded', detail: vetted.filename });
+  res.json({ ok: true, asset: { id: row.id, url, filename: row.filename, mime: row.mime, size: row.size } });
+});
+
+app.get('/assets/:id', async (req, res) => {
+  const row = await repo.getAsset(req.params.id);
+  if (!row) return res.status(404).json({ error: 'no such asset' });
+  const key = String(row.storage_key || '');
+  if (key.startsWith('supabase:') && storage) {
+    return res.redirect(302, storage.publicUrl(key.slice('supabase:'.length)));
+  }
+  const bytes = await getAssetBytes(kv, row.id);
+  if (!bytes) return res.status(404).json({ error: 'asset bytes missing' });
+  res.setHeader('Content-Type', bytes.mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.send(Buffer.from(bytes.bytes));
+});
+
+app.delete('/assets/:id', async (req, res) => {
+  const row = await repo.getAsset(req.params.id);
+  if (!row) return res.status(404).json({ error: 'no such asset' });
+  const key = String(row.storage_key || '');
+  if (key.startsWith('supabase:') && storage) await storage.delObject(key.slice('supabase:'.length));
+  else await delAssetBytes(kv, row.id);
+  await repo.deleteAsset(row.id);
+  res.json({ ok: true });
+});
+
+app.get('/brands/:id/assets', async (req, res) => {
+  const rows = await repo.listAssets(req.params.id);
+  res.json({
+    items: rows.map((r) => ({
+      id: r.id,
+      url: String(r.storage_key || '').startsWith('supabase:') && storage
+        ? storage.publicUrl(String(r.storage_key).slice('supabase:'.length))
+        : '/assets/' + r.id,
+      filename: r.filename, mime: r.mime, size: r.size, kind: r.kind,
+      uploadedBy: r.uploaded_by, createdAt: r.created_at,
+    })),
+  });
+});
+
 // ---- tweak: prompt-to-refine with version chains ----------------------------
 // The engine turns the prompt into a schema-validated parameter edit-plan,
 // rebuilds through generate() + the real validator, and persists the new
@@ -205,7 +405,7 @@ app.post('/tweak', async (req, res) => {
     prompt: typeof b.prompt === 'string' ? b.prompt.slice(0, 500) : '',
     author: typeof b.author === 'string' ? b.author.slice(0, 60) : null,
     kv,
-  }, { validate });
+  }, { validate, providers: await llmProviders() });
   if (result.ok) appendHistory(buildHistoryEntry(result.build));
   res.status(result.ok ? 200 : 400).json(result);
 });

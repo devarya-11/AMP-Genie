@@ -100,9 +100,13 @@ function toGeminiSchema(schema) {
 }
 
 // ---- Gemini (Google AI Studio, free tier) ----------------------------------
-async function callGemini({ apiKey, model, prompt, schema, timeoutMs, fetchImpl = fetch }) {
+// cooldownKey (ADDITIVE, default 'gemini' — existing callers unchanged): the
+// Genie 2.0 key pool passes 'pool:<keyId>' so ONE exhausted pooled Gemini key
+// cools down alone instead of tripping the global 'gemini' switch and taking
+// every other pooled Gemini key down with it.
+async function callGemini({ apiKey, model, prompt, schema, timeoutMs, fetchImpl = fetch, cooldownKey = 'gemini' }) {
   if (!apiKey) return null;
-  if (isCoolingDown('gemini')) return null;
+  if (isCoolingDown(cooldownKey)) return null;
   // Auth via the x-goog-api-key HEADER, not the legacy ?key= query param —
   // Google's newer AI Studio key format (the "AQ." prefix) is only accepted
   // in the header, while classic AIza keys work with both. Also keeps the key
@@ -129,7 +133,7 @@ async function callGemini({ apiKey, model, prompt, schema, timeoutMs, fetchImpl 
     if (!res) return null;
     if (!res.ok) {
       const bodyText = await res.text().catch(() => '');
-      if (looksLikeQuotaExhausted(res.status, bodyText)) cooldown('gemini');
+      if (looksLikeQuotaExhausted(res.status, bodyText)) cooldown(cooldownKey);
       return null;
     }
     const data = await res.json();
@@ -144,12 +148,29 @@ async function callGemini({ apiKey, model, prompt, schema, timeoutMs, fetchImpl 
   }
 }
 
-// ---- Groq (OpenAI-compatible chat completions, free tier) -----------------
-async function callGroq({ apiKey, model, prompt, schema, timeoutMs, fetchImpl = fetch }) {
+// ---- Generic OpenAI-compatible chat completions ----------------------------
+// Groq, OpenRouter, Cerebras and Mistral all speak the exact same dialect:
+// POST {baseUrl}/chat/completions, Bearer auth, json_object response mode with
+// the schema restated in the system prompt (portable json_schema support is
+// still patchy across these hosts, json_object + schema-in-prompt is what
+// callGroq shipped with and what the parsers downstream validate anyway).
+// Same never-throws contract as every other call*.
+//
+// cooldownKey: which slot in the shared cooldown map a quota error trips.
+// Defaults to the baseUrl's host (e.g. 'api.mistral.ai') so distinct hosts
+// never shadow each other; the key pool passes 'pool:<keyId>' for per-key
+// isolation, and callGroq pins the historical 'groq' key.
+async function callOpenAICompat({ baseUrl, apiKey, model, prompt, schema, timeoutMs, fetchImpl = fetch, cooldownKey }) {
   if (!apiKey) return null;
-  if (isCoolingDown('groq')) return null;
+  const base = typeof baseUrl === 'string' ? baseUrl.replace(/\/+$/, '') : '';
+  if (!base) return null;
+  let coolKey = cooldownKey;
+  if (!coolKey) {
+    try { coolKey = new URL(base).host; } catch { coolKey = base; }
+  }
+  if (isCoolingDown(coolKey)) return null;
   try {
-    const res = await withTimeout(() => fetchImpl('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await withTimeout(() => fetchImpl(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
@@ -164,7 +185,7 @@ async function callGroq({ apiKey, model, prompt, schema, timeoutMs, fetchImpl = 
     if (!res) return null;
     if (!res.ok) {
       const bodyText = await res.text().catch(() => '');
-      if (looksLikeQuotaExhausted(res.status, bodyText)) cooldown('groq');
+      if (looksLikeQuotaExhausted(res.status, bodyText)) cooldown(coolKey);
       return null;
     }
     const data = await res.json();
@@ -172,9 +193,21 @@ async function callGroq({ apiKey, model, prompt, schema, timeoutMs, fetchImpl = 
     if (!text) return null;
     return JSON.parse(text);
   } catch (e) {
-    console.error('[llm-providers] Groq call failed:', e && e.message);
+    console.error(`[llm-providers] ${coolKey} call failed:`, e && e.message);
     return null;
   }
+}
+
+// ---- Groq (OpenAI-compatible chat completions, free tier) -----------------
+// Delegates to callOpenAICompat — byte-identical request (same URL string,
+// headers, body key order) and the same 'groq' cooldown slot as the inline
+// version it replaces, so existing callers and tests see no difference.
+async function callGroq({ apiKey, model, prompt, schema, timeoutMs, fetchImpl = fetch }) {
+  return callOpenAICompat({
+    baseUrl: 'https://api.groq.com/openai/v1',
+    apiKey, model, prompt, schema, timeoutMs, fetchImpl,
+    cooldownKey: 'groq',
+  });
 }
 
 // ---- Ollama (fully local, permanently free) --------------------------------
@@ -203,6 +236,6 @@ async function callOllama({ baseUrl, model, prompt, schema, timeoutMs, fetchImpl
 }
 
 module.exports = {
-  callClaude, callGemini, callGroq, callOllama,
+  callClaude, callGemini, callGroq, callOllama, callOpenAICompat,
   isCoolingDown, cooldown, resetCooldowns, withTimeout, looksLikeQuotaExhausted, COOLDOWN_MS,
 };

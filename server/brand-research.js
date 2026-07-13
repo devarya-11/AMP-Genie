@@ -391,7 +391,18 @@ async function synthesizeDossier(args = {}, opts = {}) {
 
   let thunk = null;
   if (injected) {
-    thunk = injected.length ? injected[0] : null;
+    const first = injected.length ? injected[0] : null;
+    if (typeof first === 'function') {
+      // legacy zero-arg thunk (tests) — called as-is
+      thunk = first;
+    } else if (first && typeof first.call === 'function') {
+      // a key-pool descriptor {name, call(prompt, schema, timeoutMs)} — this
+      // module builds its own prompt, so the descriptor is wrapped the same
+      // way the env path wraps its caller. The typeof-function check MUST
+      // come first: bare functions also expose Function.prototype.call.
+      const prompt = buildResearchPrompt({ brandName, facts, notes });
+      thunk = () => first.call(prompt, DOSSIER_SCHEMA, timeoutMs);
+    }
   } else {
     const call = detectProviderCall(opts);
     if (call) {

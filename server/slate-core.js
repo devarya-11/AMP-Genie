@@ -108,7 +108,7 @@ async function createSlate(body, deps = {}) {
     counter: i,
     author,
   }, {
-    validate, kv, author, slateId, useCase: job.title,
+    validate, kv, author, slateId, useCase: job.title, providers: deps.providers,
   })));
 
   // One failed build (provider meltdown, validator crash) must not sink the

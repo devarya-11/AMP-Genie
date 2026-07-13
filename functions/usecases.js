@@ -11,6 +11,7 @@ import usecaseEngineMod from '../server/usecase-engine.js';
 import storeMod from '../server/store.js';
 import { applyEnv } from './_lib/env.js';
 import { json, readJson } from './_lib/http.js';
+import { llmProviders } from './_lib/genie.js';
 
 const { buildDossier, hasResearchProvider } = brandResearchMod;
 const { proposeUseCases, shapeUserIdea } = usecaseEngineMod;
@@ -43,9 +44,10 @@ export async function onRequestPost({ request, env }) {
     const b = await readJson(request);
     const brandName = (b.brand || '').trim() || 'Acme';
     const notes = typeof b.notes === 'string' ? b.notes.slice(0, 4000) : null;
+    const providers = await llmProviders(env);
     const dossier = await buildDossier({
       brandName, notes, kv: env.HISTORY, force: !!b.forceResearch,
-    });
+    }, { providers });
     // The brand kit (if the team saved one) lends its pasted voice sample to
     // every ideation prompt, and the response carries two boolean UI hints —
     // never the kit record itself, which stays a server-side concern.
@@ -57,11 +59,11 @@ export async function onRequestPost({ request, env }) {
         || (Array.isArray(kit.products) && kit.products.length))),
       // lets the UI tell "heuristic because no key" from "heuristic because
       // the LLM call didn't land this time" — the label was lying before.
-      llmConfigured: hasResearchProvider(),
+      llmConfigured: hasResearchProvider({ providers }),
     };
 
     if (typeof b.idea === 'string' && b.idea.trim()) {
-      const useCase = await shapeUserIdea({ idea: b.idea, dossier, voiceSample });
+      const useCase = await shapeUserIdea({ idea: b.idea, dossier, voiceSample }, { providers });
       return json({ useCase, dossier: { ...publicDossier(dossier), ...kitFlags } });
     }
 
@@ -72,7 +74,7 @@ export async function onRequestPost({ request, env }) {
       feedback: typeof b.feedback === 'string' ? b.feedback.slice(0, 500) : null,
       prior: Array.isArray(b.prior) ? b.prior.slice(0, 16).map(String) : null,
       voiceSample,
-    });
+    }, { providers });
     return json({ useCases, source, dossier: { ...publicDossier(dossier), ...kitFlags } });
   } catch (e) {
     return json({ error: e.message }, 400);

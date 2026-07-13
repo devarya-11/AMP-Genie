@@ -84,6 +84,9 @@ async function createBuild(body, deps = {}) {
   const {
     kv = null, author = null, slateId = null, useCase = null,
     parentId = null, rootId = null, tweakPrompt = null,
+    // Genie 2.0 key pool: when the route passes descriptors they take over
+    // composeContent's provider list; undefined keeps the env-key detection.
+    providers = undefined,
   } = deps;
   const validate = deps.validate;
   if (typeof validate !== 'function') {
@@ -190,7 +193,7 @@ async function createBuild(body, deps = {}) {
   const plan = brief
     ? await composeContent(brief, {
       moduleId, vertical, brandName: brand, tone, voiceSample,
-    })
+    }, providers ? { providers } : undefined)
     : null;
   // Real fetched logo/site (plus any hero the kit or live fetch surfaced) is
   // the base layer; brief-driven plan overrides it; an explicit manual copy

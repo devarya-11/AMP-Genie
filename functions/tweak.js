@@ -11,6 +11,7 @@ import { validate } from './_lib/validator.js';
 import { appendHistory } from './_lib/history.js';
 import { applyEnv } from './_lib/env.js';
 import { json, readJson } from './_lib/http.js';
+import { llmProviders } from './_lib/genie.js';
 
 const { applyTweak } = tweakEngineMod;
 const { buildHistoryEntry } = buildPipelineMod;
@@ -24,7 +25,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
       prompt: typeof b.prompt === 'string' ? b.prompt : '',
       author: typeof b.author === 'string' ? b.author.slice(0, 60) : null,
       kv: env.HISTORY,
-    }, { validate });
+    }, { validate, providers: await llmProviders(env) });
     if (result.ok) {
       // The tweaked build lands in the legacy Recent-builds panel too,
       // without blocking the response (history is a review aid; a write

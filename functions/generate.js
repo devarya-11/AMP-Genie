@@ -10,6 +10,7 @@ import { validate } from './_lib/validator.js';
 import { appendHistory } from './_lib/history.js';
 import { applyEnv } from './_lib/env.js';
 import { json, readJson } from './_lib/http.js';
+import { llmProviders } from './_lib/genie.js';
 
 const { createBuild, buildHistoryEntry } = buildPipelineMod;
 
@@ -21,6 +22,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
       validate,
       kv: env.HISTORY,
       author: typeof b.author === 'string' ? b.author.slice(0, 60) : null,
+      providers: await llmProviders(env),
     });
     // Persist to KV without blocking the response (history is a review aid; a
     // write failure must never fail the build).

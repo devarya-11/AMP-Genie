@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AMP Genie — team access</title>
+<!-- Standalone by design: this page is served BEFORE auth, so it must not
+     depend on the gated app shell (style.css/app.js). The hex values below
+     are hardcoded copies of the :root tokens in style.css — same brass
+     palette, one page, zero requests behind the gate. -->
+<style>
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    color:#f5ede4; /* --ink */
+    background:
+      radial-gradient(900px 440px at 82% -8%, #4a2e1a, transparent 60%),  /* --bg-glow */
+      radial-gradient(700px 380px at 0% 0%, #5a3d2e, transparent 55%),    /* --bg-glow-2 */
+      #2e1c19; /* --bg */
+    font-family:'Inter','Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.45;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  }
+  ::selection{background:#e7812955}
+  .card{
+    width:min(360px, calc(100vw - 44px));
+    background:linear-gradient(180deg,#ffffff05,transparent),#3a2420; /* --card */
+    border:1px solid #70493f66; /* --line */
+    border-radius:16px; /* --r-lg */
+    padding:28px; /* --s-5 */
+    box-shadow:0 1px 0 #ffffff0d inset, 0 24px 70px -28px #000000cc; /* --shadow-lg */
+    text-align:center;
+  }
+  .lampic{width:44px;height:44px;color:#e78129;filter:drop-shadow(0 0 14px #e7812955)} /* --accent */
+  h1{margin:10px 0 4px;font-size:19px;font-weight:800;letter-spacing:-.2px}
+  h1 span{color:#ffffff}
+  .sub{margin:0 0 20px;color:#b3927d;font-size:13px} /* --muted */
+  label{
+    display:block;text-align:left;margin-bottom:6px;
+    font-size:11px;font-weight:600;color:#b3927d;text-transform:uppercase;letter-spacing:.6px;
+  }
+  input{
+    width:100%;padding:10px 12px;border-radius:11px; /* --r-md */
+    background:#241511;border:1px solid #70493f66;color:#f5ede4; /* --field / --line / --ink */
+    font:inherit;outline:none;transition:border-color 150ms cubic-bezier(.4,0,.2,1), box-shadow 150ms cubic-bezier(.4,0,.2,1);
+  }
+  input::placeholder{color:#8a6d5c} /* --faint */
+  input:focus{border-color:#e78129;box-shadow:0 0 0 3px #e7812955} /* --accent / --ring */
+  button{
+    width:100%;margin-top:14px;padding:11px 14px;border:0;border-radius:11px;
+    background:#e78129;color:#1a0f0a; /* --accent / --on-accent */
+    font:inherit;font-weight:700;cursor:pointer;
+    transition:background 150ms cubic-bezier(.4,0,.2,1), transform 150ms cubic-bezier(.4,0,.2,1);
+  }
+  button:hover{background:#c2691c} /* --accent-press */
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.6;cursor:default}
+  .err{
+    display:none;margin:14px 0 0;padding:8px 10px;border-radius:8px; /* --r-sm */
+    background:#3a1320;color:#ff5b6e;font-size:13px; /* --bad-bg / --bad */
+  }
+  .err.on{display:block}
+  .hint{margin:18px 0 0;color:#8a6d5c;font-size:12px} /* --faint */
+</style>
+</head>
+<body>
+  <main class="card">
+    <!-- inline copy of the app shell's #i-lamp symbol (web/index.html) -->
+    <svg class="lampic" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="currentColor" d="M5 14c0-3.9 3.1-7 7-7 2.8 0 5 1.6 6.2 4l3.3-1.1.5 1.5-3.3 1.1c.2.7.3 1.4.3 2.1H5zm-1 2h16v2H4zm3 3h10l-1 2H8z"/>
+      <circle cx="12" cy="4" r="1.6" fill="currentColor"/>
+    </svg>
+    <h1>AMP&nbsp;<span>Genie</span></h1>
+    <p class="sub">The workshop is team-only. One password, shared in the team channel.</p>
+    <form id="loginForm">
+      <label for="pw">Team password</label>
+      <input id="pw" type="password" autocomplete="current-password" placeholder="••••••••" autofocus required>
+      <button id="go" type="submit">Enter the workshop</button>
+    </form>
+    <p id="err" class="err" role="alert"></p>
+    <p class="hint">Sessions last 30 days on this browser.</p>
+  </main>
+<script>
+  (function () {
+    var form = document.getElementById('loginForm');
+    var pw = document.getElementById('pw');
+    var go = document.getElementById('go');
+    var err = document.getElementById('err');
+    function fail(message) {
+      err.textContent = message;
+      err.classList.add('on');
+      go.disabled = false;
+      pw.focus();
+      pw.select();
+    }
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      err.classList.remove('on');
+      go.disabled = true;
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: pw.value }),
+      }).then(function (res) {
+        if (res.ok) { location.replace('/'); return; }
+        fail(res.status === 401
+          ? 'Wrong password — ask the team for the current one.'
+          : 'The genie is unavailable right now (' + res.status + '). Try again.');
+      }).catch(function () {
+        fail('Could not reach the genie — check your connection and retry.');
+      });
+    });
+  })();
+</script>
+</body>
+</html>

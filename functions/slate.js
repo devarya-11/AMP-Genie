@@ -10,6 +10,7 @@ import { validate } from './_lib/validator.js';
 import { appendHistory } from './_lib/history.js';
 import { applyEnv } from './_lib/env.js';
 import { json, readJson } from './_lib/http.js';
+import { llmProviders } from './_lib/genie.js';
 
 const { createSlate } = slateCoreMod;
 const { buildHistoryEntry } = buildPipelineMod;
@@ -18,7 +19,9 @@ export async function onRequestPost({ request, env, waitUntil }) {
   applyEnv(env); // provider API keys reach brief-content/llm-providers via process.env
   try {
     const b = await readJson(request);
-    const { builds, response } = await createSlate(b, { validate, kv: env.HISTORY });
+    const { builds, response } = await createSlate(b, {
+      validate, kv: env.HISTORY, providers: await llmProviders(env),
+    });
     // Slate builds land in the legacy Recent-builds panel too. ONE combined
     // promise, appending sequentially inside it: appendHistory is a
     // read-modify-write of a single KV key (see _lib/history.js), so n

@@ -47,6 +47,9 @@ module.exports = defineConfig({
       SMTP_HOST: '',
       SMTP_USER: '',
       SMTP_PASS: '',
+      // Genie 2.0 team gate: unset means OPEN (server/auth.js) — the suite
+      // tests the app, not the login wall; the gate has its own unit tests.
+      TEAM_PASSWORD: '',
     },
   },
 });
