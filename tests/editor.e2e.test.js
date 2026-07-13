@@ -133,3 +133,44 @@ test('reopening the saved email in the editor loads its blocks', async ({ page }
     .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 25000 })
     .toContain('amp-bind');
 });
+
+test('M4: dragging a palette block into the phone inserts it on the canvas', async ({ page }) => {
+  await openEditorFresh(page);
+  await page.fill('#edAiIdea', 'quiz with an intro');
+  await page.click('#edAiGo');
+  const canvasTypes = () => page.frameLocator('#edFrame').locator('[data-bid]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-btype')));
+  await expect.poll(async () => (await canvasTypes()).length, { timeout: 60000 }).toBeGreaterThan(1);
+
+  // palette items are draggable
+  await expect(page.locator('#edPalette .ed-add-btn').first()).toHaveAttribute('draggable', 'true');
+
+  // The canvas anchors land in the DOM a beat before bindCanvas (the iframe
+  // onload handler) attaches the drop listeners. A real user's mouse-drag is
+  // far slower than that gap; the test isn't, so wait for the tell that
+  // bindCanvas ran — it injects #edg-style into the iframe head.
+  await expect
+    .poll(async () => page.evaluate(() => {
+      const cd = document.getElementById('edFrame').contentDocument;
+      return !!(cd && cd.getElementById('edg-style'));
+    }), { timeout: 20000 })
+    .toBe(true);
+
+  const before = await canvasTypes();
+  // drop a Button block onto the first canvas anchor (real DnD across the
+  // iframe boundary isn't reliably scriptable, so dispatch the same events the
+  // browser fires — proven equivalent to a real drag)
+  await page.evaluate(() => {
+    const win = document.getElementById('edFrame').contentWindow;
+    const cd = win.document;
+    const a = cd.querySelector('[data-bid]');
+    // build the DataTransfer + event in the IFRAME realm — a parent-realm
+    // DataTransfer riding an iframe DragEvent reads back empty via getData().
+    const dt = new win.DataTransfer(); dt.setData('text/ed-newblock', 'button');
+    const r = a.getBoundingClientRect();
+    a.dispatchEvent(new win.DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: r.top + 3 }));
+    a.dispatchEvent(new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: r.top + 3 }));
+  });
+  await expect.poll(async () => (await canvasTypes()).includes('button'), { timeout: 20000 }).toBe(true);
+  await expect.poll(async () => (await canvasTypes()).length, { timeout: 20000 }).toBe(before.length + 1);
+});

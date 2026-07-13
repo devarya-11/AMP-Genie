@@ -1094,6 +1094,12 @@
       b.title = (opts.hint || '');
     } else {
       b.onclick = () => addBlock(def.type);
+      // M4: drag a palette element INTO the phone to drop it at a position.
+      b.draggable = true;
+      b.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/ed-newblock', def.type);
+        e.dataTransfer.effectAllowed = 'copy';
+      });
     }
     return b;
   }
@@ -1108,21 +1114,29 @@
     });
     if (locked) box.appendChild(el('div', 'ed-pal-note', 'One interactive block per email.'));
   }
-  function addBlock(type) {
+  // atIndex (M4 drop): insert the new block at that exact slot; otherwise
+  // insert after the selected block (click-to-add), else append.
+  function addBlock(type, atIndex) {
     let block;
     if (isInteractive(type)) {
-      if (docHasInteractive()) return; // guard: one per email
+      if (docHasInteractive()) return null; // guard: one per email
       block = { id: nextBlockId(), type, props: {} };
     } else {
-      const def = blockDef(type); if (!def) return;
+      const def = blockDef(type); if (!def) return null;
       block = { id: nextBlockId(), type, props: def.make() };
     }
-    const idx = S.doc.blocks.findIndex((b) => b.id === S.edSelId);
-    if (idx >= 0) S.doc.blocks.splice(idx + 1, 0, block);
-    else S.doc.blocks.push(block);
+    if (Number.isInteger(atIndex)) {
+      const i = Math.max(0, Math.min(atIndex, S.doc.blocks.length));
+      S.doc.blocks.splice(i, 0, block);
+    } else {
+      const idx = S.doc.blocks.findIndex((b) => b.id === S.edSelId);
+      if (idx >= 0) S.doc.blocks.splice(idx + 1, 0, block);
+      else S.doc.blocks.push(block);
+    }
     S.edSelId = block.id;
     renderPalette(); renderBlocks(); renderProps();
     markDirty();
+    return block;
   }
 
   // ---- LEFT: brand ASSET LIBRARY (shared, collaborative) ----
@@ -1547,13 +1561,21 @@
       if (sel) sel.classList.add('edg-sel');
     }
   }
+  function clearDropMarks(cd) {
+    cd.querySelectorAll('.edg-drop-before,.edg-drop-after,.edg-drop-asset')
+      .forEach((n) => n.classList.remove('edg-drop-before', 'edg-drop-after', 'edg-drop-asset'));
+  }
+  const ASSET_TARGET = /^(hero|image|header|products)$/;
   function bindCanvas() {
     const cd = canvasDoc(); if (!cd || !cd.body) return;
     if (!cd.getElementById('edg-style')) {
       const st = cd.createElement('style'); st.id = 'edg-style';
       st.textContent = '.edg-a{cursor:pointer;transition:outline .1s}'
         + '.edg-a.edg-hover{outline:2px dashed #e78129;outline-offset:-2px}'
-        + '.edg-a.edg-sel{outline:2px solid #e78129;outline-offset:-2px}';
+        + '.edg-a.edg-sel{outline:2px solid #e78129;outline-offset:-2px}'
+        + '.edg-a.edg-drop-before{box-shadow:inset 0 4px 0 #e78129}'
+        + '.edg-a.edg-drop-after{box-shadow:inset 0 -4px 0 #e78129}'
+        + '.edg-a.edg-drop-asset{outline:3px dashed #34d27b;outline-offset:-3px}';
       (cd.head || cd.documentElement).appendChild(st);
     }
     cd.addEventListener('mouseover', (e) => {
@@ -1571,6 +1593,44 @@
       const a = anchorOf(cd, e.target);
       if (a) { e.preventDefault(); e.stopPropagation(); selectBlock(a.dataset.bid); }
     }, true);
+
+    // M4: drop a palette block, or a library image, INTO the phone.
+    cd.addEventListener('dragover', (e) => {
+      const t = e.dataTransfer.types || [];
+      const isNew = t.indexOf && t.indexOf('text/ed-newblock') >= 0;
+      const isAsset = t.indexOf && t.indexOf('text/asset-url') >= 0;
+      if (!isNew && !isAsset) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = isNew ? 'copy' : 'move';
+      clearDropMarks(cd);
+      const a = anchorOf(cd, e.target);
+      if (!a) return;
+      if (isAsset) { if (ASSET_TARGET.test(a.dataset.btype)) a.classList.add('edg-drop-asset'); return; }
+      const rect = a.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > rect.height / 2;
+      a.classList.add(after ? 'edg-drop-after' : 'edg-drop-before');
+      a.dataset.dropafter = after ? '1' : '0';
+    });
+    cd.addEventListener('dragleave', () => clearDropMarks(cd));
+    cd.addEventListener('drop', (e) => {
+      const nb = e.dataTransfer.getData('text/ed-newblock');
+      const asset = e.dataTransfer.getData('text/asset-url');
+      const a = anchorOf(cd, e.target);
+      clearDropMarks(cd);
+      if (nb) {
+        e.preventDefault();
+        let idx = S.doc.blocks.length;
+        if (a) {
+          const bi = S.doc.blocks.findIndex((b) => b.id === a.dataset.bid);
+          if (bi >= 0) idx = bi + (a.dataset.dropafter === '1' ? 1 : 0);
+        }
+        addBlock(nb, idx);
+      } else if (asset && a) {
+        e.preventDefault();
+        const blk = S.doc.blocks.find((b) => b.id === a.dataset.bid);
+        if (blk && ASSET_TARGET.test(blk.type)) dropAssetOnBlock(blk, asset);
+      }
+    });
     highlightCanvas();
   }
 
