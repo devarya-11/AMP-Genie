@@ -156,6 +156,9 @@
       return;
     }
     S.pitches.forEach((p) => {
+      // The card is a <button>, so the delete control is a SIBLING overlaid on a
+      // positioned wrapper (a nested <button> would be invalid HTML).
+      const wrap = el('div', 'pitch-card-wrap');
       const card = el('button', 'pitch-card'); card.type = 'button';
       card.appendChild(el('div', 'pc-brand', p.brandName || p.brand_name || p.brand || '?'));
       card.appendChild(el('div', 'pc-title', p.title || 'Untitled pitch'));
@@ -168,8 +171,26 @@
       const upd = p.updated_at || p.created_at;
       if (upd) card.appendChild(el('div', 'pc-foot', 'Updated ' + shortDate(upd)));
       card.onclick = () => openPitch(p.id);
-      box.appendChild(card);
+      const del = el('button', 'pitch-del', '✕'); del.type = 'button';
+      del.title = 'Delete pitch'; del.setAttribute('aria-label', 'Delete pitch ' + (p.title || ''));
+      del.onclick = (e) => { e.stopPropagation(); deletePitch(p); };
+      wrap.appendChild(card); wrap.appendChild(del);
+      box.appendChild(wrap);
     });
+  }
+  // Hard-delete a pitch (and its examples) after an explicit confirm.
+  async function deletePitch(p) {
+    const n = (p.exampleCount != null) ? p.exampleCount : (p.example_count != null ? p.example_count : 0);
+    const tail = n ? ' and its ' + n + ' example' + (n === 1 ? '' : 's') : '';
+    if (!window.confirm('Delete “' + (p.title || 'this pitch') + '”' + tail + '? This cannot be undone.')) return;
+    setLine('pitchesStatus', 'Deleting “' + (p.title || 'pitch') + '”…', true);
+    try {
+      const r = await req('DELETE', '/api/pitches/' + encodeURIComponent(p.id), { author: author() });
+      if (r && r.error) { setLine('pitchesStatus', 'Error: ' + r.error); return; }
+      S.pitches = S.pitches.filter((x) => x.id !== p.id);
+      renderPitches();
+      setLine('pitchesStatus', 'Deleted “' + (p.title || 'pitch') + '”.');
+    } catch (e) { setLine('pitchesStatus', 'Error: ' + e.message); }
   }
 
   // ======================================================================

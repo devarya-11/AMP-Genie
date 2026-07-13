@@ -350,6 +350,20 @@ function createPitchApi(ctx = {}) {
     return ok({ pitch });
   }
 
+  // DELETE /api/pitches/:id — hard-delete a pitch and its examples. Recorded in
+  // the activity log (the pitch is gone, but the audit line survives).
+  async function deletePitchH({ id, author } = {}) {
+    if (!ID_SHAPE.test(String(id || ''))) return bad('bad pitch id');
+    const pitch = await repo.getPitch(id);
+    if (!pitch) return missing('no such pitch');
+    const gone = await repo.deletePitch(id);
+    if (!gone) return missing('no such pitch');
+    await repo.logActivity({
+      actor: cleanAuthor(author), brandId: pitch.brand_id, verb: 'pitch-deleted', detail: pitch.title,
+    });
+    return ok({ ok: true });
+  }
+
   // ---- examples: the bridge from the engines into the pitch space --------------
 
   // createExampleH is where the relational workspace meets the KV-era build
@@ -860,6 +874,7 @@ function createPitchApi(ctx = {}) {
     listPitchesH: guarded(listPitchesH),
     getPitchH: guarded(getPitchH),
     updatePitchH: guarded(updatePitchH),
+    deletePitchH: guarded(deletePitchH),
     createExampleH: guarded(createExampleH),
     getExampleH: guarded(getExampleH),
     exampleToDocH: guarded(exampleToDocH),

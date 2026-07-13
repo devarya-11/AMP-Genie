@@ -353,6 +353,17 @@ function createSupabaseRepo({ url, secretKey, fetchImpl = fetch } = {}) {
     return updatePitch(id, { status: 'archived' });
   }
 
+  // Hard-delete a pitch and its examples. Postgres enforces the
+  // examples.pitch_id FK, so those rows MUST go first or the pitch DELETE 409s.
+  async function deletePitch(id) {
+    if (!ID_SHAPE.test(String(id || ''))) return false;
+    await call('examples?pitch_id=eq.' + enc(String(id)), { method: 'DELETE' });
+    const out = await call('pitches?id=eq.' + enc(String(id)), {
+      method: 'DELETE', prefer: 'return=representation',
+    });
+    return Array.isArray(out) && out.length > 0;
+  }
+
   // ---- examples -----------------------------------------------------------------
 
   async function getExample(id) {
@@ -573,6 +584,7 @@ function createSupabaseRepo({ url, secretKey, fetchImpl = fetch } = {}) {
     listAllPitches,
     updatePitch,
     archivePitch,
+    deletePitch,
     createExample,
     getExample,
     updateExampleDoc,

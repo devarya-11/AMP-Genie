@@ -80,6 +80,9 @@ function registerPitchRoutes(app, ctx) {
       patch: b.patch !== undefined ? b.patch : b,
     }));
   });
+  app.delete('/api/pitches/:id', async (req, res) => {
+    send(res, await api.deletePitchH({ id: req.params.id, author: body(req).author }));
+  });
   app.post('/api/pitches/:id/examples', async (req, res) => {
     const b = body(req);
     send(res, await api.createExampleH({

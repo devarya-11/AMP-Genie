@@ -19,3 +19,9 @@ export async function onRequestPatch({ request, params, env }) {
   });
   return json(out.json, out.status);
 }
+
+export async function onRequestDelete({ request, params, env }) {
+  const b = await readJson(request).catch(() => ({}));
+  const out = await getPitchApi(env).deletePitchH({ id: params.id, author: b && b.author });
+  return json(out.json, out.status);
+}

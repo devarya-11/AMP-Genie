@@ -213,3 +213,25 @@ test('settings: add a pool key -> masked row -> delete it', async ({ page }) => 
   await row.locator('button').last().click();
   await expect(row).toHaveCount(0, { timeout: 15000 });
 });
+
+test('pitches home: the delete control removes a pitch after confirm', async ({ page, request }) => {
+  // a throwaway pitch so the shared serial flow's pitch is untouched
+  const delTitle = 'Delete me ' + RUN;
+  const brand = (await (await request.post('/api/brands', {
+    data: { name: 'DelBrand ' + RUN, notes: 'x', author: 'E2E' },
+  })).json());
+  const bId = (brand.brand || brand).id;
+  await request.post('/api/pitches', { data: { brandId: bId, title: delTitle, brief: 'x', author: 'E2E' } });
+
+  await gotoHome(page);
+  const card = page.locator('#pitchesList .pitch-card-wrap', { hasText: delTitle });
+  await expect(card).toHaveCount(1, { timeout: 15000 });
+
+  page.once('dialog', (d) => d.accept()); // the confirm()
+  await card.locator('.pitch-del').click();
+  await expect(card).toHaveCount(0, { timeout: 15000 });
+
+  // and it's really gone from the API, not just the DOM
+  const after = await (await request.get('/api/pitches')).json();
+  expect((after.items || after.pitches || []).some((p) => p.title === delTitle)).toBe(false);
+});

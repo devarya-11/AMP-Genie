@@ -219,6 +219,31 @@ test('pitches: create/list/get/update with the brand join and the status allowli
   assert.strictEqual((await api.getPitchH({ id: 'aaaaaabbbbbb' })).status, 404);
 });
 
+test('deletePitchH hard-deletes the pitch and cascades to its examples', async () => {
+  const { api, repo } = await freshApi();
+  const brandId = (await api.createBrandH({ name: 'Deletable Co' })).json.brand.id;
+  const pitch = (await api.createPitchH({ brandId, title: 'To be deleted' })).json.pitch;
+  const ex = await api.createDocExampleH({
+    pitchId: pitch.id, title: 'Doomed email',
+    doc: { version: 1, blocks: [{ id: 'b1', type: 'text', props: { heading: 'Hi', body: 'x' } }] },
+    author: 'tester',
+  });
+  assert.strictEqual(ex.status, 200);
+  assert.strictEqual((await api.getPitchH({ id: pitch.id })).json.examples.length, 1, 'example present before delete');
+
+  const del = await api.deletePitchH({ id: pitch.id, author: 'tester' });
+  assert.strictEqual(del.status, 200);
+  assert.strictEqual(del.json.ok, true);
+
+  assert.strictEqual((await api.getPitchH({ id: pitch.id })).status, 404, 'the pitch is gone');
+  assert.deepStrictEqual(await repo.listExamplesForPitch(pitch.id), [], 'its examples are gone too');
+  const list = await api.listPitchesH();
+  assert.ok(!(list.json.pitches || list.json.items || []).some((p) => p.id === pitch.id), 'off the pitch list');
+
+  assert.strictEqual((await api.deletePitchH({ id: pitch.id })).status, 404, 'a second delete finds nothing');
+  assert.strictEqual((await api.deletePitchH({ id: 'nope' })).status, 400, 'a malformed id is a 400');
+});
+
 // ---- createExample: the bridge from the engines into the pitch space ------------
 
 test('createExample end-to-end: real generate + real validator, brands-row colour/assets/products/voice carried', async () => {

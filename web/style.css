@@ -201,6 +201,15 @@ button.chip.on{border-color:var(--accent);color:var(--ink);background:#e7812922}
 .pc-foot{margin-top:auto;font-size:11px;color:var(--faint)}
 .pitch-card.empty{align-items:center;justify-content:center;color:var(--faint);font-style:italic;cursor:default;border-style:dashed}
 .pitch-card.empty:hover{border-color:var(--line);transform:none;box-shadow:var(--shadow)}
+/* delete affordance — a sibling overlaid on a positioned wrapper (the card is a button) */
+.pitch-card-wrap{position:relative;display:flex}
+.pitch-card-wrap>.pitch-card{width:100%}
+.pitch-del{position:absolute;top:10px;right:10px;z-index:2;width:26px;height:26px;border-radius:8px;
+  border:1px solid var(--line);background:var(--card);color:var(--faint);font-size:12px;line-height:1;cursor:pointer;
+  opacity:.5;transition:opacity var(--tr),color var(--tr),border-color var(--tr)}
+.pitch-card-wrap:hover .pitch-del{opacity:1}
+.pitch-del:hover{color:var(--bad,#ff5b6e);border-color:var(--bad,#ff5b6e)}
+.pitch-del:focus-visible{opacity:1;outline:none;box-shadow:var(--ring)}
 
 /* ---- wizard ---- */
 .wizard{display:flex;flex-direction:column;gap:var(--s-4)}

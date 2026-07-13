@@ -387,6 +387,16 @@ async function archivePitch(db, id) {
   return updatePitch(db, id, { status: 'archived' });
 }
 
+// Hard-delete a pitch and everything hanging off it. examples.pitch_id
+// REFERENCES pitches(id) (enforced by Postgres/D1), so its rows go FIRST;
+// activity rows are a log with no FK, so they are left as the audit trail.
+async function deletePitch(db, id) {
+  if (!ID_SHAPE.test(String(id || ''))) return false;
+  await db.run('DELETE FROM examples WHERE pitch_id = ?', [String(id)]);
+  const { changes } = await db.run('DELETE FROM pitches WHERE id = ?', [String(id)]);
+  return changes > 0;
+}
+
 // ---- examples -------------------------------------------------------------------
 
 // List rows exclude the two heavy columns (amp_html is a whole email,
@@ -620,7 +630,7 @@ module.exports = {
   // contacts
   addContact, updateContact, deleteContact, listContacts,
   // pitches
-  createPitch, getPitch, listPitchesForBrand, listAllPitches, updatePitch, archivePitch,
+  createPitch, getPitch, listPitchesForBrand, listAllPitches, updatePitch, archivePitch, deletePitch,
   PITCH_STATUSES,
   // examples
   createExample, getExample, updateExampleDoc, listExamplesForPitch, listVersions, latestExamplesPerRoot,
