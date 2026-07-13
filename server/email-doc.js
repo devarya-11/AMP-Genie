@@ -538,7 +538,22 @@ const BLOCK_RENDERERS = {
  * with the exact generate.js head order and a single <style amp-custom>.
  * ------------------------------------------------------------------ */
 
-function renderDoc(doc) {
+// opts.anchors (Genie 2.0 canvas editor): wrap each top-level block body in a
+// <div class="edg-a" data-bid=.. data-btype=..> so the editor's canvas overlay
+// can map a click/drag anywhere in the rendered phone back to the block that
+// produced it. Anchors are EDITOR-ONLY — the saved/shared amp_html is rendered
+// WITHOUT them (clean), so a wrapper div can never reach a real inbox.
+function anchorId(id) {
+  return String(id == null ? '' : id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+}
+function wrapAnchor(block, html, index) {
+  const bid = anchorId(block.id) || ('b' + index);
+  const btype = anchorId(block.type);
+  return `<div class="edg-a" data-bid="${bid}" data-btype="${btype}">${html}</div>`;
+}
+
+function renderDoc(doc, opts = {}) {
+  const anchors = !!(opts && opts.anchors);
   const warnings = [];
   // Tolerate being handed either a raw or an already-sanitized doc: if it looks
   // untrusted, run it through the trust boundary first.
@@ -586,23 +601,23 @@ function renderDoc(doc) {
   const seenScript = new Set();
   const addScript = (s) => { if (s && !seenScript.has(s)) { seenScript.add(s); scripts.push(s); } };
 
-  for (const block of d.blocks) {
+  d.blocks.forEach((block, index) => {
     if (INTERACTIVE_TYPES.has(block.type)) {
-      if (interactiveRendered) continue; // belt-and-braces: at most one
+      if (interactiveRendered) return; // belt-and-braces: at most one
       const out = renderInteractive(block, ctx, warnings);
-      if (!out) continue;
+      if (!out) return;
       interactiveRendered = true;
-      bodies.push(out.html);
+      bodies.push(anchors ? wrapAnchor(block, out.html, index) : out.html);
       for (const c of out.css) cssParts.push(c);
       for (const s of out.scripts) addScript(s);
-      continue;
+      return;
     }
     const render = BLOCK_RENDERERS[block.type];
-    if (!render) continue; // validateDoc already dropped unknowns; belt-and-braces
+    if (!render) return; // validateDoc already dropped unknowns; belt-and-braces
     const out = render(block.props || {}, ctx, warnings);
-    bodies.push(out.html);
+    bodies.push(anchors ? wrapAnchor(block, out.html, index) : out.html);
     for (const c of out.css) cssParts.push(c);
-  }
+  });
 
   const css = mergeCss(cssParts);
   // The head carries v0.js (always, added by shell) + the deduped

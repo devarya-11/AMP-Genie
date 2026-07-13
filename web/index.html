@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
 
@@ -371,10 +371,22 @@
         <div id="edLibrary" class="ed-library"><div id="edDrawer" class="ed-drawer"></div></div>
       </aside>
 
-      <!-- CENTER: block list -->
-      <div class="ed-center card">
-        <div class="gen-hdr"><svg class="ic accent"><use href="#i-doc"/></svg> Blocks</div>
-        <div id="edBlocks" class="ed-blocks"></div>
+      <!-- CENTER: the phone IS the canvas — click a block to select & edit it -->
+      <div class="ed-center ed-canvas card">
+        <div class="ed-canvas-bar">
+          <div id="edSelBar" class="ed-selbar"><span class="ed-selbar-empty">Click a block in the email to edit it</span></div>
+          <span id="edChip" class="chip">rendering…</span>
+        </div>
+        <div id="edWarn" class="ed-warn"></div>
+        <div class="stage">
+          <div class="phone">
+            <div class="phone-screen">
+              <iframe id="edFrame" class="amp-frame" sandbox="allow-scripts allow-same-origin" title="Editable AMP email"></iframe>
+            </div>
+          </div>
+        </div>
+        <!-- block-list state (reorder/dup/delete power the selection bar); hidden -->
+        <div id="edBlocks" class="ed-blocks hidden"></div>
       </div>
 
       <!-- RIGHT: properties -->
@@ -382,22 +394,6 @@
         <div class="gen-hdr"><svg class="ic accent"><use href="#i-sliders"/></svg> Properties</div>
         <div id="edProps" class="ed-props"></div>
       </aside>
-    </div>
-
-    <!-- PREVIEW: phone frame -->
-    <div class="ed-preview card">
-      <div class="ed-preview-hdr">
-        <div class="gen-hdr" style="margin:0"><svg class="ic accent"><use href="#i-lamp"/></svg> Live preview</div>
-        <span id="edChip" class="chip">rendering…</span>
-      </div>
-      <div id="edWarn" class="ed-warn"></div>
-      <div class="stage">
-        <div class="phone">
-          <div class="phone-screen">
-            <iframe id="edFrame" class="amp-frame" sandbox="allow-scripts allow-same-origin" title="Live AMP email preview"></iframe>
-          </div>
-        </div>
-      </div>
     </div>
   </section>
 
@@ -432,6 +428,6 @@
   </main>
 </div>
 
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

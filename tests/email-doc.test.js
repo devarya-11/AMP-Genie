@@ -536,3 +536,31 @@ test('determinism: a composed interactive+static doc is byte-identical across re
   };
   assert.strictEqual(renderDoc(doc).ampHtml, renderDoc(doc).ampHtml);
 });
+
+// ---- M2 canvas: renderDoc anchors option (editor-only addressable blocks) ----
+
+test('renderDoc({anchors}) wraps each block in an addressable data-bid element; clean render has none', async () => {
+  const doc = {
+    version: 1, brand: { name: 'Practo', primaryHex: '#0a8080' },
+    blocks: [
+      { id: 'b1', type: 'header', props: { brandName: 'Practo' } },
+      { id: 'b2', type: 'text', props: { heading: 'Hi', body: 'One question.' } },
+      { id: 'b3', type: 'quiz', props: { head: 'Which plan?' } },
+      { id: 'b4', type: 'footer', props: { brandName: 'Practo' } },
+    ],
+  };
+  const { doc: clean } = validateDoc(doc);
+  const plain = renderDoc(clean);
+  const anchored = renderDoc(clean, { anchors: true });
+
+  // clean render (what gets saved/shared) carries NO editor anchors
+  assert.ok(!plain.ampHtml.includes('data-bid'), 'saved render must be anchor-free');
+
+  // anchored render (editor canvas) tags every block, and still validates
+  const bids = (anchored.ampHtml.match(/data-bid="[^"]+"/g) || []);
+  assert.strictEqual(bids.length, 4, 'one anchor per block');
+  assert.ok(anchored.ampHtml.includes('data-bid="b3"') && anchored.ampHtml.includes('data-btype="quiz"'),
+    'the interactive block is addressable too');
+  const v = await validate(anchored.ampHtml);
+  assert.strictEqual(v.pass, true, 'anchored render must still pass the real validator');
+});

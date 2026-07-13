@@ -483,6 +483,18 @@ a.linkbtn{color:var(--ink-2)}
 .ed-warn:empty{display:none}
 .chip.rendering{color:var(--muted)}
 
+/* M2: the phone IS the canvas (center column). Click a block to select+edit. */
+.ed-canvas{display:flex;flex-direction:column;gap:12px;
+  background:radial-gradient(460px 320px at 50% 8%, #e7812914, transparent 70%)}
+.ed-canvas-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:34px}
+.ed-selbar{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
+.ed-selbar-empty{color:var(--faint);font-size:13px;font-style:italic}
+.ed-selbar-tag{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;letter-spacing:.3px;
+  color:var(--ink);background:#e7812918;border:1px solid #e7812955;border-radius:20px;padding:4px 12px 4px 6px}
+.ed-selbar-tag.inter{background:#4c88f818;border-color:#4c88f855}
+.ed-selbar-tag .ed-block-ic{width:20px;height:20px}
+.ed-selbar-acts{display:flex;gap:3px}
+
 @media(max-width:1100px){
   .ed-grid{grid-template-columns:1fr}
   .ed-left,.ed-right{position:static}

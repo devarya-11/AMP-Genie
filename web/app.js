@@ -1136,7 +1136,7 @@
       const sum = inter ? (blk.props && blk.props.head ? blk.props.head : 'Interactive module')
                         : ((def && def.summary(blk.props || {})) || '');
       body.appendChild(el('div', 'ed-block-sum', sum));
-      body.onclick = () => { S.edSelId = blk.id; renderBlocks(); renderProps(); };
+      body.onclick = () => selectBlock(blk.id);
       card.appendChild(body);
 
       const acts = el('div', 'ed-block-acts');
@@ -1179,6 +1179,7 @@
 
       box.appendChild(card);
     });
+    renderSelBar(); // keep the in-canvas toolbar in sync with every mutation
   }
   function blockIndex(id) { return S.doc.blocks.findIndex((b) => b.id === id); }
   function moveBlock(id, dir) {
@@ -1414,6 +1415,90 @@
 
   // ---- PREVIEW: debounced POST /api/docs/render ----
   let _renderTimer = null;
+  // ---- selection is shared by the block list AND the phone canvas ----
+  function selectBlock(id) {
+    S.edSelId = id;
+    renderBlocks();
+    renderSelBar();
+    renderProps();
+    highlightCanvas();
+  }
+
+  // The in-canvas toolbar for the selected block: name + move/duplicate/delete,
+  // above the phone. Replaces the old block-list column's per-row controls.
+  function renderSelBar() {
+    const bar = $('edSelBar'); if (!bar) return;
+    bar.innerHTML = '';
+    const blk = S.doc && S.doc.blocks.find((b) => b.id === S.edSelId);
+    if (!blk) { bar.appendChild(el('span', 'ed-selbar-empty', 'Click a block in the email to edit it')); return; }
+    const i = S.doc.blocks.findIndex((b) => b.id === blk.id);
+    const inter = isInteractive(blk.type);
+    const tag = el('span', 'ed-selbar-tag' + (inter ? ' inter' : ''));
+    tag.appendChild(el('span', 'ed-block-ic', typeGlyph(blk.type)));
+    tag.appendChild(el('span', '', typeLabel(blk.type)));
+    bar.appendChild(tag);
+    const acts = el('div', 'ed-selbar-acts');
+    const mk = (glyph, title, fn, disabled, danger) => {
+      const b = el('button', 'ed-iconbtn' + (danger ? ' danger' : ''), glyph);
+      b.type = 'button'; b.title = title; b.disabled = !!disabled; b.onclick = fn; return b;
+    };
+    acts.appendChild(mk('↑', 'Move up', () => moveBlock(blk.id, -1), i === 0));
+    acts.appendChild(mk('↓', 'Move down', () => moveBlock(blk.id, 1), i === S.doc.blocks.length - 1));
+    if (!inter) acts.appendChild(mk('⧉', 'Duplicate', () => duplicateBlock(blk.id)));
+    acts.appendChild(mk('✕', 'Delete', () => deleteBlock(blk.id), false, true));
+    bar.appendChild(acts);
+  }
+
+  // ---- M2: edit INSIDE the phone. The rendered AMP carries data-bid anchors
+  // (server adds them for the editor preview only); clicking a block in the
+  // iframe selects it and opens its settings. The iframe is srcdoc + same
+  // origin, so we can reach its document, inject a selection style, and
+  // capture clicks before the AMP runtime treats them as taps. ----
+  function canvasDoc() {
+    try { return $('edFrame').contentDocument; } catch (e) { return null; }
+  }
+  function anchorOf(cd, node) {
+    while (node && node !== cd.body) {
+      if (node.dataset && node.dataset.bid) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+  function highlightCanvas() {
+    const cd = canvasDoc(); if (!cd || !cd.body) return;
+    cd.querySelectorAll('.edg-sel,.edg-hover').forEach((n) => n.classList.remove('edg-sel', 'edg-hover'));
+    if (S.edSelId) {
+      const sel = cd.querySelector('[data-bid="' + String(S.edSelId).replace(/"/g, '') + '"]');
+      if (sel) sel.classList.add('edg-sel');
+    }
+  }
+  function bindCanvas() {
+    const cd = canvasDoc(); if (!cd || !cd.body) return;
+    if (!cd.getElementById('edg-style')) {
+      const st = cd.createElement('style'); st.id = 'edg-style';
+      st.textContent = '.edg-a{cursor:pointer;transition:outline .1s}'
+        + '.edg-a.edg-hover{outline:2px dashed #e78129;outline-offset:-2px}'
+        + '.edg-a.edg-sel{outline:2px solid #e78129;outline-offset:-2px}';
+      (cd.head || cd.documentElement).appendChild(st);
+    }
+    cd.addEventListener('mouseover', (e) => {
+      const a = anchorOf(cd, e.target);
+      cd.querySelectorAll('.edg-hover').forEach((n) => n.classList.remove('edg-hover'));
+      if (a && a.dataset.bid !== S.edSelId) a.classList.add('edg-hover');
+    });
+    cd.addEventListener('mouseout', () => {
+      cd.querySelectorAll('.edg-hover').forEach((n) => n.classList.remove('edg-hover'));
+    });
+    // Capture phase so a click SELECTS (edit mode) rather than triggering the
+    // module's amp-bind tap.
+    cd.addEventListener('click', (e) => {
+      if (S.editMode === false) return; // interact mode (M6): let AMP handle it
+      const a = anchorOf(cd, e.target);
+      if (a) { e.preventDefault(); e.stopPropagation(); selectBlock(a.dataset.bid); }
+    }, true);
+    highlightCanvas();
+  }
+
   function scheduleRender() { clearTimeout(_renderTimer); _renderTimer = setTimeout(renderPreview, 400); }
   async function renderPreview() {
     clearTimeout(_renderTimer);
@@ -1422,6 +1507,8 @@
     try {
       const out = await api('/api/docs/render', { doc: S.doc });
       if (out && out.error && !out.ampHtml) { chip0.className = 'chip fail'; chip0.textContent = 'render error'; $('edWarn').textContent = out.error; return; }
+      // Re-bind the canvas each time the iframe reloads (srcdoc wipes it).
+      $('edFrame').onload = bindCanvas;
       $('edFrame').srcdoc = out.ampHtml || '';
       // Prefer the server's sanitized doc so ids/shape stay in lockstep.
       if (out.doc && Array.isArray(out.doc.blocks)) mergeSanitized(out.doc);

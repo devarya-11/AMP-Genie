@@ -583,10 +583,14 @@ function createPitchApi(ctx = {}) {
   // Validate + render a doc to one AMP document and run the injected validator.
   // Pure and never throws (validateDoc/renderDoc/validate are all safe); shape
   // errors surface as { ok:false }. Shared by every doc handler below.
-  async function renderDocResult(doc) {
+  // opts.anchors: the editor canvas preview needs addressable blocks
+  // (data-bid); the SAVE handlers omit it so the stored/shared amp_html stays
+  // clean. Anchors don't change AMP validity (proven), so the verdict is the
+  // same either way.
+  async function renderDocResult(doc, opts = {}) {
     const v = validateDoc(doc);
     if (!v.ok) return { ok: false, error: v.error };
-    const r = renderDoc(v.doc);
+    const r = renderDoc(v.doc, { anchors: !!(opts && opts.anchors) });
     const verdict = await validate(r.ampHtml);
     return {
       ok: true,
@@ -648,9 +652,10 @@ function createPitchApi(ctx = {}) {
   // renders and reports the verdict + the sanitized doc (so the editor can
   // reconcile what survived the trust boundary, e.g. a hostile string that was
   // stripped or a bad block that was dropped).
-  async function renderDocH({ doc } = {}) {
+  async function renderDocH({ doc, anchors } = {}) {
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return bad('doc must be an object');
-    const r = await renderDocResult(doc);
+    // The canvas editor is the caller — anchor by default; a client can opt out.
+    const r = await renderDocResult(doc, { anchors: anchors !== false });
     if (!r.ok) return bad(r.error || 'invalid doc');
     return ok({
       ampHtml: r.ampHtml,

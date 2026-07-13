@@ -88,16 +88,18 @@ test('reorder via the down button, then Save lands the email in the gallery', as
   await openEditorFresh(page);
   await expect(page.locator('#edChip')).toContainText('PASS', { timeout: 25000 });
 
-  // Add a Text block so there are at least two blocks to reorder.
-  await page.locator('#edPalette .ed-add-btn', { hasText: 'Text' }).first().click();
-  const heading = page.locator('#edProps .ctrl', { hasText: 'Heading' }).locator('input');
-  await heading.fill(HEADING);
-
-  // Reorder: move the first block down one slot (non-drag fallback).
-  const firstType = await page.locator('#edBlocks .ed-block').first().locator('.ed-block-type').textContent();
-  await page.locator('#edBlocks .ed-block').first().locator('button[title="Move down"]').click();
-  const secondTypeAfter = await page.locator('#edBlocks .ed-block').nth(1).locator('.ed-block-type').textContent();
-  expect(secondTypeAfter).toBe(firstType);
+  // The email IS the canvas: the fresh doc already has >1 block (a text intro
+  // + the interactive module). Click the first block IN the phone to select
+  // it, then move it down one slot via the selection toolbar.
+  const canvasOrder = () => page.frameLocator('#edFrame').locator('[data-bid]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-bid')));
+  await expect.poll(async () => (await canvasOrder()).length, { timeout: 20000 }).toBeGreaterThan(1);
+  const before = await canvasOrder();
+  await page.frameLocator('#edFrame').locator('[data-bid]').first().click();
+  await expect(page.locator('#edSelBar button[title="Move down"]')).toBeVisible();
+  await page.locator('#edSelBar button[title="Move down"]').click();
+  // the moved block (was first) is now later in the canvas order
+  await expect.poll(async () => (await canvasOrder()).indexOf(before[0]), { timeout: 20000 }).toBeGreaterThan(0);
 
   // Title + Save -> a doc example is created and the indicator flips to Saved.
   await page.fill('#edTitle', EMAIL_TITLE);
@@ -120,10 +122,13 @@ test('reopening the saved email in the editor loads its blocks', async ({ page }
   await page.click('#exEditDoc');
   await expect(page.locator('#view-editor')).toBeVisible({ timeout: 15000 });
 
-  // The doc round-trips: blocks are present and the saved heading survived.
-  await expect(page.locator('#edBlocks .ed-block')).not.toHaveCount(0);
+  // The doc round-trips: the title survived and the canvas re-renders the
+  // saved blocks (addressable in the phone) including the interactive module.
   await expect(page.locator('#edTitle')).toHaveValue(EMAIL_TITLE);
   await expect
+    .poll(async () => page.frameLocator('#edFrame').locator('[data-bid]').count(), { timeout: 25000 })
+    .toBeGreaterThan(0);
+  await expect
     .poll(async () => (await page.locator('#edFrame').getAttribute('srcdoc')) || '', { timeout: 25000 })
-    .toContain(HEADING);
+    .toContain('amp-bind');
 });
