@@ -1249,7 +1249,10 @@
     hdr.appendChild(el('span', 'ed-props-hdr-ic', typeGlyph(blk.type)));
     hdr.appendChild(el('span', 'ed-props-hdr-name', typeLabel(blk.type)));
     box.appendChild(hdr);
-    const set = (key, val) => { blk.props[key] = val; renderBlocks(); markDirty(); };
+    const set = (key, val) => {
+      if (val === undefined || val === '') delete blk.props[key]; else blk.props[key] = val;
+      renderBlocks(); markDirty();
+    };
     if (!blk.props || typeof blk.props !== 'object') blk.props = {};
     // Interactive modules: one labelled copy field per its field-map entry.
     if (isInteractive(blk.type)) {
@@ -1282,6 +1285,14 @@
       case 'text':
         box.appendChild(field('Heading', blk.props.heading || '', (v) => set('heading', v)));
         box.appendChild(areaField('Body', blk.props.body || '', (v) => set('body', v)));
+        box.appendChild(el('div', 'ed-props-sec', 'Heading style'));
+        box.appendChild(numberField('Heading size (px)', blk.props.headingFontSize, (v) => set('headingFontSize', v), 12, 48));
+        box.appendChild(selectField('Heading align', ['left', 'center', 'right'], blk.props.headingAlign || 'left', (v) => set('headingAlign', v)));
+        box.appendChild(colorField('Heading colour', blk.props.headingColor, (v) => set('headingColor', v)));
+        box.appendChild(el('div', 'ed-props-sec', 'Body style'));
+        box.appendChild(numberField('Body size (px)', blk.props.bodyFontSize, (v) => set('bodyFontSize', v), 12, 32));
+        box.appendChild(selectField('Body align', ['left', 'center', 'right'], blk.props.bodyAlign || 'left', (v) => set('bodyAlign', v)));
+        box.appendChild(colorField('Body colour', blk.props.bodyColor, (v) => set('bodyColor', v)));
         break;
       case 'image':
         box.appendChild(urlField('Image URL', blk.props.imageUrl || '', (v) => set('imageUrl', v)));
@@ -1293,6 +1304,10 @@
         box.appendChild(field('Label', blk.props.label || '', (v) => set('label', v)));
         box.appendChild(field('Link (href)', blk.props.href || '', (v) => set('href', v)));
         box.appendChild(selectField('Align', ['left', 'center', 'right'], blk.props.align || 'center', (v) => set('align', v)));
+        box.appendChild(el('div', 'ed-props-sec', 'Button style'));
+        box.appendChild(selectField('Size', ['S', 'M', 'L'], blk.props.size || 'M', (v) => set('size', v === 'M' ? undefined : v)));
+        box.appendChild(toggleField('Full width', blk.props.fullWidth === true, (v) => set('fullWidth', v ? true : undefined)));
+        box.appendChild(colorField('Button colour', blk.props.buttonColor, (v) => set('buttonColor', v)));
         break;
       case 'products':
         box.appendChild(productsEditor(blk));
@@ -1308,6 +1323,9 @@
       default:
         box.appendChild(el('div', 'ed-props-empty', 'No editor for this block type.'));
     }
+    // M9: every static block (except the divider spacer) carries the shared
+    // spacing + background controls.
+    if (blk.type !== 'divider') appendBoxFields(box, blk, set);
   }
   // property-field builders (label + input, live oninput)
   // camelCase field key -> human label, e.g. "footerText" -> "Footer text".
@@ -1328,6 +1346,46 @@
     const c = ctrl(labelText); const s = el('select');
     opts.forEach((o) => { const op = el('option', '', o); op.value = o; if (o === value) op.selected = true; s.appendChild(op); });
     s.onchange = () => onChange(s.value); c.appendChild(s); return c;
+  }
+  // Integer field (M9+): empty -> undefined (unset), else clamped to [min,max].
+  function numberField(labelText, value, onChange, min, max) {
+    const c = ctrl(labelText); const i = el('input'); i.type = 'number';
+    if (min != null) i.min = min; if (max != null) i.max = max;
+    i.value = (value === undefined || value === null || value === '') ? '' : value;
+    i.oninput = () => {
+      if (i.value === '') return onChange(undefined);
+      let n = Math.round(Number(i.value)); if (!Number.isFinite(n)) return;
+      if (min != null) n = Math.max(min, n); if (max != null) n = Math.min(max, n);
+      onChange(n);
+    };
+    c.appendChild(i); return c;
+  }
+  // Colour field (M9+): a swatch picker + a clear button that unsets the value.
+  function colorField(labelText, value, onChange) {
+    const c = ctrl(labelText);
+    const row = el('div', 'ed-color-row');
+    const i = el('input'); i.type = 'color'; i.value = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value || '') ? value : '#ffffff';
+    i.oninput = () => onChange(i.value);
+    const clear = el('button', 'ghost sm', 'Clear'); clear.type = 'button'; clear.title = 'Remove colour';
+    clear.onclick = () => { onChange(undefined); i.value = '#ffffff'; };
+    const swatch = el('span', 'ed-color-cur'); swatch.textContent = value || 'none';
+    row.appendChild(i); row.appendChild(clear); row.appendChild(swatch);
+    c.appendChild(row); return c;
+  }
+  // Boolean toggle (M11+): a checkbox that sets true / undefined.
+  function toggleField(labelText, checked, onChange) {
+    const c = el('label', 'ed-toggle-field');
+    const i = el('input'); i.type = 'checkbox'; i.checked = !!checked;
+    i.onchange = () => onChange(i.checked);
+    c.appendChild(i); c.appendChild(el('span', '', labelText));
+    return c;
+  }
+  // M9: the shared "Spacing & background" controls every static block carries.
+  function appendBoxFields(box, blk, set) {
+    box.appendChild(el('div', 'ed-props-sec', 'Spacing & background'));
+    box.appendChild(numberField('Padding top (px)', blk.props.paddingTop, (v) => set('paddingTop', v), 0, 80));
+    box.appendChild(numberField('Padding bottom (px)', blk.props.paddingBottom, (v) => set('paddingBottom', v), 0, 80));
+    box.appendChild(colorField('Background', blk.props.backgroundColor, (v) => set('backgroundColor', v)));
   }
   // URL field with a "Choose from assets" affordance: reveals the drawer, then
   // arms the next drawer click to fill THIS field (in addition to drag-drop).

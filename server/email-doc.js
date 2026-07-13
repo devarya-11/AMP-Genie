@@ -134,6 +134,8 @@ const DOC_VERSION = 1;
 const MAX_BLOCKS = 40;
 const DEFAULT_PRIMARY = '#4f46e5'; // a neutral, brandable indigo when no brand colour is given
 const HEX_ANY = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const ALIGNS = ['left', 'center', 'right']; // the only allowed text-align values
+const BTN_SIZES = ['S', 'M', 'L']; // allowed button sizes (M === base default)
 
 // The supported STATIC block types (v1). Order here is the palette order the
 // editor can show; it does not constrain block order in a doc.
@@ -172,6 +174,21 @@ function coerceHex(v) {
 function clampInt(n, min, max, dflt) {
   const v = Math.round(Number(n));
   return Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : dflt;
+}
+
+// M9: per-block spacing + background, shared by every static block. An UNSET
+// field stays undefined (dflt=undefined) so no CSS is emitted and un-styled
+// blocks render byte-identically to before. paddingTop/Bottom are integers
+// (0–80px); backgroundColor is coerceHex-validated — never a raw user string.
+function sanitizeBox(props = {}) {
+  const o = {};
+  const pt = clampInt(props.paddingTop, 0, 80, undefined);
+  if (pt !== undefined) o.paddingTop = pt;
+  const pb = clampInt(props.paddingBottom, 0, 80, undefined);
+  if (pb !== undefined) o.paddingBottom = pb;
+  const bg = coerceHex(props.backgroundColor);
+  if (bg) o.backgroundColor = bg;
+  return o;
 }
 
 /* ------------------------------------------------------------------ *
@@ -217,10 +234,19 @@ const BLOCK_SANITIZERS = {
   text(props = {}) {
     // PLAIN TEXT ONLY — no html/markup prop ever. heading -> <h1>, body -> <p>,
     // both enc()'d at render. '<'/'>' are stripped here and entity-encoded there.
-    return {
+    const o = {
       heading: cleanStr(props.heading, 140),
       body: cleanStr(props.body, 2000),
     };
+    // M10: optional per-instance typography — sizes clamped, aligns enum-gated,
+    // colours coerceHex-validated. Unset fields stay off (byte-identical).
+    const hfs = clampInt(props.headingFontSize, 12, 48, undefined); if (hfs !== undefined) o.headingFontSize = hfs;
+    const bfs = clampInt(props.bodyFontSize, 12, 32, undefined); if (bfs !== undefined) o.bodyFontSize = bfs;
+    if (ALIGNS.includes(props.headingAlign)) o.headingAlign = props.headingAlign;
+    if (ALIGNS.includes(props.bodyAlign)) o.bodyAlign = props.bodyAlign;
+    const hc = coerceHex(props.headingColor); if (hc) o.headingColor = hc;
+    const bc = coerceHex(props.bodyColor); if (bc) o.bodyColor = bc;
+    return o;
   },
   image(props = {}) {
     return {
@@ -231,12 +257,17 @@ const BLOCK_SANITIZERS = {
     };
   },
   button(props = {}) {
-    const align = ['left', 'center', 'right'].includes(props.align) ? props.align : 'center';
-    return {
+    const align = ALIGNS.includes(props.align) ? props.align : 'center';
+    const o = {
       label: cleanStr(props.label, 60) || 'Learn more',
       href: safeHttpUrl(props.href) || undefined, // no href -> non-link styled span
       align,
     };
+    // M11: size (S/M/L, M===default so unset), full-width, custom colour.
+    if (BTN_SIZES.includes(props.size)) o.size = props.size;
+    if (props.fullWidth === true) o.fullWidth = true;
+    const bc = coerceHex(props.buttonColor); if (bc) o.buttonColor = bc;
+    return o;
   },
   products(props = {}) {
     const columns = clampInt(props.columns, 1, 3, 2);
@@ -322,7 +353,10 @@ function validateDoc(doc) {
       }
       const sanitize = BLOCK_SANITIZERS[type];
       if (!sanitize) { notes.push(`dropped unknown block type "${cleanStr(type, 40)}"`); continue; }
-      blocks.push({ id, type, props: sanitize(raw.props || {}) });
+      // Every static block also carries the shared box props (M9 spacing + bg).
+      const clean = sanitize(raw.props || {});
+      Object.assign(clean, sanitizeBox(raw.props || {}));
+      blocks.push({ id, type, props: clean });
     }
     out.blocks = blocks;
     if (notes.length) out.notes = notes;
@@ -348,7 +382,7 @@ function validateDoc(doc) {
 // matter how many blocks of a type a doc contains. renderDoc dedupes by key.
 function once(key, css) { return { once: key, css }; }
 
-function renderHeader(props, ctx) {
+function renderHeader(props, ctx, warnings, id) {
   const p = ctx.palette;
   const brandName = props.brandName || ctx.brandName || 'Brand';
   const site = props.link || ctx.site || siteGuess(brandName);
@@ -362,10 +396,10 @@ function renderHeader(props, ctx) {
   </a>
   <h1>${enc(brandName)}</h1>
 </div>`;
-  return { html, css: [once('base', baseCss(p))] };
+  return styled(id, props, html, [once('base', baseCss(p))]);
 }
 
-function renderHero(props, ctx, warnings) {
+function renderHero(props, ctx, warnings, id) {
   const p = ctx.palette;
   const h = props.height || 240;
   let src = props.imageUrl;
@@ -375,10 +409,10 @@ function renderHero(props, ctx, warnings) {
     src = ph(600, h, p.primary, '#ffffff', (ctx.brandName || 'HERO').slice(0, 12));
   }
   const html = `<div class="hero"><amp-img src="${enc(src)}" width="600" height="${h}" layout="responsive" alt="${enc(alt)}"></amp-img></div>`;
-  return { html, css: [once('base', baseCss(p)), once('hero', `\n.hero amp-img{display:block;}\n`)] };
+  return styled(id, props, html, [once('base', baseCss(p)), once('hero', `\n.hero amp-img{display:block;}\n`)]);
 }
 
-function renderText(props, ctx) {
+function renderText(props, ctx, warnings, id) {
   const p = ctx.palette;
   const parts = [];
   if (props.heading) parts.push(`<h2 class="tx-h">${enc(props.heading)}</h2>`);
@@ -390,10 +424,33 @@ function renderText(props, ctx) {
 .text .tx-b{margin:0;font-size:15px;line-height:1.6;color:${p.ink};}
 .text .tx-h + .tx-b{margin-top:0;}
 `;
-  return { html, css: [once('base', baseCss(p)), once('text', css)] };
+  return styled(id, props, html, [once('base', baseCss(p)), once('text', css)], textInstanceCss(id, props));
+}
+// M10: per-instance heading/body typography, scoped under the block's style
+// class so it overrides the shared .text rules (same specificity, emitted
+// later). Re-sanitises every value — no user string reaches CSS.
+function textInstanceCss(id, props) {
+  const sel = '.' + styleClass(id);
+  const hfs = clampInt(props.headingFontSize, 12, 48, undefined);
+  const bfs = clampInt(props.bodyFontSize, 12, 32, undefined);
+  const ha = ALIGNS.includes(props.headingAlign) ? props.headingAlign : undefined;
+  const ba = ALIGNS.includes(props.bodyAlign) ? props.bodyAlign : undefined;
+  const hc = coerceHex(props.headingColor);
+  const bc = coerceHex(props.bodyColor);
+  const h = [], b = [];
+  if (hfs !== undefined) h.push('font-size:' + hfs + 'px;');
+  if (ha) h.push('text-align:' + ha + ';');
+  if (hc) h.push('color:' + hc + ';');
+  if (bfs !== undefined) b.push('font-size:' + bfs + 'px;');
+  if (ba) b.push('text-align:' + ba + ';');
+  if (bc) b.push('color:' + bc + ';');
+  let out = '';
+  if (h.length) out += '\n' + sel + ' .tx-h{' + h.join('') + '}\n';
+  if (b.length) out += sel + ' .tx-b{' + b.join('') + '}\n';
+  return out;
 }
 
-function renderImage(props, ctx, warnings) {
+function renderImage(props, ctx, warnings, id) {
   const p = ctx.palette;
   let src = props.imageUrl;
   const alt = props.alt || '';
@@ -407,10 +464,10 @@ function renderImage(props, ctx, warnings) {
     ? `<a href="${enc(props.href)}" target="_blank" rel="noopener noreferrer">${img}</a>`
     : img;
   const html = `<div class="pad imgblk">${inner}</div>`;
-  return { html, css: [once('base', baseCss(p)), once('imgblk', `\n.imgblk amp-img{display:block;}\n.imgblk a{display:block;text-decoration:none;}\n`)] };
+  return styled(id, props, html, [once('base', baseCss(p)), once('imgblk', `\n.imgblk amp-img{display:block;}\n.imgblk a{display:block;text-decoration:none;}\n`)]);
 }
 
-function renderButton(props, ctx, warnings) {
+function renderButton(props, ctx, warnings, id) {
   const p = ctx.palette;
   const label = props.label || 'Learn more';
   const align = props.align || 'center';
@@ -432,10 +489,29 @@ function renderButton(props, ctx, warnings) {
 .btnblk-right{text-align:right;}
 .btnblk .btnwrap{display:inline-table;}
 `;
-  return { html, css: [once('base', baseCss(p)), once('btnblk', css)] };
+  return styled(id, props, html, [once('base', baseCss(p)), once('btnblk', css)], buttonInstanceCss(id, props));
+}
+// M11: per-instance button size / full-width / colour, scoped under the block's
+// style class (two-class selector out-specifies the base .btn rule). M size is
+// the base default, so it emits nothing. Re-sanitises every value.
+function buttonInstanceCss(id, props) {
+  const sel = '.' + styleClass(id);
+  const btn = [];
+  const size = BTN_SIZES.includes(props.size) ? props.size : undefined;
+  if (size === 'S') btn.push('padding:8px 16px;font-size:13px;');
+  else if (size === 'L') btn.push('padding:18px 32px;font-size:17px;');
+  const bc = coerceHex(props.buttonColor);
+  if (bc) btn.push('background:' + bc + ';');
+  let out = '';
+  if (props.fullWidth === true) {
+    btn.push('display:block;width:100%;box-sizing:border-box;');
+    out += '\n' + sel + ' .btnwrap{display:table;width:100%;}\n';
+  }
+  if (btn.length) out = '\n' + sel + ' .btn{' + btn.join('') + '}\n' + out;
+  return out;
 }
 
-function renderProducts(props, ctx, warnings) {
+function renderProducts(props, ctx, warnings, id) {
   const p = ctx.palette;
   const cols = props.columns || 2;
   const items = props.items || [];
@@ -466,27 +542,27 @@ function renderProducts(props, ctx, warnings) {
 .prod .pcol.gap{margin-left:${cols === 3 ? '3.5' : '4'}%;}
 .prod .card .name{font-size:13px;}
 `;
-  return { html, css: [once('base', baseCss(p)), once('prod-' + cols, css)] };
+  return styled(id, props, html, [once('base', baseCss(p)), once('prod-' + cols, css)]);
 }
 
-function renderDivider(props, ctx) {
+function renderDivider(props, ctx, warnings, id) {
   const p = ctx.palette;
   const html = `<div class="pad divblk"><div class="divrule"></div></div>`;
   const css = `
 .divblk{padding-top:8px;padding-bottom:8px;}
 .divrule{border-top:1px solid ${p.line};height:0;font-size:0;line-height:0;}
 `;
-  return { html, css: [once('base', baseCss(p)), once('divblk', css)] };
+  return styled(id, props, html, [once('base', baseCss(p)), once('divblk', css)]);
 }
 
-function renderFooter(props, ctx) {
+function renderFooter(props, ctx, warnings, id) {
   const p = ctx.palette;
   const brandName = props.brandName || ctx.brandName || 'Brand';
   // Static footer line — NO real unsub token/link (that would need routing);
   // a plain reassurance line, mirroring generate.js:footerBlock semantics.
   const text = props.text || 'You are receiving this email because you opted in.';
   const html = `<div class="foot"><p>${enc(brandName)} &#8226; ${enc(text)}</p></div>`;
-  return { html, css: [once('base', baseCss(p))] };
+  return styled(id, props, html, [once('base', baseCss(p))]);
 }
 
 // An interactive block: delegate to generate.js's buildModuleFragment, which
@@ -547,6 +623,35 @@ const BLOCK_RENDERERS = {
 // WITHOUT them (clean), so a wrapper div can never reach a real inbox.
 function anchorId(id) {
   return String(id == null ? '' : id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+}
+// M9–M12: per-instance style class + CSS built ONLY from sanitized primitives
+// (clampInt integers, coerceHex colours) — no user string ever reaches CSS.
+function styleClass(id) { return 'blk-' + anchorId(id); }
+function boxCss(id, props) {
+  // Re-sanitize here too: renderDoc trusts a doc that already has a blocks
+  // array (skips validateDoc), so never emit a value that didn't pass through
+  // clampInt/coerceHex — defence-in-depth against a raw doc reaching render.
+  const box = sanitizeBox(props);
+  const rules = [];
+  if (box.paddingTop !== undefined) rules.push('padding-top:' + box.paddingTop + 'px;');
+  if (box.paddingBottom !== undefined) rules.push('padding-bottom:' + box.paddingBottom + 'px;');
+  if (box.backgroundColor) rules.push('background:' + box.backgroundColor + ';');
+  return rules.length ? ('\n.' + styleClass(id) + '{' + rules.join('') + '}\n') : '';
+}
+// Prepend a class to a rendered block's outermost <div class="…"> (the wrapper
+// every renderer emits first). Only called when the block has instance styling,
+// so an un-styled block's html is untouched and stays byte-identical.
+function injectClass(html, cls) {
+  return html.replace('class="', 'class="' + cls + ' ');
+}
+// Renderer tail: fold per-instance styling (M9 box + optional M10/M11 type CSS,
+// the latter already scoped under `.blk-<id> …` by the caller) onto a block.
+// When there is any instance CSS, tag the wrapper with the block's style class
+// and emit it once; otherwise the block is returned untouched (byte-identical).
+function styled(id, props, html, cssParts, typeCss) {
+  const inst = boxCss(id, props) + (typeCss || '');
+  if (!inst) return { html, css: cssParts };
+  return { html: injectClass(html, styleClass(id)), css: cssParts.concat(once('blk-' + anchorId(id), inst)) };
 }
 function wrapAnchor(block, html, index) {
   const bid = anchorId(block.id) || ('b' + index);
@@ -616,7 +721,7 @@ function renderDoc(doc, opts = {}) {
     }
     const render = BLOCK_RENDERERS[block.type];
     if (!render) return; // validateDoc already dropped unknowns; belt-and-braces
-    const out = render(block.props || {}, ctx, warnings);
+    const out = render(block.props || {}, ctx, warnings, block.id);
     bodies.push(anchors ? wrapAnchor(block, out.html, index) : out.html);
     for (const c of out.css) cssParts.push(c);
   });

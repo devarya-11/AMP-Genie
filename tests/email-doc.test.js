@@ -118,6 +118,93 @@ test('M8: a reversed block order still PASSes and stays byte-deterministic', asy
   assert.strictEqual(renderDoc(reversed).ampHtml, out.ampHtml, 'permuted order is byte-stable');
 });
 
+// ---- M9: per-block spacing + background ----
+test('M9: paddingTop/Bottom + backgroundColor render a scoped rule and PASS', async () => {
+  const doc = { version: 1, blocks: [
+    { id: 'bx', type: 'text', props: { heading: 'H', body: 'x', paddingTop: 32, paddingBottom: 16, backgroundColor: '#e0e0e0' } },
+  ] };
+  const out = renderDoc(doc);
+  assert.match(out.ampHtml, /\.blk-bx\{padding-top:32px;padding-bottom:16px;background:#e0e0e0;\}/, 'scoped instance rule present');
+  assert.match(out.ampHtml, /class="blk-bx pad text"/, 'style class tags the wrapper');
+  const v = await validate(out.ampHtml);
+  assert.strictEqual(v.pass, true, `styled block must pass: ${JSON.stringify(v.errors)}`);
+});
+
+test('M9: an un-styled block emits no instance class or rule (byte-identical)', () => {
+  const styled = { version: 1, blocks: [{ id: 'b1', type: 'text', props: { heading: 'H', body: 'x' } }] };
+  const out = renderDoc(styled).ampHtml;
+  assert.ok(!/blk-b1/.test(out), 'no instance class for an un-styled block');
+});
+
+test('M9: a hostile backgroundColor never reaches the CSS', () => {
+  const doc = { version: 1, blocks: [
+    { id: 'b2', type: 'text', props: { heading: 'H', body: 'x', backgroundColor: 'red;} body{display:none' } },
+  ] };
+  const out = renderDoc(doc).ampHtml;
+  assert.ok(!/display:none/.test(out), 'injected CSS must be dropped');
+  assert.ok(!/blk-b2/.test(out), 'invalid colour yields no instance rule');
+});
+
+test('M9: padding is clamped to 0–80 and non-numeric is dropped', () => {
+  const doc = { version: 1, blocks: [
+    { id: 'b3', type: 'text', props: { heading: 'H', body: 'x', paddingTop: 9999, paddingBottom: 'abc' } },
+  ] };
+  const out = renderDoc(doc).ampHtml;
+  assert.match(out, /\.blk-b3\{padding-top:80px;\}/, 'over-max padding clamps to 80, junk padding dropped');
+});
+
+// ---- M10: text typography ----
+test('M10: heading/body font-size, align, colour render scoped rules and PASS', async () => {
+  const doc = { version: 1, blocks: [
+    { id: 't1', type: 'text', props: { heading: 'Hi', body: 'x', headingFontSize: 28, bodyAlign: 'center', headingColor: '#112233' } },
+  ] };
+  const out = renderDoc(doc);
+  assert.match(out.ampHtml, /\.blk-t1 \.tx-h\{font-size:28px;color:#112233;\}/);
+  assert.match(out.ampHtml, /\.blk-t1 \.tx-b\{text-align:center;\}/);
+  const v = await validate(out.ampHtml);
+  assert.strictEqual(v.pass, true, `styled text must pass: ${JSON.stringify(v.errors)}`);
+});
+
+test('M10: an out-of-range size clamps and a non-enum align is dropped', () => {
+  const doc = { version: 1, blocks: [
+    { id: 't2', type: 'text', props: { heading: 'H', body: 'x', headingFontSize: 999, bodyAlign: 'justify;} x{y:z' } },
+  ] };
+  const out = renderDoc(doc).ampHtml;
+  assert.match(out, /\.blk-t2 \.tx-h\{font-size:48px;\}/, 'font-size clamps to 48');
+  assert.ok(!/y:z/.test(out) && !/text-align:justify/.test(out), 'non-enum align never reaches CSS');
+});
+
+test('M10: an un-styled text block is byte-identical to before M10', () => {
+  const doc = { version: 1, blocks: [{ id: 'tt', type: 'text', props: { heading: 'H', body: 'x' } }] };
+  const out = renderDoc(doc).ampHtml;
+  assert.ok(!/blk-tt/.test(out), 'no instance class when no styling set');
+});
+
+// ---- M11: button styling ----
+test('M11: size L, full-width, colour render scoped rules and PASS', async () => {
+  const doc = { version: 1, blocks: [
+    { id: 'bt', type: 'button', props: { label: 'Go', href: 'https://x.com', size: 'L', fullWidth: true, buttonColor: '#0a7d33' } },
+  ] };
+  const out = renderDoc(doc);
+  assert.match(out.ampHtml, /\.blk-bt \.btn\{padding:18px 32px;font-size:17px;background:#0a7d33;display:block;width:100%;box-sizing:border-box;\}/);
+  assert.match(out.ampHtml, /\.blk-bt \.btnwrap\{display:table;width:100%;\}/);
+  const v = await validate(out.ampHtml);
+  assert.strictEqual(v.pass, true, `styled button must pass: ${JSON.stringify(v.errors)}`);
+});
+
+test('M11: the M (default) size emits no instance rule', () => {
+  const doc = { version: 1, blocks: [{ id: 'bm', type: 'button', props: { label: 'Go', href: 'https://x.com', size: 'M' } }] };
+  assert.ok(!/blk-bm/.test(renderDoc(doc).ampHtml), 'M size is the base default → no override');
+});
+
+test('M11: a hostile buttonColor and non-enum size are rejected', () => {
+  const doc = { version: 1, blocks: [
+    { id: 'bh', type: 'button', props: { label: 'x', href: 'https://x.com', size: 'XL', buttonColor: '#fff;} evil{x:y' } },
+  ] };
+  const out = renderDoc(doc).ampHtml;
+  assert.ok(!/x:y/.test(out) && !/blk-bh/.test(out), 'invalid size + colour yield no instance rule');
+});
+
 // ---- structural rules (mirrors tests/validator.test.js) ----------------------
 
 test('AMP4EMAIL structural rules are honoured', () => {
