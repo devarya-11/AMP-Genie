@@ -218,10 +218,12 @@ function sanitizeCustomHtml(html) {
   // classic redirect/resource-load vectors — drop them (amp-form's <form> and
   // amp-img stay; the amp-* equivalents are how AMP does these safely).
   s = s.replace(/<\/?(iframe|object|embed|base|meta|link|noscript)\b[^>]*>/gi, '');
-  // Event-handler attributes: "on…=" preceded by whitespace OR "/" (both act as
-  // attribute separators in the HTML tokenizer, so <img/onerror=…> must die too).
-  // AMP's own `on="tap:…"` has no letters after "on", so it is left untouched.
-  s = s.replace(/[\s/]on[a-z][a-z-]*\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
+  // Event-handler attributes: "on…=" preceded by ANY attribute boundary the
+  // HTML tokenizer honours — whitespace, "/", or the quote/apostrophe/"="/">"
+  // that ends the previous attribute. So <img src="x"onerror=…>, <img/onerror=…>
+  // and <img src=x onerror=…> all die. AMP's own `on="tap:…"` has no letters
+  // after "on", so it is never matched. The captured separator is preserved.
+  s = s.replace(/([\s/"'=>])on[a-z][a-z-]*\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '$1');
   // Defuse script URLs and IE's css expression() ANYWHERE (href/src/style/etc.),
   // tolerating whitespace/entities the tokenizer would ignore.
   s = s.replace(/(javascript|vbscript)\s*:/gi, 'blocked:');

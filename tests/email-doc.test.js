@@ -92,6 +92,7 @@ test('sanitizeCustomHtml neutralizes every script/handler/url evasion', () => {
   const cases = [
     '<script>evil()</script>', '<SCRIPT>evil()</SCRIPT>', '<script/xss>evil()</script>', '<script >e()</script>',
     '<img src=x onerror=alert(1)>', '<img/onerror=alert(1) src=x>', '<img src=x\nonerror=alert(1)>',
+    '<img src="x"onerror="alert(1)">', "<img src='x'onerror='alert(1)'>", // quote-boundary (no space)
     '<svg/onload=alert(1)>', '<div onclick="e()">x</div>',
     '<iframe src="javascript:evil()"></iframe>', '<object data="x"></object>', '<embed src="x">',
     '<meta http-equiv=refresh content="0;url=http://evil">', '<link rel=stylesheet href="http://evil.css">',
@@ -102,7 +103,7 @@ test('sanitizeCustomHtml neutralizes every script/handler/url evasion', () => {
     const out = sanitizeCustomHtml(c);
     assert.ok(!/<script(?![^>]*application\/(ld\+)?json)/i.test(out), `executable script survived: ${c} -> ${out}`);
     assert.ok(!/<(iframe|object|embed|meta|link)\b/i.test(out), `embedding tag survived: ${c} -> ${out}`);
-    assert.ok(!/\son[a-z]+\s*=|\/on[a-z]+\s*=/i.test(out), `on-handler survived: ${c} -> ${out}`);
+    assert.ok(!/[\s/"'=>]on[a-z]+\s*=/i.test(out), `on-handler survived: ${c} -> ${out}`);
     assert.ok(!/(javascript|vbscript)\s*:|expression\s*\(/i.test(out), `active url/expression survived: ${c} -> ${out}`);
   }
 });

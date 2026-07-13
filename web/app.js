@@ -1931,6 +1931,14 @@
     if (sdoc.brand !== undefined) S.doc.brand = sdoc.brand;
     if (sdoc.currency !== undefined) S.doc.currency = sdoc.currency;
     if (sdoc.version !== undefined) S.doc.version = sdoc.version;
+    // Adopt the server-sanitized settings (e.g. a clamped contentWidth) so the
+    // Email-settings panel never shows a stale value. Repaint it only when it is
+    // the visible panel AND no field there is focused, so live typing is safe.
+    if (sdoc.settings !== undefined) S.doc.settings = sdoc.settings; else delete S.doc.settings;
+    if (S.edSelId == null) {
+      const ae = document.activeElement;
+      if (!(ae && ae.closest && ae.closest('#edProps'))) renderProps();
+    }
   }
 
   // ---- SAVE: PATCH existing doc example, else POST a new one ----
