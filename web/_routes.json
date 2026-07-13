@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Send EVERY request through the Pages Functions layer so functions/_middleware.js (the team password gate) sees static assets too — without this, Pages auto-excludes static files from the worker and the app shell serves ungated. Unmatched routes still fall through to static serving after the middleware passes them.",
+  "include": ["/*"],
+  "exclude": []
+}
