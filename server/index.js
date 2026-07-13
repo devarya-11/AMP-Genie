@@ -231,6 +231,12 @@ app.get('/build/:id', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="amp-genie-${(build.brand || 'brand').toLowerCase().replace(/[^a-z0-9]/g, '')}-${build.moduleId}${fmt === 'fallback' ? '-fallback' : ''}.html"`);
     return res.type('html').send(body || '');
   }
+  // Inline (no attachment) so a share-page <iframe src> renders the exact AMP
+  // instead of downloading it — the /b/ and /s/ pages' interactive preview.
+  if (fmt === 'embed') {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.type('html').send(build.ampHtml || '');
+  }
   // JSON view strips the heavy parts — share pages only need the model.
   const { ampHtml, fallbackHtml, fallbackText, ...meta } = build;
   res.json(meta);

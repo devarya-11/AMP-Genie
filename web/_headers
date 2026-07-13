@@ -8,7 +8,5 @@
   Cache-Control: no-store
 /app.js
   Cache-Control: no-cache
-/preview.js
-  Cache-Control: no-cache
 /style.css
   Cache-Control: no-cache
