@@ -220,17 +220,10 @@ a.linkbtn{color:var(--ink-2)}
 .brand-logo{width:36px;height:36px;border-radius:9px;object-fit:contain;background:#ffffff;padding:3px;
   border:1px solid var(--line);flex:0 0 auto}
 
-/* ---- use-case proposal cards ---- */
-.uc-list{display:flex;flex-direction:column;gap:10px}
-.uc-card{border:1px solid var(--line);border-radius:var(--r-md);padding:14px 16px;background:#ffffff05;
-  display:flex;flex-direction:column;gap:8px}
-.uc-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
-.uc-title{font-weight:700;font-size:14px;color:var(--ink)}
+/* ---- inline remove button (product / contact rows) ---- */
 .uc-remove{background:transparent;border:0;color:var(--faint);font-size:14px;padding:2px 6px;border-radius:6px;
   transition:color var(--tr),background var(--tr)}
 .uc-remove:hover{color:var(--bad);background:#ff5b6e14}
-.uc-goal{font-size:12px;line-height:1.5;color:var(--ink-2)}
-.uc-actions{display:flex;justify-content:flex-end}
 
 /* ---- brand kit editor (wizard step 2) ---- */
 .kit-products{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
@@ -267,15 +260,13 @@ a.linkbtn{color:var(--ink-2)}
 .pw-title:hover{color:var(--accent2)}
 .pw-title-input{font-size:16px;font-weight:700;padding:8px 10px;max-width:420px}
 
+/* shared section header — details panes, editor columns, properties */
 .gen-hdr{display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;margin-bottom:10px}
 .gen-hdr .chip{font-weight:400}
 .details-sub{margin-top:24px}
 
 /* examples pane */
 .ex-toolbar{display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap}
-.gen-panel{display:grid;grid-template-columns:1.2fr .8fr;gap:22px;border:1px solid var(--line);border-radius:var(--r-md);
-  padding:16px 18px;margin-bottom:18px;background:#ffffff05}
-.gen-col{min-width:0;display:flex;flex-direction:column;gap:10px}
 .ex-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
 .ex-card{border:1px solid var(--line);border-radius:var(--r-md);padding:14px 16px;background:#ffffff05;text-align:left;
   color:inherit;font:inherit;display:flex;flex-direction:column;gap:8px;cursor:pointer;
@@ -335,7 +326,6 @@ a.linkbtn{color:var(--ink-2)}
   .nav-foot .author-input{width:110px}
   .content{padding:18px 16px}
   .qgrid{grid-template-columns:1fr}
-  .gen-panel{grid-template-columns:1fr}
   .details-grid{grid-template-columns:1fr}
   .key-add{grid-template-columns:1fr 1fr}
 }

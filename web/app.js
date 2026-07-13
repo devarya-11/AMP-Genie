@@ -11,7 +11,7 @@
     wContacts: [],
     // workspace
     pitch: null, examples: [], brand: null, assets: [], contacts: [],
-    example: null, versions: [], proposals: [],
+    example: null, versions: [],
     keysLoaded: false,
     // ---- visual block editor ----
     doc: null,             // { version, brand?, currency?, blocks:[{id,type,props}] }
@@ -380,7 +380,6 @@
     switchView('pitch');
     switchWTab('examples');
     showExDetail(false);
-    $('genPanel').classList.add('hidden');
     $('exGrid').innerHTML = '';
     setLine('exStatus', 'Opening the pitch…', true);
     try {
@@ -460,80 +459,6 @@
     if (name === 'details') loadActivity();
   }
 
-  // ---- examples: proposals + your idea ----
-  async function propose(reroll) {
-    if (!S.brand) return;
-    const btn = reroll ? $('genReroll') : $('genPropose');
-    busy(btn, true, 'Thinking…');
-    setLine('genStatus', 'Drafting use-cases for ' + S.brand.name + '…', true);
-    try {
-      const body = { brand: S.brand.name, brief: (S.pitch && S.pitch.brief) || undefined, count: 6 };
-      if (reroll && S.proposals.length) body.prior = S.proposals.map((u) => u.title);
-      const out = await api('/usecases', body);
-      if (out && out.error) { setLine('genStatus', 'Error: ' + out.error); return; }
-      S.proposals = out.useCases || [];
-      const src = $('genSource');
-      if (out.source) { src.textContent = out.source === 'library' ? 'library playbook' : 'LLM-proposed'; src.classList.remove('hidden'); }
-      renderProposals();
-      $('genReroll').classList.remove('hidden');
-      setLine('genStatus', S.proposals.length ? '' : 'No proposals this time — try again or type your own idea.');
-    } catch (e) { setLine('genStatus', 'Error: ' + e.message); }
-    finally { busy(btn, false); }
-  }
-  function renderProposals() {
-    const list = $('genList'); list.innerHTML = '';
-    S.proposals.forEach((u) => {
-      const card = el('div', 'uc-card');
-      const top = el('div', 'uc-top');
-      top.appendChild(el('span', 'uc-title', u.title || 'Use-case'));
-      card.appendChild(top);
-      if (u.businessGoal) card.appendChild(el('div', 'uc-goal', u.businessGoal));
-      const meta = el('div', 'chips');
-      chip(meta, 'module', moduleName(u.moduleId));
-      card.appendChild(meta);
-      const actions = el('div', 'uc-actions');
-      const go = el('button', 'primary sm'); go.type = 'button';
-      go.innerHTML = '<svg class="ic"><use href="#i-sparkle"/></svg> Generate';
-      go.onclick = () => generateFromProposal(u, go);
-      actions.appendChild(go);
-      card.appendChild(actions);
-      list.appendChild(card);
-    });
-  }
-  // Every new example is editor-first: generate a starting doc (with the
-  // routed interactive module baked in) and open the visual editor. Nothing
-  // is persisted until the user saves from the editor.
-  async function generateFromProposal(u, btn) {
-    busy(btn, true, 'Drafting…');
-    setLine('genStatus', 'Drafting “' + (u.title || 'example') + '” for the editor…', true);
-    try {
-      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/ai-doc', {
-        moduleId: u.moduleId, useCase: u.title, brief: (S.pitch && S.pitch.brief) || u.title || '', author: author(),
-      });
-      if (out && out.error) { setLine('genStatus', 'Error: ' + out.error); return; }
-      setLine('genStatus', '');
-      enterEditor((out && out.doc) || { version: 1, blocks: [] }, null, u.title || 'New email');
-    } catch (e) { setLine('genStatus', 'Error: ' + e.message); }
-    finally { busy(btn, false); }
-  }
-  async function generateFromIdea() {
-    const text = $('ideaInput').value.trim();
-    if (!text) { setLine('ideaStatus', 'Describe the email you want first.'); $('ideaInput').focus(); return; }
-    const btn = $('ideaGo');
-    busy(btn, true);
-    setLine('ideaStatus', 'Drafting your idea for the editor…', true);
-    try {
-      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/ai-doc', {
-        brief: text, useCase: text, author: author(),
-      });
-      if (out && out.error) { setLine('ideaStatus', 'Error: ' + out.error); return; }
-      $('ideaInput').value = '';
-      setLine('ideaStatus', '');
-      enterEditor((out && out.doc) || { version: 1, blocks: [] }, null, text.slice(0, 60) || 'New email');
-    } catch (e) { setLine('ideaStatus', 'Error: ' + e.message); }
-    finally { busy(btn, false); }
-  }
-
   // ---- examples: gallery + detail ----
   function renderGallery() {
     const grid = $('exGrid'); grid.innerHTML = '';
@@ -558,7 +483,6 @@
     $('exDetail').classList.toggle('hidden', !on);
     $('exGrid').classList.toggle('hidden', on);
     $('exToolbar').classList.toggle('hidden', on);
-    if (on) $('genPanel').classList.add('hidden');
   }
 
   function exampleParams(x) {
@@ -993,23 +917,6 @@
     } catch (e) { setLine('edAiStatus', 'Error: ' + e.message); }
   }
 
-  // ---- open the editor: fresh (from ai-doc) or from an existing doc example.
-  async function openEditorNew() {
-    if (!S.pitch) return;
-    const btn = $('edNew');
-    busy(btn, true, 'Drafting…');
-    setLine('edNewStatus', 'Asking the genie for a starting layout…', true);
-    try {
-      const out = await api('/api/pitches/' + encodeURIComponent(S.pitch.id) + '/ai-doc', {
-        brief: (S.pitch && S.pitch.brief) || '', author: author(),
-      });
-      if (out && out.error) { setLine('edNewStatus', 'Error: ' + out.error); return; }
-      const doc = (out && out.doc) || { version: 1, blocks: [] };
-      setLine('edNewStatus', '');
-      enterEditor(doc, null, (S.pitch && S.pitch.title) || 'New email');
-    } catch (e) { setLine('edNewStatus', 'Error: ' + e.message); }
-    finally { busy(btn, false); }
-  }
   // Open ANY example in the editor: a doc example loads its stored blocks; a
   // legacy interactive example is synthesized into an editable doc server-side
   // (/as-doc). Saving PATCHes the same example, so editing an old AMP updates
@@ -1899,7 +1806,6 @@
     $('exEditDoc').onclick = openEditorForExample;
 
     // visual block editor
-    $('edNew').onclick = openEditorNew;
     $('edBack').onclick = leaveEditor;
     $('edSave').onclick = saveDoc;
     $('edTitle').oninput = () => { S.edDirty = true; setSaved(); };
