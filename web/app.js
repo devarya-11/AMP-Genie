@@ -128,7 +128,13 @@
     const card = $('dossierCard');
     if (!d) { card.classList.add('hidden'); return; }
     card.classList.remove('hidden');
-    $('dossierConf').textContent = d.confidence === 'llm' ? 'LLM-researched' : 'heuristic (no LLM key)';
+    // Honest label: 'heuristic' has two very different causes. Only say
+    // "no LLM key" when there genuinely isn't one — otherwise the LLM just
+    // didn't land this time (free-tier flakiness), and clicking Research
+    // again retries it (the server re-attempts a cached heuristic dossier).
+    $('dossierConf').textContent = d.confidence === 'llm'
+      ? 'LLM-researched'
+      : (d.llmConfigured ? 'heuristic — click Research to retry the LLM' : 'heuristic (no LLM key)');
     $('dossierSummary').textContent = d.summary || 'No public summary found — add notes above and re-research, or just continue.';
     const chips = $('dossierChips'); chips.innerHTML = '';
     if (d.vertical) chip(chips, 'vertical', d.vertical);

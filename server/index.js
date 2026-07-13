@@ -24,7 +24,7 @@ const { readHistory, appendHistory, MAX_ENTRIES } = require('./history');
 const { createBuild, buildHistoryEntry } = require('./build-pipeline');
 const { createSlate } = require('./slate-core');
 const { applyTweak, readVersions } = require('./tweak-engine');
-const { buildDossier } = require('./brand-research');
+const { buildDossier, hasResearchProvider } = require('./brand-research');
 const { proposeUseCases, shapeUserIdea } = require('./usecase-engine');
 const {
   getBuild, getSlate, readSlateIndex, normalizeBrief,
@@ -126,6 +126,9 @@ app.post('/usecases', async (req, res) => {
       hasKit: !!kit,
       kitHasAssets: !!(kit && (kit.logoUrl || kit.heroUrl || voiceSample
         || (Array.isArray(kit.products) && kit.products.length))),
+      // lets the UI tell "heuristic because no key" from "heuristic because
+      // the LLM call didn't land this time" — the label was lying before.
+      llmConfigured: hasResearchProvider(),
     };
     const publicDossier = {
       name: dossier.name,

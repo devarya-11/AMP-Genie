@@ -12,7 +12,7 @@ delete process.env.OLLAMA_BASE_URL;
 delete process.env.ANTHROPIC_API_KEY;
 
 const {
-  buildDossier, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier,
+  buildDossier, hasResearchProvider, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier,
 } = require('../server/brand-research');
 
 // A realistic homepage: title/meta/og in mixed attribute order, chrome nav
@@ -121,7 +121,9 @@ test('fetchBrandSite returns null when every candidate fetch is refused', async 
   let calls = 0;
   const refused = async () => { calls += 1; throw new Error('ECONNREFUSED'); };
   assert.strictEqual(await fetchBrandSite('Glowly', refused), null);
-  assert.strictEqual(calls, 2); // www.glowly.com then glowly.com
+  // Four candidates raced in parallel: www/bare x .com/.in (a dead .com must
+  // never starve the budget before .in is tried — the groww.in fix).
+  assert.strictEqual(calls, 4);
 });
 
 test('fetchBrandSite returns the answering domain and its extracted facts', async () => {
@@ -325,9 +327,10 @@ test('buildDossier returns the cached dossier on a second call without refetchin
   const kv = fakeKv();
   const f = countingFetch(FIXTURE_HTML);
   const first = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers: [] });
-  assert.strictEqual(f.calls, 1);
+  // 4 candidate domains raced per build (www/bare x .com/.in).
+  assert.strictEqual(f.calls, 4);
   const second = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers: [] });
-  assert.strictEqual(f.calls, 1, 'a cache hit must not refetch the site');
+  assert.strictEqual(f.calls, 4, 'a cache hit must not refetch the site');
   assert.deepStrictEqual(second, first);
 });
 
@@ -338,7 +341,7 @@ test('buildDossier force:true bypasses a valid cache entry', async () => {
   await buildDossier({
     brandName: 'Glowly', kv, fetchImpl: f.impl, force: true,
   }, { providers: [] });
-  assert.strictEqual(f.calls, 2, 'force must recompute even with a fresh cache entry');
+  assert.strictEqual(f.calls, 8, 'force must recompute even with a fresh cache entry');
 });
 
 test('buildDossier treats changed notes as a cache miss (notes hash comparison)', async () => {
@@ -350,13 +353,13 @@ test('buildDossier treats changed notes as a cache miss (notes hash comparison)'
   const d = await buildDossier({
     brandName: 'Glowly', notes: 'new plan', kv, fetchImpl: f.impl,
   }, { providers: [] });
-  assert.strictEqual(f.calls, 2, 'changed notes must recompute the dossier');
+  assert.strictEqual(f.calls, 8, 'changed notes must recompute the dossier');
   assert.strictEqual(d.notes, 'new plan');
   // unchanged notes hit the refreshed cache again
   await buildDossier({
     brandName: 'Glowly', notes: 'new plan', kv, fetchImpl: f.impl,
   }, { providers: [] });
-  assert.strictEqual(f.calls, 2);
+  assert.strictEqual(f.calls, 8);
 });
 
 test('buildDossier keeps the pasted notes verbatim, whitespace and all', async () => {
@@ -390,4 +393,47 @@ test('buildDossier copes with no brand name at all (nothing to fetch, nothing to
   assert.strictEqual(d.slug, '');
   assert.strictEqual(d.vertical, 'Generic');
   assert.strictEqual(d.confidence, 'heuristic');
+});
+
+// ---- v3.2 fix: a stale heuristic cache upgrades once a provider exists ------
+
+test('a cached HEURISTIC dossier is re-attempted (and upgraded) when a provider is now configured', async () => {
+  const kv = fakeKv();
+  const f = countingFetch(FIXTURE_HTML);
+  // First research with NO provider -> heuristic, cached.
+  const first = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers: [] });
+  assert.strictEqual(first.confidence, 'heuristic');
+  const callsAfterFirst = f.calls;
+
+  // Second research WITH a provider (an earlier keyless session is exactly
+  // this: heuristic in KV, key added later). Must NOT serve the stale
+  // heuristic — it re-runs and upgrades to llm.
+  const llmThunk = async () => ({ summary: 'Glowly makes clean skincare.', vertical: 'Beauty' });
+  const second = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers: [llmThunk] });
+  assert.strictEqual(second.confidence, 'llm', 'a provider must upgrade the cached heuristic');
+  assert.strictEqual(second.summary, 'Glowly makes clean skincare.');
+  assert.ok(f.calls > callsAfterFirst, 're-research must refetch, not serve the stale cache');
+
+  // Now the cache holds an llm dossier: a third call (still with a provider)
+  // is a fast cache hit — no refetch.
+  const callsBeforeThird = f.calls;
+  const third = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers: [llmThunk] });
+  assert.strictEqual(third.confidence, 'llm');
+  assert.strictEqual(f.calls, callsBeforeThird, 'a cached llm dossier must be served without refetching');
+});
+
+test('hasResearchProvider reflects injected providers, a Claude client, and env keys', () => {
+  const saved = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+  try {
+    assert.strictEqual(hasResearchProvider({}), false);
+    assert.strictEqual(hasResearchProvider({ providers: [] }), false);
+    assert.strictEqual(hasResearchProvider({ providers: [async () => ({})] }), true);
+    assert.strictEqual(hasResearchProvider({ client: {} }), true);
+    process.env.GEMINI_API_KEY = 'x';
+    assert.strictEqual(hasResearchProvider({}), true);
+  } finally {
+    if (saved === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = saved;
+  }
 });

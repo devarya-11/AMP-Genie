@@ -24,6 +24,7 @@ const {
   callClaude, callGemini, callGroq, callOllama, withTimeout,
 } = require('./llm-providers');
 const { inferVertical, inferTone } = require('./brief-router');
+const { candidateDomains } = require('./brand');
 const { VERTICALS } = require('./content');
 const { brandSlug } = require('./store');
 
@@ -138,13 +139,10 @@ function extractSiteFacts(html, baseUrl) { // eslint-disable-line no-unused-vars
   return facts;
 }
 
-// Mirrors server/brand.js's candidateDomains (not exported there): the UI
-// never asks for a URL, so guess www.<slug>.com then <slug>.com.
-function candidateDomains(brandName) {
-  const slug = String(brandName || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-  if (!slug) return [];
-  return [`https://www.${slug}.com`, `https://${slug}.com`];
-}
+// Reuses server/brand.js's candidateDomains (.com AND .in, www + bare) — the
+// two modules had drifted, and research trying only .com is exactly why
+// groww.in-style brands timed out their whole scrape budget on dead .com
+// domains and then had no site facts to ground the LLM synthesis.
 
 // Fetch the brand's homepage and extract facts. Same resilience contract as
 // brand.js's fetchBrandColor/fetchBrandLogo: any failure at any stage falls
@@ -153,17 +151,26 @@ function candidateDomains(brandName) {
 // before it could make the caller feel stuck. Never throws.
 async function fetchBrandSite(brandName, fetchImpl = fetch) {
   const run = async () => {
-    for (const url of candidateDomains(brandName)) {
-      try {
-        const r = await safeFetch(url, REQUEST_TIMEOUT_MS, fetchImpl);
-        if (!r.ok) continue;
-        const html = await r.text();
-        return { site: url, facts: extractSiteFacts(html, url) };
-      } catch {
-        // blocked / DNS failure / timeout — try the next candidate, then fall through
-      }
+    const domains = candidateDomains(brandName);
+    if (!domains.length) return null;
+    // Race every candidate in PARALLEL, not serially: a dead first domain
+    // (groww.com times out at REQUEST_TIMEOUT_MS) must not consume the whole
+    // SITE_TIMEOUT_MS budget before the real one (groww.in, answers in <1s)
+    // is even attempted — the serial version starved the LLM of site facts
+    // for every .in-first brand. Each attempt rejects on any failure so
+    // Promise.any yields the first SUCCESS, not the first settle; if all
+    // reject it throws (AggregateError) and we degrade to null.
+    const attempts = domains.map(async (url) => {
+      const r = await safeFetch(url, REQUEST_TIMEOUT_MS, fetchImpl);
+      if (!r.ok) throw new Error('non-2xx');
+      const html = await r.text();
+      return { site: url, facts: extractSiteFacts(html, url) };
+    });
+    try {
+      return await Promise.any(attempts);
+    } catch {
+      return null; // every candidate domain failed
     }
-    return null;
   };
   return withTimeout(run, SITE_TIMEOUT_MS);
 }
@@ -394,18 +401,44 @@ async function synthesizeDossier(args = {}, opts = {}) {
   }
   if (typeof thunk !== 'function') return null;
 
-  try {
-    // the built-in call*s honour timeoutMs themselves, but race here too so
-    // an injected/misbehaving thunk can never hold a build past the budget;
-    // Promise.resolve().then() also absorbs synchronous throws
-    let raw = await withTimeout(() => Promise.resolve().then(thunk), timeoutMs);
-    if (!raw) return null;
-    if (typeof raw === 'string') raw = JSON.parse(raw);
-    const dossier = validateDossier(raw);
-    return dossier && Object.keys(dossier).length ? dossier : null;
-  } catch {
-    return null;
+  // Free-tier structured output is intermittently flaky — the same schema'd
+  // call that succeeds for one brand returns a 200 with empty/unparseable
+  // content for the next. The real-provider path therefore gets ONE retry,
+  // which measurably lifts the llm-tier hit rate; an injected test thunk is
+  // called exactly once (nothing flaky to retry, and a second call would
+  // break call-count assertions).
+  const maxAttempts = injected ? 1 : 2;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      // the built-in call*s honour timeoutMs themselves, but race here too so
+      // an injected/misbehaving thunk can never hold a build past the budget;
+      // Promise.resolve().then() also absorbs synchronous throws
+      let raw = await withTimeout(() => Promise.resolve().then(thunk), timeoutMs);
+      if (raw) {
+        if (typeof raw === 'string') raw = JSON.parse(raw);
+        const dossier = validateDossier(raw);
+        if (dossier && Object.keys(dossier).length) return dossier;
+      }
+    } catch {
+      // parse/validation/timeout failure — fall through to the retry, then null
+    }
   }
+  return null;
+}
+
+// True when any research provider is configured (a Claude DI client counts).
+// Drives two things: whether a cached HEURISTIC dossier is worth re-attempting
+// (an llm upgrade is only possible with a provider), and the honest UI label
+// (heuristic-because-no-key vs heuristic-because-the-call-failed).
+function hasResearchProvider(opts = {}) {
+  // Injected providers (the test/DI seam) count too, so this stays consistent
+  // with synthesizeDossier's own provider selection.
+  if (Array.isArray(opts.providers) && opts.providers.length) return true;
+  return !!(opts.client
+    || process.env.ANTHROPIC_API_KEY
+    || process.env.GEMINI_API_KEY
+    || process.env.GROQ_API_KEY
+    || OLLAMA_BASE_URL);
 }
 
 // ---- orchestrator ------------------------------------------------------------
@@ -463,7 +496,15 @@ async function buildDossier(args = {}, opts = {}) {
       const cached = await cacheGet(kv, key);
       // changed notes invalidate the cache: the dossier must reflect what
       // the team pasted now, not what they pasted last time
-      if (cached && cached.notesHash === hash) return cached;
+      if (cached && cached.notesHash === hash) {
+        // A cached LLM dossier is authoritative — serve it fast. A cached
+        // HEURISTIC one only records that the LLM wasn't available (or failed)
+        // when it was made; if a provider is configured NOW, fall through and
+        // try to upgrade it. This is what unsticks every brand researched in
+        // an earlier keyless session (they'd otherwise serve the stale
+        // heuristic forever, which is exactly the "no LLM key" chip bug).
+        if (cached.confidence === 'llm' || !hasResearchProvider(opts)) return cached;
+      }
     }
 
     const fetched = await fetchBrandSite(name, fetchImpl || fetch);
@@ -522,4 +563,5 @@ async function buildDossier(args = {}, opts = {}) {
 
 module.exports = {
   buildDossier, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier,
+  hasResearchProvider,
 };

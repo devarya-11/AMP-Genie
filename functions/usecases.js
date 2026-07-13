@@ -12,7 +12,7 @@ import storeMod from '../server/store.js';
 import { applyEnv } from './_lib/env.js';
 import { json, readJson } from './_lib/http.js';
 
-const { buildDossier } = brandResearchMod;
+const { buildDossier, hasResearchProvider } = brandResearchMod;
 const { proposeUseCases, shapeUserIdea } = usecaseEngineMod;
 // normalizeBrief comes from store.js, NOT server/history.js — history touches
 // __dirname/fs at module load, which does not exist in the Workers bundle.
@@ -55,6 +55,9 @@ export async function onRequestPost({ request, env }) {
       hasKit: !!kit,
       kitHasAssets: !!(kit && (kit.logoUrl || kit.heroUrl || voiceSample
         || (Array.isArray(kit.products) && kit.products.length))),
+      // lets the UI tell "heuristic because no key" from "heuristic because
+      // the LLM call didn't land this time" — the label was lying before.
+      llmConfigured: hasResearchProvider(),
     };
 
     if (typeof b.idea === 'string' && b.idea.trim()) {

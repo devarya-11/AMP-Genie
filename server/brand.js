@@ -293,4 +293,8 @@ function libVertical(brandName) {
 module.exports = {
   resolveBrandColor, libGet, libVertical, hashColor, BRAND_LIBRARY,
   resolveBrandLogo, fetchBrandLogo, ogImage, iconHref, absUrl,
+  // Exported so server/brand-research.js reuses the SAME candidate list —
+  // these two modules had drifted (research still tried only .com, which is
+  // why groww.in-style brands starved their LLM call on dead-domain timeouts).
+  candidateDomains, googleFaviconUrl,
 };
