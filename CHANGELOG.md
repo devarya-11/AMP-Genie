@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.2.1 — dossier reliability + honest LLM-status label (2026-07-12)
+
+The "heuristic (no LLM key)" chip was appearing even with a key configured.
+Three causes fixed:
+
+- **Scrape starvation** — `brand-research` kept its own `.com`-only domain
+  list (drifted from `brand.js`), so `.in`-first brands (groww.in) timed out
+  the whole scrape budget on dead `.com` domains before the real one was
+  tried. Now imports the shared `candidateDomains` (`.com` + `.in`) and RACES
+  all candidates in parallel (`Promise.any`).
+- **Stale cache** — a dossier researched in an earlier keyless session cached
+  `heuristic` and was served forever. `buildDossier` now re-attempts a cached
+  heuristic when a provider is configured, upgrading it to `llm`.
+- **Free-tier flakiness** — the LLM synthesis retries once.
+- **Honest label** — `/usecases` returns `llmConfigured`; the chip only says
+  "(no LLM key)" when there genuinely isn't one, otherwise "click Research to
+  retry the LLM". (A raw `429` quota-exceeded — the free Gemini tier's daily
+  cap — is the usual reason a configured key still yields heuristic; an
+  Anthropic key has no free-tier wall.)
+
+Merged devarya's Directive 7 (preview now renders the **real** validated AMP
+in an iframe, retiring the `preview.js` JS-mirror and its drift risk).
+
 ## v3.2 — proper emailers: assets, voice, exemplars (2026-07-12)
 
 - **Brand kit assets** — the Brands view gains an editor: logo URL, hero
