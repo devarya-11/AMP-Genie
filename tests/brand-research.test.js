@@ -12,8 +12,12 @@ delete process.env.OLLAMA_BASE_URL;
 delete process.env.ANTHROPIC_API_KEY;
 
 const {
-  buildDossier, hasResearchProvider, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier,
+  buildDossier, hasResearchProvider, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier, stockImageUrl,
 } = require('../server/brand-research');
+
+// generate.js's exact amp-img src grammar — every stockImageUrl must satisfy it
+// or the URL would be dropped downstream and the tile fall back to a placeholder.
+const VALID_IMG = /^https:\/\/[^\s"'<>]+$/;
 
 // A realistic homepage: title/meta/og in mixed attribute order, chrome nav
 // links mixed with real category labels, a duplicate label in another case,
@@ -229,6 +233,70 @@ test('validateDossier keeps only a real generator vertical', () => {
   assert.strictEqual(validateDossier({ vertical: 42 }).vertical, undefined);
 });
 
+// ---- validateDossier: the v3.3 priced catalog + hero prompt -----------------
+
+test('validateDossier keeps a priced catalog; a price-less item survives unpriced', () => {
+  const d = validateDossier({
+    catalog: [
+      { name: 'Butter Chicken', price: 420 },
+      { name: 'Garlic Naan', price: 80.6 }, // rounded to a whole rupee
+      { name: 'House Cocktail' }, // no price -> named item still lands
+    ],
+  });
+  assert.deepStrictEqual(d.catalog, [
+    { name: 'Butter Chicken', price: 420 },
+    { name: 'Garlic Naan', price: 81 },
+    { name: 'House Cocktail' },
+  ]);
+});
+
+test('validateDossier drops a bad price but keeps the item, and drops a nameless/markup catalog row', () => {
+  const d = validateDossier({
+    catalog: [
+      { name: 'Free Sample', price: 0 }, // 0 is out of window -> price dropped
+      { name: 'Overflow', price: 1e12 }, // above PRICE_MAX -> price dropped
+      { name: 'Bad Price', price: 'lots' }, // non-numeric -> price dropped
+      { name: '<b>Injected</b>' }, // markup name -> whole row dropped
+      { price: 100 }, // no name -> whole row dropped
+    ],
+  });
+  assert.deepStrictEqual(d.catalog, [
+    { name: 'Free Sample' }, { name: 'Overflow' }, { name: 'Bad Price' },
+  ]);
+});
+
+test('validateDossier caps the catalog at 8 and ignores a non-array catalog', () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ name: `Dish ${i}`, price: 100 + i }));
+  assert.strictEqual(validateDossier({ catalog: many }).catalog.length, 8);
+  assert.strictEqual(validateDossier({ catalog: 'not an array' }).catalog, undefined);
+  assert.strictEqual(validateDossier({ catalog: [] }).catalog, undefined);
+});
+
+test('validateDossier keeps a clean heroPrompt and drops a markup/over-long one', () => {
+  assert.strictEqual(validateDossier({ heroPrompt: 'plated coastal cuisine' }).heroPrompt, 'plated coastal cuisine');
+  assert.strictEqual(validateDossier({ heroPrompt: 'hero <img> shot' }).heroPrompt, undefined);
+  assert.strictEqual(validateDossier({ heroPrompt: 'x'.repeat(121) }).heroPrompt, undefined);
+});
+
+// ---- stockImageUrl: keyword photography URLs --------------------------------
+
+test('stockImageUrl builds a deterministic, amp-img-valid loremflickr URL from keywords', () => {
+  const a = stockImageUrl('Butter Chicken', 300, 200);
+  assert.match(a, /^https:\/\/loremflickr\.com\/300\/200\/butter,chicken\?lock=\d+$/);
+  assert.match(a, VALID_IMG, 'must satisfy generate.js validImgUrl so it is never dropped');
+  assert.strictEqual(stockImageUrl('Butter Chicken', 300, 200), a, 'same query -> byte-identical URL (stable lock)');
+  assert.notStrictEqual(stockImageUrl('Garlic Naan', 300, 200), a, 'different query -> different photo');
+});
+
+test('stockImageUrl slugs punctuation, caps at 4 keywords, clamps dimensions, and returns null when empty', () => {
+  const u = stockImageUrl("Chef's Special — Tandoori! Platter Deluxe Extra", 600, 240);
+  assert.match(u, /^https:\/\/loremflickr\.com\/600\/240\/chef,s,special,tandoori\?lock=\d+$/);
+  assert.strictEqual(stockImageUrl('   ', 300, 200), null);
+  assert.strictEqual(stockImageUrl('!!!', 300, 200), null);
+  assert.strictEqual(stockImageUrl(null), null);
+  assert.match(stockImageUrl('food', 99999, -5), /^https:\/\/loremflickr\.com\/2000\/1\/food\?/);
+});
+
 test('validateDossier sanitises voice sub-arrays and tolerates a malformed voice', () => {
   const d = validateDossier({ voice: { adjectives: ['bold', 42, '<i>sly</i>'], donts: 'nope' } });
   assert.deepStrictEqual(d.voice, { adjectives: ['bold'] });
@@ -321,6 +389,23 @@ test('buildDossier merges the LLM part over the heuristic dossier and stamps ide
   assert.strictEqual(d.notes, 'internal note');
   assert.ok(!Number.isNaN(Date.parse(d.researchedAt)), 'researchedAt must be a parseable timestamp');
   assert.ok(kv.store.has('dossier:glowly'), 'dossier persisted best-effort under dossier:<slug>');
+});
+
+test('buildDossier threads the LLM catalog and heroPrompt through to the merged dossier', async () => {
+  const kv = fakeKv();
+  const f = countingFetch(FIXTURE_HTML);
+  const providers = [async () => ({
+    catalog: [{ name: 'Radiance Serum', price: 1299 }, { name: 'Velvet Lipstick', price: 899 }],
+    heroPrompt: 'clean beauty serums on marble',
+  })];
+  const d = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers });
+  assert.deepStrictEqual(d.catalog, [
+    { name: 'Radiance Serum', price: 1299 },
+    { name: 'Velvet Lipstick', price: 899 },
+  ]);
+  assert.strictEqual(d.heroPrompt, 'clean beauty serums on marble');
+  assert.strictEqual(d.confidence, 'llm');
+  assert.ok(d.categories.includes('Skincare'), 'heuristic still fills the fields the LLM left');
 });
 
 test('buildDossier returns the cached dossier on a second call without refetching', async () => {

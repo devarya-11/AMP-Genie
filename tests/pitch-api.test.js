@@ -93,6 +93,56 @@ test('createBrand: a library brand freezes its real colour; junk names 400; re-a
     'a name with no letter or digit cannot slug');
 });
 
+test('createBrand: an LLM catalog lands real priced, pictured products and a keyword hero', async () => {
+  // A brand whose homepage is unreachable offline, so no scraped og:image and
+  // no scraped products — exactly the "comorin" case. The injected provider
+  // supplies the priced catalog + heroPrompt the real Groq/Gemini call would.
+  const db = createLocalDb(':memory:');
+  await db.applyMigrations(MIGRATIONS);
+  const repo = bindLocalRepo(db);
+  const providers = [{
+    name: 'fake',
+    async call() {
+      return {
+        summary: 'Comorin is a modern Indian restaurant.',
+        vertical: 'Food',
+        catalog: [
+          { name: 'Butter Chicken', price: 420 },
+          { name: 'Garlic Naan', price: 80 },
+          { name: 'House Cocktail' }, // price-less: a named item still lands
+        ],
+        heroPrompt: 'plated indian coastal cuisine on a rustic table',
+      };
+    },
+  }];
+  const api = createPitchApi({
+    repo, storage: null, kv: fakeKv(), validate, llmProviders: async () => providers,
+  });
+
+  const res = await api.createBrandH({ name: 'Comorin', author: 'dev' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.brand.vertical, 'Food', 'the LLM vertical lands on the row');
+  // No og:image offline, so the heroPrompt paints a real keyword hero photo.
+  assert.match(res.json.brand.hero_url, /^https:\/\/loremflickr\.com\/600\/240\/[a-z,]+\?lock=\d+$/);
+
+  // The researched catalogue is now REAL product rows, ready for the first build.
+  const detail = await api.getBrandH({ id: res.json.brand.id });
+  const products = detail.json.products;
+  assert.strictEqual(products.length, 3, 'all three catalog items persisted');
+  const byName = Object.fromEntries(products.map((p) => [p.name, p]));
+  assert.strictEqual(byName['Butter Chicken'].price, 420);
+  assert.strictEqual(byName['Garlic Naan'].price, 80);
+  assert.strictEqual(byName['House Cocktail'].price, null, 'a price-less item lands unpriced, never dropped');
+  for (const p of products) {
+    assert.match(p.image_url, /^https:\/\/loremflickr\.com\/300\/200\/[a-z,]+\?lock=\d+$/, 'each tile gets a keyword photo');
+  }
+
+  // Re-adding the brand replaces the list wholesale — no duplication.
+  await api.createBrandH({ name: 'Comorin' });
+  const again = await api.getBrandH({ id: res.json.brand.id });
+  assert.strictEqual(again.json.products.length, 3, 're-research replaces, never duplicates');
+});
+
 // ---- brand detail views --------------------------------------------------------
 
 test('getBrand/getBrandBySlug: full workspace shape, junk ids 400, unknown 404', async () => {

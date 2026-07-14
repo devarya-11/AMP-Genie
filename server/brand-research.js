@@ -237,6 +237,14 @@ const ARRAY_CAPS = {
   products: 10, categories: 10, audiences: 5, currentCampaigns: 5,
 };
 const VOICE_CAPS = { adjectives: 5, donts: 5 };
+// The priced catalog is what finally replaces generate.js's generic vertical
+// placeholders ("Pro Plan", "Annual Saver") with the brand's ACTUAL items at
+// realistic prices. Capped to the repo's PRODUCTS_MAX (8); prices are whole
+// rupees in a sane window so a hallucinated 0 or 1e30 can never render.
+const CATALOG_MAX = 8;
+const PRICE_MIN = 1;
+const PRICE_MAX = 10000000;
+const HERO_PROMPT_MAX = 120;
 
 // Same rules as brief-content.js's validateStringField: trimmed, non-empty,
 // under maxLen, and free of '<'/'>' — markup must never leave this module.
@@ -255,6 +263,29 @@ function cleanStringArray(val, maxItems) {
     if (out.length >= maxItems) break;
     const s = cleanString(v, FIELD_ITEM_MAX_LEN);
     if (s !== null) out.push(s);
+  }
+  return out.length ? out : null;
+}
+
+// The LLM's priced catalog: each item is { name, price? }. A clean, markup-free
+// name (<= FIELD_ITEM_MAX_LEN) is required; price is OPTIONAL — a finite
+// positive integer inside the sane window survives, anything else drops the
+// price but keeps the named item (a name-only announcement still grounds the
+// email in a real product). Capped at CATALOG_MAX. Returns null when nothing is
+// usable, so the field is simply absent and heuristic products fill in at
+// persistence time. Same per-field-DROP religion as the rest of this module.
+function cleanCatalog(val) {
+  if (!Array.isArray(val)) return null;
+  const out = [];
+  for (const it of val) {
+    if (out.length >= CATALOG_MAX) break;
+    if (!it || typeof it !== 'object' || Array.isArray(it)) continue;
+    const name = cleanString(it.name, FIELD_ITEM_MAX_LEN);
+    if (name === null) continue;
+    const item = { name };
+    const price = Math.round(Number(it.price));
+    if (Number.isFinite(price) && price >= PRICE_MIN && price <= PRICE_MAX) item.price = price;
+    out.push(item);
   }
   return out.length ? out : null;
 }
@@ -281,6 +312,16 @@ function validateDossier(obj) {
     if (donts) voice.donts = donts;
     if (Object.keys(voice).length) out.voice = voice;
   }
+
+  // The priced catalog and the hero image prompt are the v3.3 enrichment: LLM-
+  // only fields (the heuristic tier can't price a product or picture a hero), so
+  // they're absent unless the model grounded them. Both re-validated here as
+  // defense in depth, same as every other field.
+  const catalog = cleanCatalog(obj.catalog);
+  if (catalog) out.catalog = catalog;
+
+  const heroPrompt = cleanString(obj.heroPrompt, HERO_PROMPT_MAX);
+  if (heroPrompt !== null) out.heroPrompt = heroPrompt;
 
   // an invented vertical must never leak into getContent() — anything
   // outside the real generator list is dropped so the heuristic one is kept
@@ -311,6 +352,20 @@ const DOSSIER_SCHEMA = {
       additionalProperties: false,
     },
     currentCampaigns: { type: 'array', items: { type: 'string', maxLength: FIELD_ITEM_MAX_LEN }, maxItems: ARRAY_CAPS.currentCampaigns },
+    catalog: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', maxLength: FIELD_ITEM_MAX_LEN },
+          price: { type: 'number' },
+        },
+        required: ['name'],
+        additionalProperties: false,
+      },
+      maxItems: CATALOG_MAX,
+    },
+    heroPrompt: { type: 'string', maxLength: HERO_PROMPT_MAX },
     vertical: { type: 'string', enum: VERTICALS },
   },
   additionalProperties: false,
@@ -338,7 +393,7 @@ function buildResearchPrompt({ brandName, facts, notes }) {
 Scraped homepage facts (may be noisy or incomplete):
 ${factLines}
 ${notesBlock}
-Fill in the dossier as JSON: summary (what the company does and for whom), products (up to 10 short product names), categories (up to 10 catalogue categories), audiences (up to 5 short audience descriptors), voice (adjectives: up to 5 brand-voice adjectives; donts: up to 5 things the copy must avoid), currentCampaigns (up to 5 short descriptions of offers or campaigns visible in the facts or notes), vertical (exactly one of: ${VERTICALS.join(', ')}). Plain text values only — no HTML, no markdown, no links. Omit any field you cannot ground in the facts or notes.`;
+Fill in the dossier as JSON: summary (what the company does and for whom), products (up to 10 short product names), categories (up to 10 catalogue categories), audiences (up to 5 short audience descriptors), voice (adjectives: up to 5 brand-voice adjectives; donts: up to 5 things the copy must avoid), currentCampaigns (up to 5 short descriptions of offers or campaigns visible in the facts or notes), catalog (up to 8 of the brand's REAL flagship products or menu items grounded in the facts/notes, each an object {name, price} where price is a realistic retail price as a plain positive whole number in Indian rupees — a restaurant lists actual dishes at real menu prices, a shop lists real SKUs; NEVER invent generic placeholders like "Starter Plan", "Pro Plan" or "Annual Saver"), heroPrompt (a short 4-to-10-word visual description of the single best hero photograph for this brand's marketing email, e.g. "plated South Indian coastal cuisine on a rustic wooden table"), vertical (exactly one of: ${VERTICALS.join(', ')}). Plain text string values only — no HTML, no markdown, no links; prices are bare numbers. Omit any field you cannot ground in the facts or notes.`;
 }
 
 // First configured provider only, fixed priority order (Claude, Gemini,
@@ -572,7 +627,37 @@ async function buildDossier(args = {}, opts = {}) {
   }
 }
 
+// ---- keyword photography -----------------------------------------------------
+
+// A real, keyword-relevant photograph URL for a product tile or a hero band,
+// built the SAME URL-parameterised way generate.js builds its placehold.co and
+// quickchart.io images: no fetch here, just a deterministic https URL a later
+// amp-img can load. loremflickr returns a Creative-Commons Flickr photo whose
+// tags match the comma-joined keywords; ?lock=<hash> pins ONE stable photo per
+// query so re-renders (and the test suite) stay byte-identical. The output is
+// intentionally kept within generate.js's validImgUrl grammar (plain https, no
+// whitespace/quotes/brackets) so it survives every downstream sanitiser. An
+// empty or unusable query returns null, so callers fall back to their own
+// placeholder (a ph() tile or a hero-less header) rather than a broken image.
+function stockImageUrl(query, width, height) {
+  const words = String(query || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4);
+  if (!words.length) return null;
+  const w = Math.max(1, Math.min(2000, Math.round(Number(width) || 600)));
+  const h = Math.max(1, Math.min(2000, Math.round(Number(height) || 400)));
+  const key = words.join(',');
+  // Same 31-multiplier rolling hash as notesHash, kept numeric: loremflickr's
+  // lock seed wants a number, and a stable seed is all determinism needs.
+  let lock = 0;
+  for (let i = 0; i < key.length; i += 1) lock = (lock * 31 + key.charCodeAt(i)) >>> 0;
+  return `https://loremflickr.com/${w}/${h}/${key}?lock=${lock || 1}`;
+}
+
 module.exports = {
   buildDossier, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier,
-  hasResearchProvider,
+  hasResearchProvider, stockImageUrl,
 };

@@ -34,7 +34,7 @@
 // fs, no path, no process.env reads at module load — so this bundles for
 // Workers untouched.
 
-const { buildDossier } = require('./brand-research');
+const { buildDossier, stockImageUrl } = require('./brand-research');
 const { resolveBrandColor, resolveBrandLogo } = require('./brand');
 const { createBuild } = require('./build-pipeline');
 const { applyTweak } = require('./tweak-engine');
@@ -85,6 +85,51 @@ function parseJson(text) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+// Turn a researched dossier into rows for the relational products table — the
+// bridge that finally lands REAL, priced, pictured products where
+// createExampleH -> createBuild -> generate() renders them, instead of the
+// vertical's generic placeholders ("Pro Plan", "Annual Saver"). The LLM's
+// priced `catalog` wins; a keyless/offline heuristic dossier falls back to its
+// name-only `products` (still the brand's real headings, just unpriced). Each
+// item gets a keyword-relevant stock photo derived from its own name + the
+// brand vertical, so tiles show real photography, not a coloured placeholder.
+// repo.replaceProducts' cleanProductRow re-validates every row, so a junk
+// price/image drops that field, never the row.
+function productsFromDossier(dossier) {
+  const d = dossier || {};
+  const vertical = (typeof d.vertical === 'string' && d.vertical !== 'Generic') ? d.vertical : '';
+  const source = (Array.isArray(d.catalog) && d.catalog.length)
+    ? d.catalog
+    : (Array.isArray(d.products) ? d.products.map((name) => ({ name })) : []);
+  const rows = [];
+  for (const it of source) {
+    const name = (it && typeof it.name === 'string') ? it.name.trim() : '';
+    if (!name) continue;
+    const row = { name };
+    const price = Math.round(Number(it && it.price));
+    if (Number.isFinite(price) && price > 0) row.price = price;
+    const image = stockImageUrl(`${name} ${vertical}`, 300, 200);
+    if (image) row.image = image;
+    rows.push(row);
+  }
+  return rows;
+}
+
+// The hero image the email header paints: a REAL scraped og:image (best) wins;
+// otherwise the LLM's heroPrompt — or, failing that, the brand vertical —
+// becomes a keyword-relevant stock photograph, so a brand whose homepage
+// carried no og:image still opens on a relevant hero band instead of a
+// placeholder. Returns undefined (not null) so it slots straight into the
+// upsertBrand args the way the other optional fields do.
+function heroFromDossier(dossier, liveHeroUrl) {
+  if (typeof liveHeroUrl === 'string' && liveHeroUrl) return liveHeroUrl;
+  const d = dossier || {};
+  const prompt = (typeof d.heroPrompt === 'string' && d.heroPrompt.trim())
+    ? d.heroPrompt
+    : ((typeof d.vertical === 'string' && d.vertical !== 'Generic') ? `${d.vertical} ${d.name || ''}` : '');
+  return stockImageUrl(prompt, 600, 240) || undefined;
 }
 
 // The wire dossier — mirrors functions/usecases.js's publicDossier field for
@@ -204,7 +249,9 @@ function createPitchApi(ctx = {}) {
       vertical: dossier.vertical,
       site: (logo && logo.site) || dossier.site || undefined,
       logoUrl: (logo && logo.logoUrl) || undefined,
-      heroUrl: (logo && logo.heroUrl) || undefined,
+      // A real og:image wins; otherwise the LLM's heroPrompt paints a relevant
+      // stock hero so the header is never a bare placeholder.
+      heroUrl: heroFromDossier(dossier, logo && logo.heroUrl),
       voiceSample: undefined,
       dossier,
       createdBy: actor,
@@ -213,6 +260,21 @@ function createPitchApi(ctx = {}) {
     // refreshes its research rather than erroring, which is what the team
     // actually means by typing a known name into the wizard.
     if (!brand) return { status: 500, json: { error: 'could not save the brand' } };
+    // Land the researched catalogue as real product rows so the FIRST example
+    // this brand generates shows its ACTUAL items (createExampleH reads them
+    // straight back via listProducts). Best-effort and off the critical path:
+    // a products write that fails must never lose the brand the wizard just
+    // researched — the brand row is the system of record, products refresh on
+    // the next research. Re-adding a known brand replaces the list wholesale
+    // (replaceProducts is whole-list), so a refreshed dossier can't duplicate.
+    const productRows = productsFromDossier(dossier);
+    if (productRows.length) {
+      try {
+        await repo.replaceProducts(brand.id, productRows);
+      } catch (e) {
+        console.error('[pitch-api] createBrand: could not persist products:', e && e.message);
+      }
+    }
     await repo.logActivity({
       actor, brandId: brand.id, verb: 'brand-created', detail: brand.name,
     });
