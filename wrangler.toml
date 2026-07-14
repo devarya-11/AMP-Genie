@@ -23,3 +23,14 @@ pages_build_output_dir = "web"
 [[kv_namespaces]]
 binding = "HISTORY"
 id = "45848d264860419eae8c4869900eff10"
+
+# Genie 2.0 system of record on Cloudflare D1 (SQLite over HTTP). The Pages
+# Functions reach it as env.DB; functions/_lib/genie.js builds the repo via
+# createD1Db(env.DB) whenever Supabase is not configured. Schema lives in
+# migrations/0001_init.sql (apply with `wrangler d1 execute amp-genie-db
+# --remote --file=migrations/0001_init.sql`). Local `wrangler pages dev` gets a
+# throwaway in-memory D1 unless --d1 DB=<id> is passed.
+[[d1_databases]]
+binding = "DB"
+database_name = "amp-genie-db"
+database_id = "71b354a8-bd3e-486f-92f7-5e0b0b3aafa9"
