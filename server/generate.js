@@ -463,21 +463,43 @@ ${footerBlock({ brand, defaultText: 'Live catalogue search, right inside your in
 }
 
 function buildQuiz(ctx) {
-  const { brand, palette: p, content, t, copy = {} } = ctx;
+  const { brand, palette: p, content, t, currency, copy = {} } = ctx;
   const headSrc = copy.head || t.quiz;
   const head = enc(applyBrand(headSrc, brand));
-  const qSrc = copy.question || content.quiz.q;
+  // Real pasted/kit products drive the answer choices when at least two are
+  // present — the "show the brand's ACTUAL items, not the vertical's
+  // placeholders" rule reveal/search already follow, now extended to the quiz
+  // so real items reach it too (directive: real content must not stay confined
+  // to the two product modules). Each product becomes a tap target whose match
+  // panel names it and its REAL price — deterministic source only, the LLM can
+  // never set a price — so real items win over the LLM's invented copy.options
+  // here, exactly as a real product name wins over copy.itemNames in reveal. Up
+  // to four fit the tap-target column; fewer than two can't pose a choice, so
+  // the LLM/library path stands and the no-items render stays byte-identical.
+  const real = validItems(copy.items);
+  const useItems = real.length >= 2;
+  const qSrc = copy.question || (useItems ? 'Which one is calling your name?' : content.quiz.q);
   const q = enc(applyBrand(qSrc, brand));
-  // A copy-provided option override must match the template's fixed 3-option
-  // shape exactly (label required; result optional, falls back to the
-  // library's own result copy) or it is ignored outright.
-  const validOverride = Array.isArray(copy.options)
-    && copy.options.length === content.quiz.options.length
-    && copy.options.every((o) => o && typeof o.label === 'string' && o.label.trim());
-  const opts = validOverride
-    ? copy.options.map((o, i) => ({ label: o.label, result: (typeof o.result === 'string' && o.result.trim()) || content.quiz.options[i].result }))
-    : content.quiz.options;
-  const keys = ['a', 'b', 'c'];
+  let opts;
+  if (useItems) {
+    opts = real.slice(0, 4).map((it) => ({
+      label: it.name,
+      result: it.price != null ? `${it.name} — ${priceText(it.price, currency)}` : it.name,
+    }));
+  } else {
+    // A copy-provided option override must match the template's fixed 3-option
+    // shape exactly (label required; result optional, falls back to the
+    // library's own result copy) or it is ignored outright.
+    const validOverride = Array.isArray(copy.options)
+      && copy.options.length === content.quiz.options.length
+      && copy.options.every((o) => o && typeof o.label === 'string' && o.label.trim());
+    opts = validOverride
+      ? copy.options.map((o, i) => ({ label: o.label, result: (typeof o.result === 'string' && o.result.trim()) || content.quiz.options[i].result }))
+      : content.quiz.options;
+  }
+  // Four keys cover the real-items path (2-4 options); the library/LLM path only
+  // ever indexes the first three, so its output stays byte-for-byte unchanged.
+  const keys = ['a', 'b', 'c', 'd'];
 
   const css = baseCss(p) + `
 .opt{display:block;border:1px solid ${p.line};border-radius:10px;padding:15px 16px;margin:0 0 12px;font-size:15px;cursor:pointer;}
@@ -587,10 +609,18 @@ function buildPoll(ctx) {
   const { brand, palette: p, content, t, copy = {} } = ctx;
   const headSrc = copy.head || t.poll;
   const head = enc(applyBrand(headSrc, brand));
-  const qSrc = copy.question || content.poll.q;
+  // Two real products become the two sides of the vote when present — the same
+  // real-items-win rule as reveal/quiz, so a "this or that" grounds in the
+  // brand's actual line-up instead of the vertical's placeholder pair. A vote
+  // tile shows the product, not its price (the choice isn't about cost), so only
+  // the real names are used; the LLM's optionA/optionB stand only when no real
+  // pair was supplied, keeping the no-items render byte-identical.
+  const real = validItems(copy.items);
+  const useItems = real.length >= 2;
+  const qSrc = copy.question || (useItems ? 'Which one gets your vote?' : content.poll.q);
   const q = enc(applyBrand(qSrc, brand));
-  const a = (typeof copy.optionA === 'string' && copy.optionA.trim()) || content.poll.a;
-  const b = (typeof copy.optionB === 'string' && copy.optionB.trim()) || content.poll.b;
+  const a = useItems ? real[0].name : ((typeof copy.optionA === 'string' && copy.optionA.trim()) || content.poll.a);
+  const b = useItems ? real[1].name : ((typeof copy.optionB === 'string' && copy.optionB.trim()) || content.poll.b);
 
   const css = baseCss(p) + `
 .poll{padding:24px;}

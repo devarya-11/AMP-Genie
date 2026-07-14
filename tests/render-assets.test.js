@@ -70,6 +70,79 @@ test('item images that are not plain https are dropped to the placeholder; the i
   assert.ok(g.previewModel.items.every((it) => !('image' in it)), 'no rejected URL leaks into the previewModel');
 });
 
+// ---- quiz + poll: real items become the interaction, not just reveal/search ----
+
+test('quiz: real items become the answer options, each match naming its real price', async () => {
+  const items = [
+    { name: 'Margherita Pizza', price: 299 },
+    { name: 'Paneer Tikka', price: 349 },
+    { name: 'Lava Cake', price: 199 },
+  ];
+  const g = gen('quiz', { items });
+  const labels = g.previewModel.options.map((o) => o.label);
+  assert.deepStrictEqual(labels, ['Margherita Pizza', 'Paneer Tikka', 'Lava Cake'], 'the real product names are the options, in order');
+  // Each option keeps its own tap key; the price rides the match panel as a
+  // numeric entity (deterministic source only — the LLM never set it).
+  for (const key of ['a', 'b', 'c']) {
+    assert.ok(g.ampHtml.includes(`AMP.setState({s:{sel:'${key}'}})`), `option ${key} still taps s.sel`);
+  }
+  assert.ok(g.ampHtml.includes('Margherita Pizza') && g.ampHtml.includes('&#8377;299'), 'a real name and its real price render in the match panel');
+  // The only placeholder is the header logo (no brand logo supplied here); the
+  // real items introduce zero synthetic product tiles beyond it.
+  const phCount = (s) => s.split('placehold.co').length - 1;
+  assert.strictEqual(phCount(g.ampHtml), phCount(gen('quiz', {}).ampHtml), 'real items add no synthetic product tiles');
+  const v = await validate(g.ampHtml);
+  assert.ok(v.pass, `quiz-with-items must validate AMP4EMAIL: ${JSON.stringify(v.errors)}`);
+});
+
+test('quiz: a name-only item drops the price rather than inventing one; four-option cap', () => {
+  const items = [
+    { name: 'Free Coffee' }, // no price
+    { name: 'Discounted Tea', price: 49 },
+    { name: 'Pastry' }, // no price
+    { name: 'Sandwich', price: 129 },
+    { name: 'Fifth Wheel', price: 1 }, // beyond the four-option cap
+  ];
+  const g = gen('quiz', { items });
+  assert.strictEqual(g.previewModel.options.length, 4, 'at most four real options render');
+  const byLabel = Object.fromEntries(g.previewModel.options.map((o) => [o.label, o.result]));
+  assert.strictEqual(byLabel['Free Coffee'], 'Free Coffee', 'a price-less match is just the name — no invented number');
+  assert.ok(byLabel['Discounted Tea'].includes('₹49'), 'a real price shows on the priced item');
+  assert.ok(!g.ampHtml.includes('Fifth Wheel'), 'the fifth item is past the cap and never renders');
+});
+
+test('poll: two real items become the two vote sides; real names on both tiles', async () => {
+  const items = [{ name: 'Cold Brew', price: 180 }, { name: 'Hot Latte', price: 150 }];
+  const g = gen('poll', { items });
+  assert.strictEqual(g.previewModel.a, 'Cold Brew');
+  assert.strictEqual(g.previewModel.b, 'Hot Latte');
+  assert.ok(g.ampHtml.includes("AMP.setState({s:{v:'a'}})") && g.ampHtml.includes("AMP.setState({s:{v:'b'}})"), 'both vote taps intact');
+  assert.ok(g.ampHtml.includes('Cold Brew') && g.ampHtml.includes('Hot Latte'), 'both real names render on the vote tiles');
+  const v = await validate(g.ampHtml);
+  assert.ok(v.pass, `poll-with-items must validate AMP4EMAIL: ${JSON.stringify(v.errors)}`);
+});
+
+test('quiz/poll with fewer than two real items fall back, byte-identical to no items', () => {
+  for (const moduleId of ['quiz', 'poll']) {
+    const plain = gen(moduleId, {});
+    const oneItem = gen(moduleId, { items: [{ name: 'Solo', price: 10 }] });
+    assert.strictEqual(oneItem.ampHtml, plain.ampHtml, `${moduleId}: a single item can't pose a choice — no-op`);
+    const emptyList = gen(moduleId, { items: [] });
+    assert.strictEqual(emptyList.ampHtml, plain.ampHtml, `${moduleId}: an empty list is a no-op`);
+  }
+});
+
+test('quiz/poll real-items render is deterministic per seed', () => {
+  const items = [{ name: 'One', price: 11 }, { name: 'Two', price: 22 }, { name: 'Three', price: 33 }];
+  for (const moduleId of ['quiz', 'poll']) {
+    const opts = { brand: 'Acme', vertical: 'Generic', tone: 'Playful', currency: 'INR', moduleId, copy: { items } };
+    const a = generate({ ...opts, counter: 0 });
+    const c = generate({ ...opts, counter: 0 });
+    assert.strictEqual(a.ampHtml, c.ampHtml, `${moduleId}: same seed + items reproduces identical AMP`);
+    assert.deepStrictEqual(a.previewModel, c.previewModel, `${moduleId}: same seed + items reproduces the identical model`);
+  }
+});
+
 // ---- hero band ----------------------------------------------------------------
 
 test('a valid heroUrl renders the hero band on every module; absence renders none', () => {

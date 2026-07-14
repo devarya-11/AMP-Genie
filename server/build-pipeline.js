@@ -177,8 +177,12 @@ async function createBuild(body, deps = {}) {
   // If the brief lists real products, bias toward a module that actually shows
   // them (search for a catalogue-style brief, otherwise the offer reveal)
   // unless the caller forced a module or the router already picked a product
-  // module.
-  const PRODUCT_MODULES = new Set(['reveal', 'search']);
+  // module. "Product module" now means any module that RENDERS real items:
+  // reveal/search plus quiz (its options) and poll (its two sides). So a brief
+  // that routes to quiz/poll AND lists real products keeps that module — the
+  // items flow into it — and only a router pick that can't show items
+  // (rating/spin/calc/report) gets biased over to reveal/search.
+  const PRODUCT_MODULES = new Set(['reveal', 'search', 'quiz', 'poll']);
   let itemBias = null;
   if (hasRealItems && !b.moduleId && !(routedModule && PRODUCT_MODULES.has(routedModule))) {
     itemBias = /\b(menu|catalog|catalogue|collection|range|dishes|products|line-?up|lineup|list)\b/i.test(brief) ? 'search' : 'reveal';
