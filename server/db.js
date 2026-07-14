@@ -14,8 +14,11 @@
 // client input never reaches raw SQL without repo.js sanitising it first.
 //
 // Bundling contract: this module requires only ./migrations (pure data).
-// node:sqlite is required LAZILY inside createLocalDb, so esbuild bundling
-// for the Workers runtime never sees a Node-only import.
+// node:sqlite is required inside createLocalDb behind a try/catch, which makes
+// esbuild treat it as an OPTIONAL require — so bundling for the Workers runtime
+// (Cloudflare Pages / wrangler esbuild) does not fail to resolve the Node-only
+// builtin. The Functions path imports createD1Db and never calls createLocalDb,
+// so node:sqlite is only ever loaded on Node (dev server, tests).
 
 const { MIGRATIONS } = require('./migrations');
 
@@ -102,11 +105,21 @@ function createD1Db(d1) {
 
 // ---- local node:sqlite --------------------------------------------------------
 function createLocalDb(filePath) {
-  // Lazy require ON PURPOSE: this is the only place in the shared server/
-  // tree that touches a Node-only builtin, and it must never run (or be seen
-  // by esbuild) in the Workers bundle. Node >= 22.5 ships node:sqlite;
-  // this repo's Node 24 needs no flag.
-  const { DatabaseSync } = require('node:sqlite');
+  // Lazy require in a try/catch ON PURPOSE: this is the only place in the
+  // shared server/ tree that touches a Node-only builtin. The try/catch is
+  // what lets the Workers bundle compile — esbuild treats a require() inside
+  // try/catch as OPTIONAL and won't hard-fail to resolve node:sqlite (which
+  // Cloudflare's wrangler esbuild otherwise does). The Functions path uses
+  // createD1Db and never reaches here; on Node (dev server, tests) the require
+  // succeeds — Node >= 22.5 ships node:sqlite unflagged (this repo targets 24).
+  let DatabaseSync;
+  try {
+    ({ DatabaseSync } = require('node:sqlite'));
+  } catch (e) {
+    throw new Error('createLocalDb needs node:sqlite (Node >= 22.5) — the '
+      + 'Cloudflare Functions path uses createD1Db instead. '
+      + (e && e.message ? '(' + e.message + ')' : ''));
+  }
   const conn = new DatabaseSync(filePath || ':memory:');
   const db = {
     async all(sql, params) {
