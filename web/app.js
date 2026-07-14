@@ -210,8 +210,8 @@
   }
 
   async function researchBrand() {
-    const name = $('npBrand').value.trim();
-    if (!name) { setLine('npStatus1', 'Type a brand name first.'); $('npBrand').focus(); return; }
+    let name = $('npBrand').value.trim();
+    if (!name) { name = 'Acme'; $('npBrand').value = name; } // default brand — an empty field never blocks; falls back to Acme
     const btn = $('npResearch');
     busy(btn, true, 'Researching…');
     setLine('npStatus1', 'Researching ' + name + ' — site, products, voice…', true);

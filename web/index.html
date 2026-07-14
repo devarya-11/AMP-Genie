@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AMP Genie</title>
-<link rel="stylesheet" href="style.css?v=21">
+<link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
 
@@ -167,7 +167,7 @@
         </div>
         <div class="brief-field">
           <label class="fieldlabel" for="npBrief">Brief <span class="hint">what&rsquo;s the story? Audience, moment, offer &mdash; the genie grounds every example in this</span></label>
-          <textarea id="npBrief" rows="4" placeholder="e.g. Win back dormant SIP investors before Diwali with a gold-themed push&hellip;"></textarea>
+          <textarea id="npBrief" rows="4" maxlength="2000" placeholder="e.g. Win back dormant SIP investors before Diwali with a gold-themed push&hellip;"></textarea>
         </div>
         <div class="wstep-actions">
           <button id="npCreate" class="primary big"><svg class="ic"><use href="#i-lamp"/></svg> Create pitch</button>
@@ -315,7 +315,7 @@
             </div>
             <div class="brief-field">
               <label class="fieldlabel" for="dtBrief">Brief</label>
-              <textarea id="dtBrief" rows="4" placeholder="What&rsquo;s this pitch about?"></textarea>
+              <textarea id="dtBrief" rows="4" maxlength="2000" placeholder="What&rsquo;s this pitch about?"></textarea>
             </div>
             <div class="wstep-actions">
               <span id="dtPitchMsg" class="copy-msg" style="flex:1" aria-live="polite"></span>
@@ -447,6 +447,6 @@
   </main>
 </div>
 
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>
