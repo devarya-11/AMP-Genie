@@ -139,6 +139,22 @@ function extractSiteFacts(html, baseUrl) { // eslint-disable-line no-unused-vars
   return facts;
 }
 
+// A parked/placeholder domain (comorin.com is a 114-byte empty 200 while the
+// real restaurant lives at comorin.in) returns a clean 2xx but carries no
+// title, description, headings or nav labels — nothing to ground a dossier on.
+// "Usable" means at least one of those signals is present, so fetchBrandSite
+// can reject the empty winner and hold out for the candidate that actually
+// describes the brand.
+function hasUsableFacts(facts) {
+  if (!facts) return false;
+  return Boolean(
+    (facts.title && facts.title.length)
+    || (facts.description && facts.description.length)
+    || (Array.isArray(facts.headings) && facts.headings.length)
+    || (Array.isArray(facts.navLabels) && facts.navLabels.length),
+  );
+}
+
 // Reuses server/brand.js's candidateDomains (.com AND .in, www + bare) — the
 // two modules had drifted, and research trying only .com is exactly why
 // groww.in-style brands timed out their whole scrape budget on dead .com
@@ -157,19 +173,24 @@ async function fetchBrandSite(brandName, fetchImpl = fetch) {
     // (groww.com times out at REQUEST_TIMEOUT_MS) must not consume the whole
     // SITE_TIMEOUT_MS budget before the real one (groww.in, answers in <1s)
     // is even attempted — the serial version starved the LLM of site facts
-    // for every .in-first brand. Each attempt rejects on any failure so
-    // Promise.any yields the first SUCCESS, not the first settle; if all
-    // reject it throws (AggregateError) and we degrade to null.
+    // for every .in-first brand. Each attempt rejects on any failure — a
+    // non-2xx, OR a 2xx that yielded no usable facts (a parked .com placeholder
+    // that outraces the brand's real .in site) — so Promise.any yields the
+    // first candidate carrying REAL content, not merely the first that
+    // answered. If all reject it throws (AggregateError) and we degrade to
+    // null, exactly like a wholly dead brand.
     const attempts = domains.map(async (url) => {
       const r = await safeFetch(url, REQUEST_TIMEOUT_MS, fetchImpl);
       if (!r.ok) throw new Error('non-2xx');
       const html = await r.text();
-      return { site: url, facts: extractSiteFacts(html, url) };
+      const facts = extractSiteFacts(html, url);
+      if (!hasUsableFacts(facts)) throw new Error('parked/empty page');
+      return { site: url, facts };
     });
     try {
       return await Promise.any(attempts);
     } catch {
-      return null; // every candidate domain failed
+      return null; // every candidate domain failed or was empty
     }
   };
   return withTimeout(run, SITE_TIMEOUT_MS);

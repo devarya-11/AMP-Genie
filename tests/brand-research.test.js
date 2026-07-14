@@ -152,6 +152,30 @@ test('fetchBrandSite returns null for an empty brand name without touching the n
   assert.strictEqual(await fetchBrandSite('!!!', fetchImpl), null);
 });
 
+// The real bug behind comorin's generic tiles: comorin.com is a live-but-empty
+// 200 (a 114-byte parked page) while the actual restaurant is comorin.in. A
+// parked 2xx that outraces the real site must NOT win, or the LLM is grounded
+// on nothing and the vertical collapses to Generic (the SaaS placeholders).
+const PARKED_HTML = '<html><head></head><body></body></html>';
+
+test('fetchBrandSite skips a parked/empty 2xx and holds out for the domain with real facts', async () => {
+  // .com answers 200 but empty; only .in carries the brand's real content.
+  const fetchImpl = async (url) => (url.includes('.in')
+    ? { ok: true, text: async () => FIXTURE_HTML }
+    : { ok: true, text: async () => PARKED_HTML });
+  const got = await fetchBrandSite('Glowly', fetchImpl);
+  assert.match(got.site, /glowly\.in$/);
+  assert.ok(!got.site.includes('.com'));
+  assert.strictEqual(got.facts.siteName, 'Glowly');
+});
+
+test('fetchBrandSite returns null when every candidate is a parked/empty 2xx', async () => {
+  // All four domains answer 200 with no usable facts: degrade to null (the
+  // heuristic floor) exactly as if every domain were dead, never a blank site.
+  const fetchImpl = async () => ({ ok: true, text: async () => PARKED_HTML });
+  assert.strictEqual(await fetchBrandSite('Glowly', fetchImpl), null);
+});
+
 // ---- heuristicDossier: the deterministic floor ------------------------------
 
 test('heuristicDossier infers Beauty from a beauty-wordy page and detects the offer heading as a campaign', () => {
