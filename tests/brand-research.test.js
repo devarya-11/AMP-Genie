@@ -13,6 +13,7 @@ delete process.env.ANTHROPIC_API_KEY;
 
 const {
   buildDossier, hasResearchProvider, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier, stockImageUrl,
+  verticalStockImageUrl, VERTICAL_STOCK_KEYWORD,
 } = require('../server/brand-research');
 
 // generate.js's exact amp-img src grammar — every stockImageUrl must satisfy it
@@ -319,6 +320,27 @@ test('stockImageUrl slugs punctuation, caps at 4 keywords, clamps dimensions, an
   assert.strictEqual(stockImageUrl('!!!', 300, 200), null);
   assert.strictEqual(stockImageUrl(null), null);
   assert.match(stockImageUrl('food', 99999, -5), /^https:\/\/loremflickr\.com\/2000\/1\/food\?/);
+});
+
+test('verticalStockImageUrl keys off a single common noun per vertical (a guaranteed-real photo)', () => {
+  // loremflickr AND-matches tags, so a brand/product compound ("beauty,nykaa")
+  // matches nothing and serves a grey default — the bland tile the team saw.
+  // Each vertical maps to ONE common noun that reliably returns a real photo.
+  assert.strictEqual(verticalStockImageUrl('Beauty', 600, 400), stockImageUrl('cosmetics', 600, 400));
+  assert.match(verticalStockImageUrl('Beauty', 600, 400), /^https:\/\/loremflickr\.com\/600\/400\/cosmetics\?lock=\d+$/);
+  for (const [vertical, kw] of Object.entries(VERTICAL_STOCK_KEYWORD)) {
+    const u = verticalStockImageUrl(vertical, 300, 200);
+    assert.match(u, VALID_IMG, `${vertical} stock URL satisfies validImgUrl so it is never dropped`);
+    assert.strictEqual(u, stockImageUrl(kw, 300, 200), `${vertical} keys off its single noun "${kw}"`);
+    assert.ok(!/,/.test(new URL(u).pathname), `${vertical} query is a single tag, never an AND-compound`);
+  }
+});
+
+test('verticalStockImageUrl falls to the Generic noun for an unknown/blank vertical (never null)', () => {
+  const generic = stockImageUrl(VERTICAL_STOCK_KEYWORD.Generic, 600, 400);
+  assert.strictEqual(verticalStockImageUrl('Nonsense', 600, 400), generic, 'unknown vertical -> Generic floor');
+  assert.strictEqual(verticalStockImageUrl(undefined, 600, 400), generic, 'missing vertical -> Generic floor');
+  assert.strictEqual(verticalStockImageUrl('', 600, 400), generic, 'blank vertical -> Generic floor');
 });
 
 test('validateDossier sanitises voice sub-arrays and tolerates a malformed voice', () => {

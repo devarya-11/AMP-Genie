@@ -34,7 +34,7 @@
 // fs, no path, no process.env reads at module load — so this bundles for
 // Workers untouched.
 
-const { buildDossier, stockImageUrl } = require('./brand-research');
+const { buildDossier, stockImageUrl, verticalStockImageUrl } = require('./brand-research');
 const { resolveBrandColor, resolveBrandLogo } = require('./brand');
 const { createBuild } = require('./build-pipeline');
 const { applyTweak } = require('./tweak-engine');
@@ -110,7 +110,12 @@ function productsFromDossier(dossier) {
     const row = { name };
     const price = Math.round(Number(it && it.price));
     if (Number.isFinite(price) && price > 0) row.price = price;
-    const image = stockImageUrl(`${name} ${vertical}`, 300, 200);
+    // Key the tile off the product NAME alone: loremflickr matches tags with
+    // AND semantics, so appending the vertical ("Butter Chicken" + "Food" ->
+    // three required tags) usually matches nothing and returns a grey default.
+    // The name alone keeps per-tile variety and hits far more real photos; a
+    // name that still matches nothing falls to the vertical noun floor.
+    const image = stockImageUrl(name, 300, 200) || verticalStockImageUrl(vertical, 300, 200);
     if (image) row.image = image;
     rows.push(row);
   }
@@ -126,10 +131,16 @@ function productsFromDossier(dossier) {
 function heroFromDossier(dossier, liveHeroUrl) {
   if (typeof liveHeroUrl === 'string' && liveHeroUrl) return liveHeroUrl;
   const d = dossier || {};
-  const prompt = (typeof d.heroPrompt === 'string' && d.heroPrompt.trim())
-    ? d.heroPrompt
-    : ((typeof d.vertical === 'string' && d.vertical !== 'Generic') ? `${d.vertical} ${d.name || ''}` : '');
-  return stockImageUrl(prompt, 600, 240) || undefined;
+  // With a descriptive heroPrompt (from the LLM) key the photo off that; with
+  // no prompt key off the VERTICAL noun, NEVER the brand name. "Beauty Nykaa"
+  // matches no Flickr photo, so loremflickr serves a grey default — the exact
+  // bland hero the team kept seeing. verticalStockImageUrl is the
+  // guaranteed-real floor, and also catches a heroPrompt that itself matched
+  // nothing.
+  if (typeof d.heroPrompt === 'string' && d.heroPrompt.trim()) {
+    return stockImageUrl(d.heroPrompt, 600, 240) || verticalStockImageUrl(d.vertical, 600, 240) || undefined;
+  }
+  return verticalStockImageUrl(d.vertical, 600, 240) || undefined;
 }
 
 // The wire dossier — mirrors functions/usecases.js's publicDossier field for
@@ -859,6 +870,11 @@ function createPitchApi(ctx = {}) {
         name: brand.name,
         primaryHex: brand.primary_hex || undefined,
         logoUrl: brand.logo_url || undefined,
+        // The brand's real hero + vertical: doc-ai paints them into any hero/
+        // image block instead of a placeholder tile. Omitted before, which is
+        // why AI-drafted docs opened on a bland coloured rectangle.
+        heroUrl: brand.hero_url || undefined,
+        vertical: brand.vertical || undefined,
         site: brand.site || undefined,
         voice: brand.voice_sample || undefined,
         items: products.map((p) => ({

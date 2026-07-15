@@ -24,6 +24,7 @@
 const emailDoc = require('./email-doc');
 const { validateDoc, BLOCK_TYPES } = emailDoc;
 const { routeBrief } = require('./brief-router');
+const { verticalStockImageUrl } = require('./brand-research');
 const {
   callClaude, callGemini, callGroq, callOllama, withTimeout,
 } = require('./llm-providers');
@@ -162,12 +163,41 @@ function normBrand(brand) {
   if (logo) out.logoUrl = logo;
   const site = safeHttpUrl(b.site) || siteGuess(name);
   if (site) out.site = site;
+  // The brand's real hero (a scraped og:image, or a seeded keyword photo) and
+  // its vertical: both are needed so a hero/image block can paint a REAL brand
+  // picture instead of email-doc's palette placeholder. Previously dropped
+  // here, which is why AI-drafted hero blocks always rendered the bland tile.
+  const hero = validImgUrl(b.heroUrl);
+  if (hero) out.heroUrl = hero;
+  const vertical = cleanStr(b.vertical, 40);
+  if (vertical) out.vertical = vertical;
   // Voice + items are prompt/fallback grounding, kept in a shape both paths
   // can read. items: [{ name, price?, imageUrl? }] from the brand catalogue.
   const voice = cleanStr(b.voice, 200);
   if (voice) out.voice = voice;
   out.items = normItems(b.items);
   return out;
+}
+
+// A real image URL to paint into a hero/image block. The LLM never supplies
+// image URLs (it hallucinates them), so the block is filled from the brand's
+// own trustworthy assets. A "real photo" is one on the brand's OWN cdn — a
+// loremflickr keyword URL is deliberately skipped here because it can 404 to a
+// grey default, and our vertical stock floor (one common noun) is strictly more
+// reliable. Order: real og:image / catalogue shot, then a guaranteed-real
+// vertical stock photo. Returns undefined only when there is no vertical to key
+// on AND no real asset, so email-doc still draws its placeholder as a last
+// resort (and emits its warning).
+function realBrandPhoto(v) {
+  const u = validImgUrl(v);
+  return (u && !/(?:^|\/\/|\.)loremflickr\.com\//i.test(u)) ? u : null;
+}
+function brandImageUrl(brand, { preferProduct = false } = {}) {
+  const hero = realBrandPhoto(brand.heroUrl);
+  const productImg = (brand.items || []).map((it) => realBrandPhoto(it.imageUrl)).find(Boolean);
+  const ordered = preferProduct ? [productImg, hero] : [hero, productImg];
+  for (const u of ordered) if (u) return u;
+  return verticalStockImageUrl(brand.vertical, 600, 400) || undefined;
 }
 
 // A product/item list from either the brand or the brief: name required,
@@ -300,7 +330,10 @@ function mapBlock(raw, brand) {
     case 'header':
       return { type, props: { brandName: cleanStr(raw.brandName, CAPS.brandName) || brand.name } };
     case 'hero':
-      return { type, props: { alt: cleanStr(raw.alt, CAPS.alt) } };
+      // The LLM only writes alt text; the image is filled from the brand's real
+      // assets (og:image / catalogue photo) with a vertical stock floor, so the
+      // hero band is a real picture, not the palette placeholder.
+      return { type, props: { alt: cleanStr(raw.alt, CAPS.alt) || brand.name, imageUrl: brandImageUrl(brand) } };
     case 'text':
       return {
         type,
@@ -310,7 +343,9 @@ function mapBlock(raw, brand) {
         },
       };
     case 'image':
-      return { type, props: { alt: cleanStr(raw.alt, CAPS.alt) } };
+      // A body image leans to a product photo first (the hero already carries
+      // the og:image), falling back to the same vertical stock floor.
+      return { type, props: { alt: cleanStr(raw.alt, CAPS.alt), imageUrl: brandImageUrl(brand, { preferProduct: true }) } };
     case 'button': {
       const align = ['left', 'center', 'right'].includes(raw.align) ? raw.align : 'center';
       return {

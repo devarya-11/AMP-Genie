@@ -16,6 +16,7 @@ const {
   validateDoc, renderDoc, BLOCK_TYPES, INTERACTIVE_TYPES,
 } = require('../server/email-doc');
 const { validate } = require('../server/validator');
+const { verticalStockImageUrl } = require('../server/brand-research');
 
 // GENIE 2.0 rule under test: EVERY doc generateDoc/buildFallbackDoc yields
 // carries EXACTLY ONE interactive block (a module id from INTERACTIVE_TYPES),
@@ -216,6 +217,58 @@ test('generateDoc drops framing blocks that are not hero/text/footer (no doubled
   assert.ok(!doc.blocks.some((b) => b.type === 'button'), 'no doubled button block');
   assert.ok(!doc.blocks.some((b) => b.type === 'products'), 'a framing products block was dropped');
   assert.ok(doc.blocks.some((b) => b.type === 'text'), 'the valid text framing block survived');
+});
+
+// ---- hero blocks get a REAL image, never the palette placeholder ------------
+// Regression for the "bland rectangles / no brand images" report: an AI-drafted
+// hero framing block only supplies alt text, so email-doc placeholdered it (and
+// pushed 'hero: missing/invalid https imageUrl — used a placeholder') unless
+// doc-ai paints a real image from the brand's OWN assets. Cover the source
+// priority: real og:image first, else the guaranteed-real vertical stock floor,
+// and prove a loremflickr-valued heroUrl is skipped for the more-reliable floor.
+test('generateDoc paints a real image into an AI hero block (never the placeholder)', async (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const withHero = { copy: { head: 'Discover your glow' }, before: [{ type: 'hero', alt: 'Hero banner' }] };
+  const heroWarn = 'hero: missing/invalid https imageUrl — used a placeholder';
+
+  // (a) a real og:image on the brand's OWN cdn wins outright.
+  {
+    const brand = { name: 'Nykaa', vertical: 'Beauty', heroUrl: 'https://images.nykaa.com/hero/glow.jpg' };
+    const doc = await generateDoc({ brand, brief: 'beauty winback', moduleId: 'reveal' }, { providers: [fixedProvider(withHero)] });
+    await assertOneInteractiveValid(doc, 'hero-cdn');
+    const hero = doc.blocks.find((b) => b.type === 'hero');
+    assert.ok(hero, 'the hero framing block survived the merge');
+    assert.strictEqual(hero.props.imageUrl, 'https://images.nykaa.com/hero/glow.jpg', 'hero uses the real CDN og:image');
+    assert.ok(!renderDoc(doc).warnings.includes(heroWarn), 'no hero-placeholder warning is emitted');
+  }
+
+  // (b) no real asset, only a vertical -> the guaranteed-real vertical stock floor.
+  {
+    const brand = { name: 'Nykaa', vertical: 'Beauty' };
+    const doc = await generateDoc({ brand, brief: 'beauty winback', moduleId: 'reveal' }, { providers: [fixedProvider(withHero)] });
+    const hero = doc.blocks.find((b) => b.type === 'hero');
+    assert.strictEqual(hero.props.imageUrl, verticalStockImageUrl('Beauty', 600, 400), 'hero falls to the vertical stock floor');
+    assert.match(hero.props.imageUrl, /^https:\/\/loremflickr\.com\/600\/400\/cosmetics\?/, 'the floor keys off the real "cosmetics" noun, not a brand-poisoned query');
+    assert.ok(!renderDoc(doc).warnings.includes(heroWarn), 'the stock floor is a real image, so no placeholder warning');
+  }
+
+  // (c) a loremflickr-valued heroUrl can 404 to a grey default, so it is skipped
+  //     for the strictly-more-reliable vertical floor.
+  {
+    const brand = { name: 'Nykaa', vertical: 'Beauty', heroUrl: 'https://loremflickr.com/600/240/beauty,nykaa?lock=99' };
+    const doc = await generateDoc({ brand, brief: 'beauty winback', moduleId: 'reveal' }, { providers: [fixedProvider(withHero)] });
+    const hero = doc.blocks.find((b) => b.type === 'hero');
+    assert.strictEqual(hero.props.imageUrl, verticalStockImageUrl('Beauty', 600, 400), 'a loremflickr heroUrl is skipped for the reliable floor');
+  }
+
+  // (d) the model may omit alt; the hero alt then defaults to the brand name.
+  {
+    const brand = { name: 'Nykaa', vertical: 'Beauty' };
+    const doc = await generateDoc({ brand, brief: 'beauty winback', moduleId: 'reveal' }, { providers: [fixedProvider({ copy: { head: 'x' }, before: [{ type: 'hero' }] })] });
+    const hero = doc.blocks.find((b) => b.type === 'hero');
+    assert.strictEqual(hero.props.alt, 'Nykaa', 'hero alt defaults to the brand name when the model omits it');
+    assert.ok(hero.props.imageUrl, 'the hero still gets a real image');
+  }
 });
 
 test('generateDoc with a provider returning JUNK still yields a valid interactive doc (fallback)', async (t) => {

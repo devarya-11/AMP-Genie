@@ -678,7 +678,32 @@ function stockImageUrl(query, width, height) {
   return `https://loremflickr.com/${w}/${h}/${key}?lock=${lock || 1}`;
 }
 
+// loremflickr matches photo TAGS with AND semantics, so a brand name ("Nykaa")
+// or a multi-word product ("Vitamin C Serum") matches NO photo and the service
+// silently serves its grey "defaultImage" placeholder — which is exactly the
+// bland non-image the team kept seeing. ONE common vertical noun always matches
+// a real photo, so this map is the reliable floor: whenever we have no
+// brand-specific photo (real og:image or catalogue shot) to show, we key the
+// stock image off the vertical, never the brand/product name.
+const VERTICAL_STOCK_KEYWORD = {
+  Beauty: 'cosmetics',
+  Fashion: 'fashion',
+  Food: 'food',
+  Finance: 'finance',
+  Electronics: 'electronics',
+  Travel: 'travel',
+  Generic: 'shopping',
+};
+
+// A guaranteed-real stock photograph for a vertical (never a defaulting
+// keyword compound). Unknown/blank verticals fall to the Generic noun so the
+// result is always a real image URL, never null for a known caller.
+function verticalStockImageUrl(vertical, width, height) {
+  const kw = VERTICAL_STOCK_KEYWORD[vertical] || VERTICAL_STOCK_KEYWORD.Generic;
+  return stockImageUrl(kw, width, height);
+}
+
 module.exports = {
   buildDossier, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier,
-  hasResearchProvider, stockImageUrl,
+  hasResearchProvider, stockImageUrl, verticalStockImageUrl, VERTICAL_STOCK_KEYWORD,
 };
