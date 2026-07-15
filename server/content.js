@@ -18,6 +18,7 @@ const TONES = {
     search: 'Hunt down your next {b} favourite',
     calc: 'Tap tap watch your {b} numbers move',
     report: 'Your {b} report card just landed',
+    form: 'Get on the {b} list you will want in on this',
   },
   Premium: {
     reveal: 'An exclusive {b} offer, curated for you',
@@ -28,6 +29,7 @@ const TONES = {
     search: 'Explore the {b} collection',
     calc: 'Model your {b} plan, precisely',
     report: 'Your private {b} statement, prepared at open',
+    form: 'Join the {b} inner circle',
   },
   Urgent: {
     reveal: 'Your {b} offer expires tonight open now',
@@ -38,6 +40,7 @@ const TONES = {
     search: 'Selling fast find yours before it goes',
     calc: 'Run the numbers before the window closes',
     report: 'Your {b} results need a look today',
+    form: 'Join the {b} list before the next drop goes',
   },
   Informative: {
     reveal: 'A new offer is available on your {b} account',
@@ -48,6 +51,7 @@ const TONES = {
     search: 'Search the full {b} catalogue',
     calc: 'Estimate it yourself, right in this email',
     report: 'Your {b} summary is ready to review',
+    form: 'Sign up for {b} updates and offers',
   },
 };
 

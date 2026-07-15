@@ -1140,6 +1140,144 @@ ${footerBlock({ brand, defaultText: footerDefault, copy })}`;
 }
 
 /* ------------------------------------------------------------------ *
+ * form: lead-capture (amp-form + action-xhr, capture-and-confirm)
+ * ------------------------------------------------------------------ */
+
+// A live email-service-provider binding: the action-xhr endpoint the form
+// POSTs to, plus the merge-tag dialect that ESP rewrites per recipient at send
+// time. `generic` is a deliberately inert PLACEHOLDER — a syntactically valid
+// https URL at example.com so the markup validates, but one that fails loudly
+// (a 404) if it is ever shipped un-swapped, rather than silently mis-routing
+// real leads somewhere wrong. `netcore` is a worked example of a named preset
+// overriding that placeholder (the square-bracket dialect the reference
+// creatives used). An operator goes live by naming a preset (copy.esp) and/or
+// supplying copy.espBinding with their real endpoint and tags — a one-field
+// change, never a rewrite. Only `mergeTags.id` is emitted today (a hidden
+// field tying each submission to the recipient's CRM record); the rest of the
+// dialect is carried for the prefill extension and documents the ESP's syntax.
+const ESP_BINDINGS = {
+  generic: {
+    name: 'Generic ESP',
+    endpoint: 'https://esp.example.com/amp/subscribe',
+    mergeTags: { id: '[SUBSCRIBER_ID]', email: '[EMAIL]', name: '[NAME]', mobile: '[MOBILE]' },
+  },
+  netcore: {
+    name: 'Netcore',
+    endpoint: 'https://cdnwaapi.netcorecloud.net/amp/subscribe',
+    mergeTags: { id: '[SMT_MID]', email: '[EMAIL]', name: '[NAME]', mobile: '[MOBILE]' },
+  },
+};
+
+// An action-xhr endpoint (or an ESP override URL): AMP requires https for form
+// submission, so this applies validImgUrl's strict test — https only, sane
+// length, no markup-breaking characters — named for its role here.
+function validHttpsUrl(v) {
+  const s = (typeof v === 'string') ? v.trim() : '';
+  return (s.length <= 500 && /^https:\/\/[^\s"'<>]+$/i.test(s)) ? s : null;
+}
+
+// A merge-tag literal the ESP rewrites at send time ([EMAIL], [SMT_MID], …). It
+// lands verbatim inside an input value attribute, so it must be a short token
+// free of quote/markup characters; anything else is rejected and the binding
+// keeps its preset tag.
+function validMergeTag(v) {
+  const s = (typeof v === 'string') ? v.trim() : '';
+  return (s.length >= 1 && s.length <= 48 && !/["'<>]/.test(s)) ? s : null;
+}
+
+// Resolve the effective ESP binding for a build: a named preset (copy.esp)
+// picks a built-in dialect; an inline copy.espBinding overrides the endpoint
+// and/or individual tags on top of it, so an operator can drop in just their
+// live action-xhr URL without redefining the whole dialect. Always returns a
+// complete, validated binding (falls back to the generic placeholder), so
+// buildForm never emits a broken action-xhr no matter what the caller passes.
+function resolveEspBinding(copy = {}) {
+  const base = ESP_BINDINGS[copy.esp] || ESP_BINDINGS.generic;
+  const ov = (copy.espBinding && typeof copy.espBinding === 'object' && !Array.isArray(copy.espBinding)) ? copy.espBinding : {};
+  const endpoint = validHttpsUrl(ov.endpoint) || base.endpoint;
+  const tags = Object.assign({}, base.mergeTags);
+  if (ov.mergeTags && typeof ov.mergeTags === 'object') {
+    for (const k of Object.keys(tags)) {
+      const tag = validMergeTag(ov.mergeTags[k]);
+      if (tag) tags[k] = tag;
+    }
+  }
+  return { name: base.name, endpoint, mergeTags: tags };
+}
+
+// Lead-capture form: real fields POST to the brand's ESP over action-xhr, and
+// on a JSON success the whole form flips to a branded thank-you panel (the
+// "capture + confirm" mechanic — a server round-trip that mutates the document
+// in place, no page nav). The proven-valid AMP4EMAIL recipe (nailed down by
+// probing the vendored validator): method=post + action-xhr, NO target (a
+// DISALLOWED_ATTR here), native submitting/submit-error marker divs with static
+// copy (no amp-mustache needed), amp-bind [hidden] toggle driven by
+// on="submit-success:AMP.setState(...)", and a hidden input carrying the ESP's
+// record-id merge tag. Text inputs get their own `.fin` class so the base
+// `.btn` primary styling on the submit control is never overridden.
+function buildForm(ctx) {
+  const { brand, palette: p, t, copy = {} } = ctx;
+  const headSrc = copy.head || t.form;
+  const head = enc(applyBrand(headSrc, brand));
+  const esp = resolveEspBinding(copy);
+
+  const subhead = applyBrand(strOr(copy.subhead, 'Drop your details and be first to hear about {b} launches, offers and restocks.'), brand);
+  const submitLabel = applyBrand(strOr(copy.submitLabel, 'Join the list'), brand);
+  const successHead = applyBrand(strOr(copy.successHead, 'Thank you!'), brand);
+  const successText = applyBrand(strOr(copy.successText, "You're on the list — keep an eye on your inbox for what's next."), brand);
+
+  const css = baseCss(p) + `
+.lead .sub{font-size:14px;line-height:1.55;color:#6b6b7b;margin:0 0 16px;}
+.fin{width:100%;box-sizing:border-box;padding:13px 14px;font-size:15px;border:1px solid ${p.line};border-radius:8px;outline:none;margin:0 0 10px;background:#ffffff;color:${p.ink};}
+.fin:focus{border-color:${p.primary};}
+.frm-submit{width:100%;box-sizing:border-box;margin-top:4px;}
+.frm-note{font-size:11px;color:#9a9aa8;margin:12px 0 0;line-height:1.5;}
+.frm-msg{margin:12px 0 0;font-size:13px;font-weight:bold;}
+.frm-msg.sending{color:${p.primaryDark};}
+.frm-msg.err{color:#b42318;}
+.thanks{text-align:center;padding:34px 24px;}
+.thanks .big{font-size:30px;font-weight:bold;color:${p.primary};margin:0 0 8px;}
+.thanks .tmsg{font-size:15px;color:#6b6b7b;line-height:1.55;margin:0;}
+`;
+
+  const body = `
+${ampState('s', { sent: false })}
+${headerBlock({ brand, palette: p, head, copy })}
+<div class="pad lead" [hidden]="s.sent">
+  <p class="sub">${enc(subhead)}</p>
+  <form method="post" action-xhr="${enc(esp.endpoint)}" on="submit-success:AMP.setState({s:{sent:true}})">
+    <input type="hidden" name="rid" value="${enc(esp.mergeTags.id)}">
+    <input class="fin" type="email" name="email" placeholder="you@example.com" required>
+    <input class="fin" type="text" name="name" placeholder="Your name">
+    <input class="fin" type="tel" name="phone" placeholder="Phone (optional)">
+    <input class="btn frm-submit" type="submit" value="${enc(submitLabel)}">
+    <div submitting><p class="frm-msg sending">Sending&#8230;</p></div>
+    <div submit-error><p class="frm-msg err">Something went wrong. Please try again.</p></div>
+  </form>
+  <p class="frm-note">We&#39;ll only use your details to keep you posted. No spam.</p>
+</div>
+<div class="thanks" hidden [hidden]="!s.sent">
+  <p class="big">${enc(successHead)}</p>
+  <p class="tmsg">${enc(successText)}</p>
+</div>
+${footerBlock({ brand, defaultText: 'You can update your preferences any time.', copy })}`;
+
+  const previewModel = {
+    type: 'form',
+    head: applyBrand(headSrc, brand),
+    subhead, submitLabel, successHead, successText,
+    esp: esp.name,
+    endpoint: esp.endpoint,
+    fields: [
+      { label: 'Email', type: 'email', required: true },
+      { label: 'Name', type: 'text', required: false },
+      { label: 'Phone', type: 'tel', required: false },
+    ],
+  };
+  return { scripts: [SCRIPT_FORM, SCRIPT_BIND], css, body, previewModel };
+}
+
+/* ------------------------------------------------------------------ *
  * small string helpers for safe embedding inside amp-bind expressions
  * ------------------------------------------------------------------ */
 function jsStr(s) {
@@ -1164,6 +1302,7 @@ const MODULES = {
   poll: { name: 'This or That Poll', kind: 'poll', build: buildPoll },
   calc: { name: 'Interactive Calculator', kind: 'calculator', build: buildCalc },
   report: { name: 'Personal Report', kind: 'report', build: buildReport },
+  form: { name: 'Lead Capture Form', kind: 'lead-form', build: buildForm },
 };
 const MODULE_IDS = Object.keys(MODULES);
 
@@ -1256,6 +1395,7 @@ const MODULE_FIELDS = {
   poll: ['head', 'question', 'optionA', 'optionB', 'footerText'],
   calc: ['head', 'promptText', 'ctaLabel', 'assumptionText', 'footerText'],
   report: ['head', 'verdictText', 'ctaLabel', 'footerText'],
+  form: ['head', 'subhead', 'submitLabel', 'successText', 'footerText'],
 };
 
 function buildModuleFragment(moduleId, opts = {}) {

@@ -166,6 +166,20 @@ const USECASE_LIBRARY = {
         footerText: 'Status is fetched when you open the email, not when we hit send.',
       },
     },
+    {
+      title: 'Launch waitlist: first dibs on the next {b} drop',
+      businessGoal: 'Build a pre-launch waitlist and grow first-party contacts ahead of a limited collection drop',
+      trigger: 'pre-launch teaser, 5 days before drop',
+      moduleId: 'form',
+      kpi: 'form submit rate to launch-day conversion',
+      contentPlan: {
+        head: 'Be first through the {b} doors',
+        subhead: 'Drop your details and we will notify you the moment the new collection goes live, before it hits the public site.',
+        submitLabel: 'Join the waitlist',
+        successText: 'You are on the waitlist. Watch your inbox on launch day for your early-access link.',
+        footerText: 'We will only email you about this drop. Unsubscribe any time.',
+      },
+    },
   ],
   Food: [
     {
@@ -271,6 +285,20 @@ const USECASE_LIBRARY = {
         head: 'Nine orders, one story — your {b} June',
         verdictText: 'Late-night fees are quietly adding up — the pass would have covered them.',
         footerText: 'A summary of your own orders, composed when you opened this email.',
+      },
+    },
+    {
+      title: 'New-menu notify list for {b} regulars',
+      businessGoal: 'Capture opt-ins for menu launches and turn one-time diners into a reachable audience',
+      trigger: 'seasonal menu refresh',
+      moduleId: 'form',
+      kpi: 'signup rate to first reorder on launch',
+      contentPlan: {
+        head: 'Taste the new {b} menu first',
+        subhead: 'Sign up and we will send you the new menu the day it drops, plus a first-order treat to go with it.',
+        submitLabel: 'Notify me',
+        successText: 'You are in. The new menu and your welcome treat are on their way to your inbox.',
+        footerText: 'One tasty email when the menu changes. No spam, ever.',
       },
     },
   ],
@@ -381,6 +409,20 @@ const USECASE_LIBRARY = {
         footerText: 'This summary is informational, not investment advice.',
       },
     },
+    {
+      title: 'Early-access waitlist for the new {b} product',
+      businessGoal: 'Grow a qualified waitlist for a new card or feature and gauge demand before general rollout',
+      trigger: 'product announcement, pre-rollout',
+      moduleId: 'form',
+      kpi: 'waitlist signups to activated accounts',
+      contentPlan: {
+        head: 'Get early access to {b}',
+        subhead: 'Leave your details and we will invite you the moment early access opens. No queues, no missed launch.',
+        submitLabel: 'Request early access',
+        successText: 'Request received. We will email your invite as soon as early access is ready for you.',
+        footerText: 'We use your details only to manage your early-access invite.',
+      },
+    },
   ],
   Beauty: [
     {
@@ -487,6 +529,20 @@ const USECASE_LIBRARY = {
         verdictText: 'Two dailies are about to run out — a refill now beats a gap week.',
         ctaLabel: 'Queue it',
         footerText: 'Levels estimated from your routine log. Informational, not dermatological advice.',
+      },
+    },
+    {
+      title: 'Back-in-stock alerts for sold-out {b} shades',
+      businessGoal: 'Recover lost demand on sold-out SKUs by capturing restock-alert opt-ins tied to the CRM',
+      trigger: 'hero product marked out of stock',
+      moduleId: 'form',
+      kpi: 'alert signups to restock-day sell-through',
+      contentPlan: {
+        head: 'Never miss a {b} restock again',
+        subhead: 'Tell us where to reach you and we will ping you the second your sold-out favourite is back on the shelf.',
+        submitLabel: 'Alert me',
+        successText: 'Done. You will be first to know when it is back in stock at {b}.',
+        footerText: 'Restock alerts only. Update your preferences whenever you like.',
       },
     },
   ],
@@ -598,6 +654,20 @@ const USECASE_LIBRARY = {
         footerText: 'Device data comes from your linked {b} account, read at open.',
       },
     },
+    {
+      title: 'Launch-day notify list for the next {b} device',
+      businessGoal: 'Capture pre-launch interest for a new device and build a warm list for launch-day pre-orders',
+      trigger: 'product teaser, pre-order not yet open',
+      moduleId: 'form',
+      kpi: 'notify signups to pre-order conversion',
+      contentPlan: {
+        head: 'First in line for the new {b}',
+        subhead: 'Register now and we will send your pre-order link the minute it goes live, ahead of the general queue.',
+        submitLabel: 'Notify me at launch',
+        successText: 'You are registered. Your pre-order link lands in your inbox on launch day.',
+        footerText: 'One email at launch. We never share your details.',
+      },
+    },
   ],
   Travel: [
     {
@@ -704,6 +774,20 @@ const USECASE_LIBRARY = {
         verdictText: 'Check-in and monsoon cover are the two loose ends before you fly.',
         ctaLabel: 'Set it up',
         footerText: 'Booking status is read live from your {b} trip at open.',
+      },
+    },
+    {
+      title: 'Deal-drop alerts for {b} routes you love',
+      businessGoal: 'Grow an opt-in audience for fare drops and off-season offers on the traveller favourite routes',
+      trigger: 'post-search, no booking made',
+      moduleId: 'form',
+      kpi: 'alert signups to booking conversion',
+      contentPlan: {
+        head: 'Catch the next {b} fare drop',
+        subhead: 'Leave your details and we will alert you when prices fall on the routes and getaways you care about.',
+        submitLabel: 'Send me deals',
+        successText: 'You are on the list. Keep an eye out for fare-drop alerts from {b}.',
+        footerText: 'Fare alerts and offers only. Unsubscribe in one tap any time.',
       },
     },
   ],
@@ -837,6 +921,20 @@ const USECASE_LIBRARY = {
         verdictText: 'Billing and storage are the two things to touch before renewal day.',
         ctaLabel: 'Confirm',
         footerText: 'Workspace numbers are read at open. Informational, not a bill.',
+      },
+    },
+    {
+      title: 'Newsletter opt-in that captures leads in the inbox',
+      businessGoal: 'Grow the first-party contact list by letting readers subscribe without leaving the email',
+      trigger: 'top-of-funnel awareness send',
+      moduleId: 'form',
+      kpi: 'in-email signups to confirmed subscribers',
+      contentPlan: {
+        head: 'Stay in the loop with {b}',
+        subhead: 'Drop your details to get {b} news, updates and the occasional subscriber-only offer, straight to your inbox.',
+        submitLabel: 'Subscribe',
+        successText: 'Thanks for subscribing. Look out for your first update from {b} soon.',
+        footerText: 'We respect your inbox. Unsubscribe any time in one tap.',
       },
     },
   ],
@@ -1041,6 +1139,7 @@ const MODULE_POWERS = {
   poll: 'two-option tap poll with an instant result',
   calc: 'tap-driven live calculator (SIP/EMI/plan-savings maths) where preset pills and a stepper move a big precomputed result instantly',
   report: 'personalised report/statement viewer with tap-to-expand status rows, a verdict reveal and a pick-then-confirm next-step CTA',
+  form: 'lead-capture form that POSTs real fields (email, name, phone) to your ESP over action-xhr and flips to a branded thank-you on submit, tying each lead to its CRM record via a hidden merge-tag field',
 };
 
 function moduleVocabulary() {

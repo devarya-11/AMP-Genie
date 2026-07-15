@@ -19,8 +19,10 @@ const {
 } = require('../server/email-doc');
 
 // The interactive contract lands in the same phase; guard so the legacy-
-// synthesis assertions are skipped (not failed) if it has not landed yet.
-const HAS_INTERACTIVE = INTERACTIVE_TYPES instanceof Set && INTERACTIVE_TYPES.size === 8;
+// synthesis assertions are skipped (not failed) if it has not landed yet. A
+// non-empty set means the exports landed; the exact module count is asserted in
+// calc-report.test.js, so this stays drift-proof as modules are added.
+const HAS_INTERACTIVE = INTERACTIVE_TYPES instanceof Set && INTERACTIVE_TYPES.size > 0;
 
 // The in-memory KV stand-in from tests/pitch-api.test.js: Map-backed so we can
 // assert which build:<id> share records were written.

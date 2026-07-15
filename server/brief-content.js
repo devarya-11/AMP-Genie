@@ -116,6 +116,17 @@ const FIELD_SCHEMAS = {
     ctaLabel: { type: 'string', maxLen: 40 },
     footerText: { type: 'string', maxLen: 200 },
   },
+  // form exposes only its prose surfaces. The ESP binding (endpoint + merge-tag
+  // dialect) and the field kit stay deployment/manual config — an LLM must
+  // never be able to point the action-xhr somewhere or invent form fields, the
+  // same guardrail that keeps discount % and calc maths out of every plan.
+  form: {
+    head: { type: 'string' },
+    subhead: { type: 'string', maxLen: 220 },
+    submitLabel: { type: 'string', maxLen: 40 },
+    successText: { type: 'string', maxLen: 200 },
+    footerText: { type: 'string', maxLen: 200 },
+  },
 };
 
 function fieldsFor(moduleId) {

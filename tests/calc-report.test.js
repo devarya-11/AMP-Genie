@@ -10,9 +10,9 @@ const ORIGINAL_SIX = ['reveal', 'search', 'quiz', 'rating', 'spin', 'poll'];
 
 // ---- registry: appended, never reshuffled -----------------------------------
 
-test('calc and report are registered AFTER the original six, in order', () => {
+test('calc, report and form are registered AFTER the original six, in order', () => {
   assert.deepStrictEqual(MODULE_IDS.slice(0, 6), ORIGINAL_SIX);
-  assert.deepStrictEqual(MODULE_IDS.slice(6), ['calc', 'report']);
+  assert.deepStrictEqual(MODULE_IDS.slice(6), ['calc', 'report', 'form']);
 });
 
 test('the seeded random pick never lands on calc/report — existing seeds keep their module', () => {

@@ -9,6 +9,8 @@ npm-debug.log*
 
 # Wrangler local dev cache/state (Pages/Workers).
 .wrangler/
+# Output of `wrangler pages functions build` — a verification-only bundle.
+_worker.bundle
 
 # cf-spike/ — the throwaway proof-of-concept that de-risked running the AMP
 # validator wasm on the Workers runtime. The production version now lives in

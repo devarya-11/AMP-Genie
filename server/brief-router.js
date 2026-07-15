@@ -18,6 +18,11 @@ const KEYWORD_MAP = {
   poll: ['poll', 'vote', 'this or that', 'pick one', 'choose between'],
   calc: ['calculator', 'calculate', 'emi', 'sip', 'estimate', 'savings', 'how much', 'maturity', 'premium quote', 'work out the'],
   report: ['report', 'statement', 'results', 'summary', 'lab', 'portfolio', 'order status', 'health check', 'check-in'],
+  // Lead-capture intent. Kept last so it loses ties to the more specific
+  // modules above (Object.keys order + stable sort in routeBrief). Bare "lead"
+  // is deliberately excluded — it's a substring of "leader"/"leading"/"already"
+  // and would misfire; every term here is a deliberate capture/opt-in phrase.
+  form: ['sign up', 'signup', 'sign-up', 'waitlist', 'wait list', 'register', 'registration', 'rsvp', 'subscribe', 'opt in', 'opt-in', 'notify me', 'get notified', 'notify list', 'early access', 'join the list', 'join our list', 'join our newsletter', 'mailing list', 'lead capture', 'lead-capture', 'capture leads', 'lead form', 'lead gen', 'be the first to know'],
 };
 
 // If a module is ever renamed/removed in generate.js, fail loudly here

@@ -14,9 +14,14 @@ const {
   sanitizeCustomHtml,
 } = require('../server/email-doc');
 const { validate } = require('../server/validator');
+const { MODULE_IDS } = require('../server/generate');
 
-// The eight interactive module ids — the interactive block `type`s.
-const INTERACTIVE_IDS = ['reveal', 'search', 'quiz', 'rating', 'spin', 'poll', 'calc', 'report'];
+// Every interactive module id — the interactive block `type`s. Sourced from
+// generate()'s registry (the source of truth) so a newly added module (e.g.
+// form) is exercised automatically instead of silently skipped by a hardcoded
+// list, and so the membership check below independently pins email-doc's
+// INTERACTIVE_TYPES to that registry.
+const INTERACTIVE_IDS = [...MODULE_IDS];
 
 // A doc exercising EVERY supported static block type.
 function everyBlockDoc(overrides = {}) {
@@ -72,10 +77,10 @@ test('a doc using EVERY block type renders and passes the validator', async () =
 
 const STATIC_TYPES = ['button', 'custom', 'divider', 'footer', 'header', 'hero', 'image', 'products', 'text'];
 
-test('BLOCK_TYPES registers the eight static types plus the eight interactive modules; each renders valid alone', async () => {
+test('BLOCK_TYPES registers every static type plus every interactive module; each renders valid alone', async () => {
   // The static layout blocks are all present...
   for (const t of STATIC_TYPES) assert.ok(BLOCK_TYPES.includes(t), `static type ${t} is registered`);
-  // ...and so are the eight interactive module ids (so the palette lists them).
+  // ...and so are all interactive module ids (so the palette lists them).
   for (const t of INTERACTIVE_IDS) assert.ok(BLOCK_TYPES.includes(t), `interactive type ${t} is registered`);
   assert.strictEqual(BLOCK_TYPES.length, STATIC_TYPES.length + INTERACTIVE_IDS.length, 'no extra/duplicate types');
   // Every registered type renders a validator-clean doc when it is the sole block.
@@ -504,11 +509,12 @@ test('an interactive block carries exactly ONE <style amp-custom>, one v0.js and
   }
 });
 
-test('only the search interactive block pulls in amp-form; the other seven do not', () => {
+test('only the search and form interactive blocks pull in amp-form; the rest do not', () => {
+  const NEEDS_FORM = new Set(['search', 'form']);
   for (const type of INTERACTIVE_IDS) {
     const { ampHtml } = docToAmp(interactiveBlockDoc(type));
     const forms = (ampHtml.match(/amp-form-0\.1\.js/g) || []).length;
-    if (type === 'search') assert.strictEqual(forms, 1, 'search carries amp-form exactly once');
+    if (NEEDS_FORM.has(type)) assert.strictEqual(forms, 1, `${type} carries amp-form exactly once`);
     else assert.strictEqual(forms, 0, `${type} carries no amp-form`);
   }
 });
@@ -668,10 +674,10 @@ test('fieldsForModule returns the editable copy field names for each module (a f
   assert.deepStrictEqual(fieldsForModule('quiz'), ['head', 'question', 'footerText'], 'the returned array is a copy, not the internal one');
 });
 
-test('INTERACTIVE_TYPES is a Set of exactly the eight module ids', () => {
+test('INTERACTIVE_TYPES is a Set of exactly the generate() module ids', () => {
   assert.ok(INTERACTIVE_TYPES instanceof Set, 'it is a Set');
-  assert.strictEqual(INTERACTIVE_TYPES.size, 8);
-  for (const id of INTERACTIVE_IDS) assert.ok(INTERACTIVE_TYPES.has(id), `${id} is a member`);
+  assert.strictEqual(INTERACTIVE_TYPES.size, MODULE_IDS.length);
+  for (const id of MODULE_IDS) assert.ok(INTERACTIVE_TYPES.has(id), `${id} is a member`);
   assert.ok(!INTERACTIVE_TYPES.has('header'), 'a static type is not a member');
 });
 

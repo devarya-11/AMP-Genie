@@ -21,8 +21,10 @@ const { validate } = require('../server/validator');
 // carries EXACTLY ONE interactive block (a module id from INTERACTIVE_TYPES),
 // renders validator-clean, and never throws. If email-doc's interactive
 // exports have not landed yet, INTERACTIVE_TYPES is empty — the assertions
-// below would then be vacuous, so guard once and note it.
-const HAS_INTERACTIVE = INTERACTIVE_TYPES instanceof Set && INTERACTIVE_TYPES.size === 8;
+// below would then be vacuous, so guard once and note it. A non-empty set means
+// the exports landed; the exact module count is asserted in calc-report.test.js,
+// so this stays drift-proof as modules (calc, report, form, …) are added.
+const HAS_INTERACTIVE = INTERACTIVE_TYPES instanceof Set && INTERACTIVE_TYPES.size > 0;
 const MODULE_IDS = HAS_INTERACTIVE ? [...INTERACTIVE_TYPES] : [];
 
 const BRAND = {

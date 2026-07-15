@@ -49,6 +49,21 @@ test('routes a this-or-that brief to poll', () => {
   assert.strictEqual(result.moduleId, 'poll');
 });
 
+test('routes a lead-capture / waitlist brief to form', () => {
+  const result = routeBrief('Build a launch waitlist where people sign up to get notified', 'Generic');
+  assert.strictEqual(result.moduleId, 'form');
+  assert.ok(result.matchedTerms.length > 0);
+});
+
+test('form loses a tie to a more specific module (it is ranked last)', () => {
+  // A genuine 1-1 split: "unlock" (reveal) and "early access" (form) each match
+  // once. Because form is last in KEYWORD_MAP and routeBrief's sort is stable,
+  // the more specific module (reveal) keeps the lead on the tie.
+  const result = routeBrief('Unlock early access', 'Generic');
+  assert.strictEqual(result.moduleId, 'reveal');
+  assert.strictEqual(result.matchedTerms.length, 1);
+});
+
 // ---- no-signal / edge cases --------------------------------------------------
 
 test('returns null for a brief with no matching keywords', () => {

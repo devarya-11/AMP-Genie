@@ -357,6 +357,30 @@ function renderReport(pm, p) {
   return { html, lines };
 }
 
+// The lead-capture form has no way to submit without AMP (the static part
+// carries no JavaScript), so it collapses to its value proposition: the
+// subhead, a preview of the fields it would ask for, and a styled call-to-
+// action echoing the submit label. GMAIL_LINE (added by documentHtml) already
+// tells the reader where the live, submittable form is.
+function renderForm(pm, p) {
+  const subhead = str(pm.subhead);
+  const submitLabel = str(pm.submitLabel, 'Sign up');
+  const fields = list(pm.fields)
+    .map((f) => ((f && typeof f === 'object') ? { label: str(f.label), required: !!f.required } : null))
+    .filter((f) => f && f.label)
+    .slice(0, 6);
+  let html = '';
+  const lines = [];
+  if (subhead) { html += mutedPara(subhead, p); lines.push(subhead); }
+  fields.forEach((f) => {
+    html += `<p style="margin:0 0 10px;border:1px solid ${p.line};border-radius:8px;padding:12px 14px;font-family:${FONT};font-size:14px;color:#9a9aa8;">${enc(f.label)}${f.required ? ' *' : ''}</p>`;
+  });
+  if (fields.length) lines.push('Fields: ' + fields.map((f) => f.label + (f.required ? ' (required)' : '')).join(', '));
+  html += `<p style="margin:8px 0 0;text-align:center;"><span style="display:inline-block;background:${p.primary};color:#ffffff;font-family:${FONT};font-size:15px;font-weight:bold;padding:13px 24px;border-radius:8px;">${enc(submitLabel)}</span></p>`;
+  lines.push(submitLabel + ' by opening this email in Gmail.');
+  return { html, lines };
+}
+
 const RENDERERS = {
   reveal: renderReveal,
   search: renderSearch,
@@ -366,6 +390,7 @@ const RENDERERS = {
   poll: renderPoll,
   calc: renderCalc,
   report: renderReport,
+  form: renderForm,
 };
 
 // The explicit moduleId wins; previewModel.type is the backstop when only the
