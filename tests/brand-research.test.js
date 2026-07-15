@@ -13,7 +13,7 @@ delete process.env.ANTHROPIC_API_KEY;
 
 const {
   buildDossier, hasResearchProvider, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier, stockImageUrl,
-  verticalStockImageUrl, VERTICAL_STOCK_KEYWORD,
+  verticalStockImageUrl, VERTICAL_STOCK_KEYWORD, resolveDossierImagery,
 } = require('../server/brand-research');
 
 // generate.js's exact amp-img src grammar — every stockImageUrl must satisfy it
@@ -68,10 +68,38 @@ function fakeKv(initial = {}) {
   };
 }
 
+// buildDossier now resolves Openverse imagery through the SAME fetchImpl seam
+// as the site scrape. Count only the SITE fetches here (Openverse hits are
+// tallied separately) so every existing candidate-domain assertion (4 domains,
+// 8 on force, ...) stays exact, and hand Openverse an empty result set so no
+// image is resolved — the deterministic default for the fact-scraping tests.
 function countingFetch(html) {
-  const state = { calls: 0 };
-  state.impl = async () => {
+  const state = { calls: 0, openverseCalls: 0 };
+  state.impl = async (url) => {
+    if (typeof url === 'string' && url.includes('api.openverse.org')) {
+      state.openverseCalls += 1;
+      return { ok: true, json: async () => ({ result_count: 0, results: [] }) };
+    }
     state.calls += 1;
+    return { ok: true, text: async () => html };
+  };
+  return state;
+}
+
+// A fetchImpl that serves the brand HTML for site scrapes and a single real
+// Openverse result (a live.staticflickr-style https URL) for image lookups, so
+// buildDossier's imagery resolution is exercised deterministically offline.
+function imageryFetch(html, imageUrl) {
+  const state = { siteCalls: 0, openverseQueries: [] };
+  state.impl = async (url) => {
+    if (typeof url === 'string' && url.includes('api.openverse.org')) {
+      state.openverseQueries.push(url);
+      return {
+        ok: true,
+        json: async () => ({ result_count: 1, results: [{ url: imageUrl, license: 'cc0' }] }),
+      };
+    }
+    state.siteCalls += 1;
     return { ok: true, text: async () => html };
   };
   return state;
@@ -452,6 +480,87 @@ test('buildDossier threads the LLM catalog and heroPrompt through to the merged 
   assert.strictEqual(d.heroPrompt, 'clean beauty serums on marble');
   assert.strictEqual(d.confidence, 'llm');
   assert.ok(d.categories.includes('Skincare'), 'heuristic still fills the fields the LLM left');
+});
+
+// ---- buildDossier: the Openverse relevance floor ----------------------------
+
+test('buildDossier paints a real Openverse hero + per-item catalog images onto the dossier', async () => {
+  const kv = fakeKv();
+  const REAL = 'https://live.staticflickr.com/65535/real-serum.jpg';
+  const f = imageryFetch(FIXTURE_HTML, REAL);
+  const providers = [async () => ({
+    catalog: [{ name: 'Radiance Serum', price: 1299 }, { name: 'Velvet Lipstick', price: 899 }],
+    heroPrompt: 'clean beauty serums on marble',
+  })];
+  const d = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers });
+  assert.strictEqual(d.heroImage, REAL, 'hero resolves to the real Openverse photo');
+  assert.deepStrictEqual(d.catalog.map((c) => c.image), [REAL, REAL], 'each catalog item gets a real photo');
+  // Brand-agnostic by construction: Openverse is asked about the model's OWN
+  // scene prose and each item's OWN name — never the brand name. A query that
+  // carried "Glowly" is exactly the brand-poisoning that greys these out.
+  const decoded = f.openverseQueries.map((u) => decodeURIComponent(u));
+  assert.ok(decoded.some((u) => /clean beauty serums/.test(u)), 'the hero lookup keys off the heroPrompt');
+  assert.ok(decoded.some((u) => /Radiance Serum/.test(u)), 'a tile lookup keys off the item name');
+  assert.ok(!decoded.some((u) => /glowly/i.test(u)), 'no Openverse query carries the brand name');
+});
+
+test('buildDossier (keyless heuristic) still resolves a hero, keyed off the vertical noun not the brand', async () => {
+  const kv = fakeKv();
+  const REAL = 'https://live.staticflickr.com/65535/real-cosmetics.jpg';
+  const f = imageryFetch(FIXTURE_HTML, REAL);
+  // No provider -> heuristic dossier (no heroPrompt). Glowly's beauty-wordy
+  // homepage classifies Beauty, so the hero query is the vertical noun.
+  const d = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers: [] });
+  assert.strictEqual(d.confidence, 'heuristic');
+  assert.strictEqual(d.vertical, 'Beauty');
+  assert.strictEqual(d.heroImage, REAL, 'even keyless, the hero gets a real Openverse photo');
+  const decoded = f.openverseQueries.map((u) => decodeURIComponent(u)).join(' ');
+  assert.ok(/cosmetics/.test(decoded), 'the hero lookup keys off the vertical noun (cosmetics for Beauty)');
+  assert.ok(!/glowly/i.test(decoded), 'never the brand name');
+});
+
+test('buildDossier offline resolves no imagery (fields unset -> the loremflickr floor takes over downstream)', async () => {
+  const kv = fakeKv();
+  const providers = [async () => ({
+    catalog: [{ name: 'Radiance Serum', price: 1299 }],
+    heroPrompt: 'clean beauty serums on marble',
+  })];
+  const d = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: refusingFetch }, { providers });
+  assert.strictEqual(d.heroImage, undefined, 'a dead/rate-limited Openverse leaves heroImage unset');
+  assert.strictEqual(d.catalog[0].image, undefined, 'and leaves each catalog image unset');
+  // imagery is best-effort — the dossier itself still built, never blocked.
+  assert.strictEqual(d.confidence, 'llm');
+  assert.strictEqual(d.heroPrompt, 'clean beauty serums on marble');
+});
+
+// ---- resolveDossierImagery: the mutator, exercised directly ------------------
+
+test('resolveDossierImagery keys the hero off the vertical noun for EVERY vertical, never a brand name', async () => {
+  // Rotate through every vertical to prove the floor is vertical-general, not
+  // tuned to one brand/use case: a bookshop, a fintech app, a travel service
+  // all resolve their hero off their own vertical noun.
+  for (const [vertical, noun] of Object.entries(VERTICAL_STOCK_KEYWORD)) {
+    const seen = [];
+    const fetchImpl = async (url) => {
+      seen.push(decodeURIComponent(url));
+      return { ok: true, json: async () => ({ results: [{ url: `https://live.staticflickr.com/x/${noun}.jpg` }] }) };
+    };
+    const dossier = { name: 'SomeRandomBrand', vertical, catalog: [] };
+    await resolveDossierImagery(dossier, fetchImpl);
+    assert.strictEqual(dossier.heroImage, `https://live.staticflickr.com/x/${noun}.jpg`, `${vertical}: hero resolved`);
+    assert.ok(seen.some((u) => u.includes(noun)), `${vertical}: hero query keys off its noun "${noun}"`);
+    assert.ok(!seen.some((u) => /somerandombrand/i.test(u)), `${vertical}: never queries the brand name`);
+  }
+});
+
+test('resolveDossierImagery never throws and leaves fields unset on a dead/rate-limited Openverse', async () => {
+  const dossier = { vertical: 'Beauty', heroPrompt: 'plated coastal cuisine', catalog: [{ name: 'House Serum' }] };
+  await assert.doesNotReject(() => resolveDossierImagery(dossier, async () => { throw new Error('429 Too Many Requests'); }));
+  assert.strictEqual(dossier.heroImage, undefined);
+  assert.strictEqual(dossier.catalog[0].image, undefined);
+  // a non-object dossier and a resultless response are both no-ops, not throws
+  await assert.doesNotReject(() => resolveDossierImagery(null, async () => ({ ok: true, json: async () => ({}) })));
+  await assert.doesNotReject(() => resolveDossierImagery({ vertical: 'Beauty', catalog: [] }, async () => ({ ok: true, json: async () => ({ results: [] }) })));
 });
 
 test('buildDossier returns the cached dossier on a second call without refetching', async () => {

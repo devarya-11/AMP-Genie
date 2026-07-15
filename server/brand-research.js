@@ -27,6 +27,7 @@ const { inferVertical, inferTone } = require('./brief-router');
 const { candidateDomains } = require('./brand');
 const { VERTICALS } = require('./content');
 const { brandSlug } = require('./store');
+const { searchOpenverseImage } = require('./openverse');
 
 const CLAUDE_MODEL = 'claude-haiku-4-5';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -613,6 +614,13 @@ async function buildDossier(args = {}, opts = {}) {
       }
     }
 
+    // Resolve the keyless Openverse relevance floor onto the merged dossier
+    // (hero + each catalog item) before it is cached, so it is paid once per
+    // brand and served from KV thereafter. Same fetchImpl seam as the scrape;
+    // offline/rate-limited leaves the fields unset (the loremflickr floor
+    // downstream takes over). Never throws.
+    await resolveDossierImagery(merged, fetchImpl || fetch);
+
     const dossier = {
       ...merged,
       name,
@@ -703,7 +711,65 @@ function verticalStockImageUrl(vertical, width, height) {
   return stockImageUrl(kw, width, height);
 }
 
+// ---- Openverse relevance floor -----------------------------------------------
+
+// Openverse resolution budget: each lookup is already AbortSignal-bounded
+// inside searchOpenverseImage and they run in PARALLEL, so this overall race is
+// belt-and-braces — a hanging/misbehaving fetch can never hold a dossier build
+// past a few seconds. On timeout whatever resolved so far is already written;
+// the rest fall to the loremflickr floor downstream.
+const IMAGERY_TIMEOUT_MS = 5000;
+
+// Paint REAL, relevant, no-attribution photography onto a dossier via Openverse
+// — the keyless relevance floor that sits between the brand's OWN og:image
+// (best) and loremflickr's random vertical match (last resort). Mutates the
+// dossier in place: sets dossier.heroImage and, for each catalog item, an
+// item.image. Keyed ONLY on general signals — the model's own heroPrompt, the
+// vertical noun, each item's own name — NEVER a brand literal, so it holds for
+// any brand in any vertical (a coffee roaster's launch, a fintech quiz, a
+// bookshop's lead form alike). Uses the SAME fetchImpl seam as the site scrape
+// (tests control the network; production uses global fetch). Never throws: a
+// dead/rate-limited Openverse just leaves the fields unset and the caller
+// floors them.
+async function resolveDossierImagery(dossier, fetchImpl) {
+  if (!dossier || typeof dossier !== 'object') return;
+  try {
+    const jobs = [];
+    // Hero: prefer the model's own visual scene description; with none (the
+    // keyless heuristic tier) key off the VERTICAL noun. Never the brand name —
+    // a brand-poisoned query is exactly what makes the stock services default
+    // to grey.
+    const heroQuery = (typeof dossier.heroPrompt === 'string' && dossier.heroPrompt.trim())
+      ? dossier.heroPrompt
+      : (VERTICAL_STOCK_KEYWORD[dossier.vertical] || '');
+    if (heroQuery) {
+      jobs.push(
+        searchOpenverseImage({ query: heroQuery, fetchImpl })
+          .then((u) => { if (u) dossier.heroImage = u; })
+          .catch(() => {}),
+      );
+    }
+    // Each priced/named catalogue item gets a photo keyed off its OWN name.
+    // Openverse ranks by relevance (unlike loremflickr's all-tags-AND match),
+    // so a real product name returns a real product photo, not a grey default.
+    const catalog = Array.isArray(dossier.catalog) ? dossier.catalog : [];
+    for (const item of catalog) {
+      if (!item || typeof item !== 'object') continue;
+      if (typeof item.name !== 'string' || !item.name.trim()) continue;
+      jobs.push(
+        searchOpenverseImage({ query: item.name, fetchImpl })
+          .then((u) => { if (u) item.image = u; })
+          .catch(() => {}),
+      );
+    }
+    if (!jobs.length) return;
+    await withTimeout(() => Promise.all(jobs), IMAGERY_TIMEOUT_MS);
+  } catch {
+    // imagery is a best-effort enhancement; never let it fail a dossier build
+  }
+}
+
 module.exports = {
   buildDossier, validateDossier, heuristicDossier, extractSiteFacts, fetchBrandSite, synthesizeDossier,
-  hasResearchProvider, stockImageUrl, verticalStockImageUrl, VERTICAL_STOCK_KEYWORD,
+  hasResearchProvider, stockImageUrl, verticalStockImageUrl, VERTICAL_STOCK_KEYWORD, resolveDossierImagery,
 };

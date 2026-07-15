@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test tests/encoding.test.js tests/validator.test.js tests/llm-providers.test.js tests/brief-content.test.js tests/brief-routing.test.js tests/brand.test.js tests/fallback.test.js tests/store.test.js tests/build-pipeline.test.js tests/share-pages.test.js tests/slate-core.test.js tests/brand-research.test.js tests/usecase-engine.test.js tests/calc-report.test.js tests/tweak-engine.test.js tests/render-assets.test.js tests/pipeline-assets.test.js tests/db-repo.test.js tests/asset-store.test.js tests/auth-keypool.test.js tests/pitch-api.test.js tests/email-doc.test.js tests/doc-ai.test.js tests/doc-routes.test.js",
+    "test": "node --test tests/encoding.test.js tests/validator.test.js tests/llm-providers.test.js tests/brief-content.test.js tests/brief-routing.test.js tests/brand.test.js tests/fallback.test.js tests/store.test.js tests/build-pipeline.test.js tests/share-pages.test.js tests/slate-core.test.js tests/brand-research.test.js tests/openverse.test.js tests/usecase-engine.test.js tests/calc-report.test.js tests/tweak-engine.test.js tests/render-assets.test.js tests/pipeline-assets.test.js tests/db-repo.test.js tests/asset-store.test.js tests/auth-keypool.test.js tests/pitch-api.test.js tests/email-doc.test.js tests/doc-ai.test.js tests/doc-routes.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {

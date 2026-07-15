@@ -110,27 +110,38 @@ function productsFromDossier(dossier) {
     const row = { name };
     const price = Math.round(Number(it && it.price));
     if (Number.isFinite(price) && price > 0) row.price = price;
-    // Key the tile off the product NAME alone: loremflickr matches tags with
-    // AND semantics, so appending the vertical ("Butter Chicken" + "Food" ->
-    // three required tags) usually matches nothing and returns a grey default.
-    // The name alone keeps per-tile variety and hits far more real photos; a
-    // name that still matches nothing falls to the vertical noun floor.
-    const image = stockImageUrl(name, 300, 200) || verticalStockImageUrl(vertical, 300, 200);
+    // A pre-resolved Openverse photo (real, relevance-ranked, no-attribution
+    // CC0) wins — that is the keyless relevance floor buildDossier painted onto
+    // this item. Failing that, key a loremflickr tile off the product NAME
+    // alone: loremflickr matches tags with AND semantics, so appending the
+    // vertical ("Butter Chicken" + "Food" -> three required tags) usually
+    // matches nothing and returns a grey default. The name alone keeps per-tile
+    // variety and hits far more real photos; a name that still matches nothing
+    // falls to the vertical noun floor. (repo.replaceProducts re-validates.)
+    const preResolved = (it && typeof it.image === 'string' && it.image) ? it.image : null;
+    const image = preResolved || stockImageUrl(name, 300, 200) || verticalStockImageUrl(vertical, 300, 200);
     if (image) row.image = image;
     rows.push(row);
   }
   return rows;
 }
 
-// The hero image the email header paints: a REAL scraped og:image (best) wins;
-// otherwise the LLM's heroPrompt — or, failing that, the brand vertical —
-// becomes a keyword-relevant stock photograph, so a brand whose homepage
-// carried no og:image still opens on a relevant hero band instead of a
-// placeholder. Returns undefined (not null) so it slots straight into the
-// upsertBrand args the way the other optional fields do.
+// The hero image the email header paints, best source first:
+//   1. a REAL scraped og:image (the brand's OWN homepage hero) — brand truth;
+//   2. dossier.heroImage — a real, relevance-ranked, no-attribution Openverse
+//      photo resolved at research time (the keyless relevance floor), so a
+//      brand whose homepage carried no og:image still opens on a genuinely
+//      on-topic hero, not a random one;
+//   3. the LLM's heroPrompt — or, failing that, the brand vertical — as a
+//      loremflickr keyword photograph;
+// so the header is never a bare placeholder. Returns undefined (not null) so it
+// slots straight into the upsertBrand args the way the other optional fields do.
 function heroFromDossier(dossier, liveHeroUrl) {
   if (typeof liveHeroUrl === 'string' && liveHeroUrl) return liveHeroUrl;
   const d = dossier || {};
+  // A real Openverse photo (CC0/PDM, no attribution) beats any loremflickr
+  // keyword match, so it wins over the heroPrompt/vertical stock URLs below.
+  if (typeof d.heroImage === 'string' && d.heroImage) return d.heroImage;
   // With a descriptive heroPrompt (from the LLM) key the photo off that; with
   // no prompt key off the VERTICAL noun, NEVER the brand name. "Beauty Nykaa"
   // matches no Flickr photo, so loremflickr serves a grey default — the exact
