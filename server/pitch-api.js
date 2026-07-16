@@ -154,6 +154,26 @@ function heroFromDossier(dossier, liveHeroUrl) {
   return verticalStockImageUrl(d.vertical, 600, 240) || undefined;
 }
 
+// The curated brand_images library is the TOP rung of the image ladder: a
+// brand's OWN pictures win over the scraped og:image, the Openverse CC0 floor
+// and the loremflickr floor beneath them (heroFromDossier / productsFromDossier
+// paint those floors). A kind='hero' row overrides the hero slot; kind='product'
+// rows override the product tiles BY POSITION — the first curated product photo
+// lands on the first tile, the second on the second — so a brand that has added
+// its own real product shots shows them instead of the keyless stock relevance
+// floor. Structural, never brand-keyed: it selects on the row's own `kind`, so
+// it generalises to any brand and any vertical. Pure + defensive: an empty or
+// absent library returns { hero: null, products: [] }, leaving every rung below
+// untouched.
+function curatedImagePicks(images) {
+  const rows = Array.isArray(images) ? images : [];
+  const hero = rows.find((r) => r && r.kind === 'hero' && typeof r.url === 'string' && r.url);
+  const products = rows
+    .filter((r) => r && r.kind === 'product' && typeof r.url === 'string' && r.url)
+    .map((r) => r.url);
+  return { hero: hero ? hero.url : null, products };
+}
+
 // The wire dossier — mirrors functions/usecases.js's publicDossier field for
 // field, so the wizard reads one dossier shape whichever endpoint built it.
 // Cache bookkeeping (notes, notesHash) never leaks into the UI contract.
@@ -305,11 +325,12 @@ function createPitchApi(ctx = {}) {
 
   // The full workspace view for one brand: row + satellites in one response.
   async function brandDetail(row) {
-    const [products, contacts, assets, pitches] = await Promise.all([
+    const [products, contacts, assets, pitches, images] = await Promise.all([
       repo.listProducts(row.id),
       repo.listContacts(row.id),
       repo.listAssets(row.id),
       repo.listPitchesForBrand(row.id),
+      repo.listBrandImages(row.id),
     ]);
     return ok({
       brand: publicBrand(row),
@@ -317,6 +338,7 @@ function createPitchApi(ctx = {}) {
       contacts,
       assets: assetItems(assets, storage),
       pitches,
+      images,
     });
   }
 
@@ -340,24 +362,31 @@ function createPitchApi(ctx = {}) {
   // non-array value is dropped like any other invalid field, because a typo
   // must never wipe a brand's saved catalogue.
   async function updateBrandKitH({
-    id, patch, products, author,
+    id, patch, products, images, author,
   } = {}) {
     if (!ID_SHAPE.test(String(id || ''))) return bad('bad brand id');
     let brand = await repo.getBrandById(id);
     if (!brand) return missing('no such brand');
     const patchObj = (patch && typeof patch === 'object' && !Array.isArray(patch)) ? patch : null;
     const wantsProducts = Array.isArray(products);
-    if (!patchObj && !wantsProducts) return bad('nothing to update');
+    const wantsImages = Array.isArray(images);
+    if (!patchObj && !wantsProducts && !wantsImages) return bad('nothing to update');
     if (patchObj) {
       const updated = await repo.setBrandKitFields(id, patchObj);
       if (updated) brand = updated;
-      else if (!wantsProducts) return bad('no valid kit fields in patch');
+      else if (!wantsProducts && !wantsImages) return bad('no valid kit fields in patch');
     }
     const rows = wantsProducts
       ? await repo.replaceProducts(id, products)
       : await repo.listProducts(id);
+    // Whole-list, same discipline as products: a present ARRAY replaces the
+    // curated library, its absence leaves it untouched, so an unrelated kit
+    // save never wipes a brand's pictures.
+    const imageRows = wantsImages
+      ? await repo.replaceBrandImages(id, images)
+      : await repo.listBrandImages(id);
     await repo.logActivity({ actor: cleanAuthor(author), brandId: brand.id, verb: 'kit-updated' });
-    return ok({ brand: publicBrand(brand), products: rows || [] });
+    return ok({ brand: publicBrand(brand), products: rows || [], images: imageRows || [] });
   }
 
   // ---- contacts ---------------------------------------------------------------
@@ -475,6 +504,11 @@ function createPitchApi(ctx = {}) {
     const brand = await repo.getBrandById(pitch.brand_id);
     if (!brand) return missing('the pitch has lost its brand row');
     const products = await repo.listProducts(brand.id);
+    // The curated library is the TOP rung of the image ladder — a kind='hero'
+    // pick wins the header, kind='product' picks win the tiles by position.
+    // Read at BUILD time, not brand-creation time, because a team curates these
+    // after the brand exists.
+    const picks = curatedImagePicks(await repo.listBrandImages(brand.id));
 
     const actor = cleanAuthor(author);
     const exTitle = typeof title === 'string' ? cleanStr(title).slice(0, TITLE_MAX) : '';
@@ -510,12 +544,12 @@ function createPitchApi(ctx = {}) {
       copy: {
         ...plan,
         ...(brand.logo_url ? { logoUrl: brand.logo_url, site: brand.site || undefined } : {}),
-        ...(brand.hero_url ? { heroUrl: brand.hero_url } : {}),
+        ...(picks.hero || brand.hero_url ? { heroUrl: picks.hero || brand.hero_url } : {}),
         ...(products.length ? {
-          items: products.map((p) => ({
+          items: products.map((p, i) => ({
             name: p.name,
             price: p.price ?? undefined,
-            image: p.image_url || undefined,
+            image: picks.products[i] || p.image_url || undefined,
           })),
         } : {}),
       },
@@ -867,6 +901,9 @@ function createPitchApi(ctx = {}) {
     const brand = await repo.getBrandById(pitch.brand_id);
     if (!brand) return missing('the pitch has lost its brand row');
     const products = await repo.listProducts(brand.id);
+    // Curated library wins the hero + product tiles here too, so an AI-drafted
+    // starter doc opens on the brand's own pictures, not the stock floor.
+    const picks = curatedImagePicks(await repo.listBrandImages(brand.id));
 
     const briefText = (typeof brief === 'string' && brief.trim()) ? brief : (pitch.brief || '');
     // moduleId + useCase thread through to generateDoc so the returned starting
@@ -884,12 +921,12 @@ function createPitchApi(ctx = {}) {
         // The brand's real hero + vertical: doc-ai paints them into any hero/
         // image block instead of a placeholder tile. Omitted before, which is
         // why AI-drafted docs opened on a bland coloured rectangle.
-        heroUrl: brand.hero_url || undefined,
+        heroUrl: picks.hero || brand.hero_url || undefined,
         vertical: brand.vertical || undefined,
         site: brand.site || undefined,
         voice: brand.voice_sample || undefined,
-        items: products.map((p) => ({
-          name: p.name, price: p.price ?? undefined, imageUrl: p.image_url || undefined,
+        items: products.map((p, i) => ({
+          name: p.name, price: p.price ?? undefined, imageUrl: picks.products[i] || p.image_url || undefined,
         })),
       },
       brief: briefText,
@@ -977,4 +1014,4 @@ function createPitchApi(ctx = {}) {
   };
 }
 
-module.exports = { createPitchApi };
+module.exports = { createPitchApi, curatedImagePicks };

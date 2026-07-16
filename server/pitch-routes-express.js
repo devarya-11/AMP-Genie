@@ -33,7 +33,7 @@ function registerPitchRoutes(app, ctx) {
   app.post('/api/brands/:id/kit', async (req, res) => {
     const b = body(req);
     send(res, await api.updateBrandKitH({
-      id: req.params.id, patch: b.patch, products: b.products, author: b.author,
+      id: req.params.id, patch: b.patch, products: b.products, images: b.images, author: b.author,
     }));
   });
   app.get('/api/brands/:id/activity', async (req, res) => {

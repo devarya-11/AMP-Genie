@@ -17,7 +17,7 @@ delete process.env.OLLAMA_BASE_URL;
 // failed fetch as "fall through", never an error.
 globalThis.fetch = async () => { throw new Error('offline test: network disabled'); };
 
-const { createPitchApi } = require('../server/pitch-api');
+const { createPitchApi, curatedImagePicks } = require('../server/pitch-api');
 const { bindLocalRepo } = require('../server/repo-supabase');
 const { createLocalDb, MIGRATIONS } = require('../server/db');
 const { validate } = require('../server/validator');
@@ -387,6 +387,129 @@ test('createExample defaults: no title names the example after its module; an ex
   assert.strictEqual(stored.brief, 'rate your last delivery', 'the explicit brief wins over the pitch brief');
   assert.strictEqual(stored.useCase, null, 'no title -> no use-case provenance');
   assert.strictEqual(example.validation_pass, 1, 'hash-colour brands still build valid AMP');
+});
+
+// ---- the curated library: the TOP rung of the image ladder ------------------------
+
+test('curatedImagePicks: a kind=hero row wins the header, kind=product rows win tiles by position', () => {
+  // empty / junk -> nothing picked, so every rung below is left untouched
+  assert.deepStrictEqual(curatedImagePicks(null), { hero: null, products: [] });
+  assert.deepStrictEqual(curatedImagePicks([]), { hero: null, products: [] });
+  assert.deepStrictEqual(
+    curatedImagePicks([{ kind: 'other', url: 'https://cdn/misc.jpg' }]),
+    { hero: null, products: [] }, "an 'other' picture steers neither slot");
+  // the FIRST hero by list order wins; product urls come out in list order
+  const picks = curatedImagePicks([
+    { kind: 'product', url: 'https://cdn/p1.jpg' },
+    { kind: 'hero', url: 'https://cdn/hero-a.jpg' },
+    { kind: 'hero', url: 'https://cdn/hero-b.jpg' },  // a second hero never displaces the first
+    { kind: 'product', url: 'https://cdn/p2.jpg' },
+    { kind: 'other', url: 'https://cdn/misc.jpg' },   // 'other' is library-only, not a tile
+    { kind: 'product' },                               // a url-less row is skipped, not a hole
+  ]);
+  assert.strictEqual(picks.hero, 'https://cdn/hero-a.jpg', 'the first hero row wins the header');
+  assert.deepStrictEqual(picks.products, ['https://cdn/p1.jpg', 'https://cdn/p2.jpg'],
+    'product urls come out in order, url-less rows skipped');
+});
+
+test('updateBrandKit: a curated image library replaces whole-list and rides the brand detail', async () => {
+  const { api } = await freshApi();
+  const id = (await api.createBrandH({ name: 'Zentara' })).json.brand.id;
+  // images-only save (no patch, no products) is a valid update
+  const res = await api.updateBrandKitH({
+    id,
+    images: [
+      { url: 'https://cdn.zentara.example/hero.jpg', kind: 'hero', alt: 'Lobby' },
+      { url: 'https://cdn.zentara.example/arm.png', kind: 'product' },
+      { url: 'nope' },                                   // junk -> dropped
+      { url: 'https://cdn.zentara.example/misc.jpg' },   // no kind -> 'other'/'manual' default
+    ],
+    author: 'hriday',
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.images.length, 3, 'the junk row dropped, three kept');
+  assert.deepStrictEqual(res.json.images.map((r) => r.kind), ['hero', 'product', 'other']);
+  // the library rides the full brand detail view alongside products/contacts
+  const detail = await api.getBrandH({ id });
+  assert.deepStrictEqual(detail.json.images.map((r) => r.url), [
+    'https://cdn.zentara.example/hero.jpg',
+    'https://cdn.zentara.example/arm.png',
+    'https://cdn.zentara.example/misc.jpg',
+  ]);
+  // a whole-list save with fewer rows REPLACES, never appends
+  const fewer = await api.updateBrandKitH({
+    id, images: [{ url: 'https://cdn.zentara.example/only.jpg', kind: 'hero' }],
+  });
+  assert.strictEqual(fewer.json.images.length, 1);
+  // products and images are independent: an images-only save keeps the catalogue
+  await api.updateBrandKitH({ id, products: [{ name: 'Arm One' }] });
+  const afterImg = await api.updateBrandKitH({
+    id, images: [{ url: 'https://cdn.zentara.example/h.jpg', kind: 'hero' }],
+  });
+  assert.deepStrictEqual(afterImg.json.products.map((p) => p.name), ['Arm One'],
+    'an images-only save leaves the product list untouched');
+});
+
+test('createExample: the curated library wins the hero + tiles over the kit hero and the stock floor', async () => {
+  const { api, kv } = await freshApi();
+  const brandId = (await api.createBrandH({ name: 'Zentara' })).json.brand.id;
+  await api.updateBrandKitH({
+    id: brandId,
+    patch: { heroUrl: 'https://cdn.zentara.example/kit-hero.jpg' },
+    products: [
+      { name: 'Arm One', image: 'https://cdn.zentara.example/stock-arm.png' },
+      { name: 'Grip Kit', image: 'https://cdn.zentara.example/stock-grip.png' },
+      { name: 'Base Plate', image: 'https://cdn.zentara.example/stock-base.png' },
+    ],
+  });
+  // Curate a hero + two product photos. The hero beats the kit hero_url; the two
+  // product photos land on the first two tiles by position; the third tile, with
+  // no curated photo, keeps its stored stock image.
+  await api.updateBrandKitH({
+    id: brandId,
+    images: [
+      { url: 'https://cdn.zentara.example/curated-hero.jpg', kind: 'hero' },
+      { url: 'https://cdn.zentara.example/curated-arm.jpg', kind: 'product' },
+      { url: 'https://cdn.zentara.example/curated-grip.jpg', kind: 'product' },
+    ],
+  });
+  const pitch = (await api.createPitchH({ brandId, title: 'Launch', brief: 'meet the arms' })).json.pitch;
+  const res = await api.createExampleH({ pitchId: pitch.id, title: 'Grid', moduleId: 'spin', author: 'dev' });
+  assert.strictEqual(res.status, 200);
+  const stored = JSON.parse(kv.map.get('build:' + JSON.parse(res.json.example.params_json).buildId));
+  assert.strictEqual(stored.params.copy.heroUrl, 'https://cdn.zentara.example/curated-hero.jpg',
+    'the curated hero beats the kit hero_url');
+  const imgs = stored.params.copy.items.map((i) => i.image);
+  assert.strictEqual(imgs[0], 'https://cdn.zentara.example/curated-arm.jpg', 'curated product #1 wins tile #1');
+  assert.strictEqual(imgs[1], 'https://cdn.zentara.example/curated-grip.jpg', 'curated product #2 wins tile #2');
+  assert.strictEqual(imgs[2], 'https://cdn.zentara.example/stock-base.png',
+    'tile #3, with no curated photo, keeps its stored image — the ladder falls through');
+});
+
+test('aiDoc: the curated product library reaches the drafted doc\'s products grid', async () => {
+  const { api } = await freshApi();
+  const brandId = (await api.createBrandH({ name: 'Zentara' })).json.brand.id;
+  await api.updateBrandKitH({
+    id: brandId,
+    products: [
+      { name: 'Arm One', image: 'https://cdn.zentara.example/stock-arm.png' },
+      { name: 'Grip Kit', image: 'https://cdn.zentara.example/stock-grip.png' },
+    ],
+    images: [
+      { url: 'https://cdn.zentara.example/curated-hero.jpg', kind: 'hero' },
+      { url: 'https://cdn.zentara.example/curated-arm.jpg', kind: 'product' },
+    ],
+  });
+  const pitch = (await api.createPitchH({ brandId, title: 'Launch', brief: 'meet the arms' })).json.pitch;
+  const res = await api.aiDocH({ pitchId: pitch.id, useCase: 'Launch', author: 'dev' });
+  assert.strictEqual(res.status, 200);
+  const grid = (res.json.doc.blocks || []).find((bl) => bl.type === 'products');
+  assert.ok(grid, 'the drafted doc carries a products grid for the brand catalogue');
+  const imgs = grid.props.items.map((it) => it.imageUrl);
+  assert.strictEqual(imgs[0], 'https://cdn.zentara.example/curated-arm.jpg',
+    'the curated product photo wins tile #1 in the AI-drafted doc');
+  assert.strictEqual(imgs[1], 'https://cdn.zentara.example/stock-grip.png',
+    'tile #2, with no curated photo, keeps its stored image');
 });
 
 // ---- tweak: the zero-key floor makes a new version --------------------------------
