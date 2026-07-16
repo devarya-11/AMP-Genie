@@ -35,16 +35,19 @@ binding = "DB"
 database_name = "amp-genie-db"
 database_id = "71b354a8-bd3e-486f-92f7-5e0b0b3aafa9"
 
-# Uploaded brand-picture bytes. The Pages Functions reach it as env.UPLOADS
-# (the binding name 'ASSETS' is RESERVED in Pages — it is the internal static
-# -asset fetcher — so this must be a different name). server/asset-store.js
-# stores the raw image under 'assetbytes:<id>' and the GET /brand-images/:id
-# route streams it straight back. When UPLOADS is absent (local `wrangler pages
-# dev` without --r2, or the Node dev server) uploads fall back to the KV/fs byte
-# store, so the endpoint works with or without R2.
-# Create the bucket once (after `wrangler login`):
+# Uploaded brand-picture bytes. Deliberately UNBOUND for now: R2 is not enabled
+# on this account, and uploadBrandImageH falls back to the KV byte store when the
+# UPLOADS binding is absent (r2 || kv → kv). server/asset-store.js stores the raw
+# image under 'assetbytes:<id>' in KV (env.HISTORY) and GET /brand-images/:id
+# streams it back — so the upload feature works fully on the free KV tier with no
+# R2. The R2-aware code path stays in place, dormant, ready to switch on later.
+#
+# To move the bytes to R2 (proper object storage, no 25MB KV value cap): enable
+# R2 in the Cloudflare dashboard, then
 #   npx wrangler r2 bucket create amp-genie-assets
-# then `npx wrangler pages deploy`. Local: `wrangler pages dev --r2 UPLOADS`.
-[[r2_buckets]]
-binding = "UPLOADS"
-bucket_name = "amp-genie-assets"
+# and restore the binding below (NB: 'ASSETS' is a RESERVED name in Pages — the
+# internal static-asset fetcher — so the binding must be UPLOADS, not ASSETS):
+#   [[r2_buckets]]
+#   binding = "UPLOADS"
+#   bucket_name = "amp-genie-assets"
+# Local with R2: `wrangler pages dev --r2 UPLOADS`.
