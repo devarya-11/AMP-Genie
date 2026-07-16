@@ -11,7 +11,7 @@
 //
 // R2 (DONE): putAssetBytes/getAssetBytes/delAssetBytes now take EITHER a KV
 // namespace OR an R2 bucket and branch on isR2Bucket() — R2 stores the raw
-// bytes (env.ASSETS.put(key, bytes, { httpMetadata: { contentType } }) / .get /
+// bytes (env.UPLOADS.put(key, bytes, { httpMetadata: { contentType } }) / .get /
 // .delete, no base64 tax), KV keeps the JSON-wrapped { mime, base64 } record.
 // The route handlers only ever see put/get/del, so which store backs the bytes
 // is confined to this file; the caller picks the store by binding presence

@@ -19,18 +19,19 @@ let cached = { genie: null, kv: null, r2: null, api: null };
 
 export function getPitchApi(env) {
   const genie = getGenie(env);
-  if (!cached.api || cached.genie !== genie || cached.kv !== env.HISTORY || cached.r2 !== env.ASSETS) {
+  if (!cached.api || cached.genie !== genie || cached.kv !== env.HISTORY || cached.r2 !== env.UPLOADS) {
     cached = {
       genie,
       kv: env.HISTORY,
-      r2: env.ASSETS,
+      r2: env.UPLOADS,
       api: createPitchApi({
         repo: genie.repo,
         storage: genie.storage,
         kv: env.HISTORY,
         // R2 bucket for uploaded brand-picture bytes; absent in local dev,
-        // where uploadBrandImageH falls back to the KV byte store.
-        r2: env.ASSETS,
+        // where uploadBrandImageH falls back to the KV byte store. Named UPLOADS
+        // because 'ASSETS' is a reserved binding name in Cloudflare Pages.
+        r2: env.UPLOADS,
         validate,
         llmProviders: () => llmProviders(env),
       }),

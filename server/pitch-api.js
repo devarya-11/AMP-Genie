@@ -408,7 +408,7 @@ function createPitchApi(ctx = {}) {
 
   // uploadBrandImageH — a REAL file upload into the curated library (the
   // source:'upload' arm of brand_images, the sibling of the paste-a-URL path).
-  // Bytes land in R2 (env.ASSETS) or, absent that binding, the KV byte store,
+  // Bytes land in R2 (env.UPLOADS) or, absent that binding, the KV byte store,
   // and GET /brand-images/:id streams them back; when Supabase Storage is
   // configured they take its permanent public CDN URL instead, needing no
   // serving route — the exact three-tier the /assets upload path uses. The

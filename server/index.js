@@ -387,7 +387,7 @@ app.delete('/assets/:id', async (req, res) => {
 // GET /brand-images/:id streams an uploaded curated picture whose bytes live in
 // the byte store (no Supabase). No DB row is needed — the id keys the store
 // directly. Wire-identical to functions/brand-images/[id].js; the Pages twin
-// reads R2 (env.ASSETS) then KV (env.HISTORY), here there is only the fs kv.
+// reads R2 (env.UPLOADS) then KV (env.HISTORY), here there is only the fs kv.
 app.get('/brand-images/:id', async (req, res) => {
   const id = String(req.params.id || '');
   if (!isAssetId(id)) return res.status(404).json({ error: 'not found' });

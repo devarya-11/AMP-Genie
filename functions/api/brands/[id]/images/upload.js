@@ -1,7 +1,7 @@
 // POST /api/brands/:id/images/upload — a real file upload into the brand's
 // curated picture library. Body: { dataBase64, mime, filename, kind?, alt?,
 // author? }. Thin shell over server/pitch-api.js's uploadBrandImageH: the bytes
-// go to R2 (env.ASSETS) or the KV fallback, and the picture appends to
+// go to R2 (env.UPLOADS) or the KV fallback, and the picture appends to
 // brand_images at source='upload' — the SAME top rung of the image ladder a
 // pasted URL enters. Wire-identical to the Express route in pitch-routes-express.js.
 
