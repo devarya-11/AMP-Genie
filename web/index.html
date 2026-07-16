@@ -273,6 +273,21 @@
         <div id="assetGrid" class="asset-grid"></div>
 
         <div class="contacts-block">
+          <div class="gen-hdr"><svg class="ic accent"><use href="#i-folder"/></svg> Brand pictures <span class="hint">used first in emails — your own hero &amp; product photos beat the auto-picked stock</span></div>
+          <div class="brandpix-add">
+            <input id="bpUrl" type="url" placeholder="Paste an image URL (https://…)">
+            <select id="bpKind" aria-label="Picture kind">
+              <option value="hero">hero</option>
+              <option value="product">product</option>
+              <option value="other">other</option>
+            </select>
+            <button id="bpAdd" class="ghost sm" type="button">Add picture</button>
+          </div>
+          <div id="bpStatus" class="statusline"></div>
+          <div id="bpGrid" class="asset-grid"></div>
+        </div>
+
+        <div class="contacts-block">
           <div class="gen-hdr"><svg class="ic accent"><use href="#i-brand"/></svg> Contacts</div>
           <div class="contact-add">
             <input id="ctName" type="text" placeholder="Name">

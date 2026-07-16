@@ -304,6 +304,11 @@ a.linkbtn{color:var(--ink-2)}
 .asset-sub{font-size:11px;color:var(--faint);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .asset-actions{display:flex;gap:6px;padding:0 12px 12px}
 .asset-actions button{flex:1;justify-content:center;padding:6px 8px;font-size:12px}
+.brandpix-add{display:flex;gap:8px;align-items:center}
+.brandpix-add input{flex:1;padding:9px 11px;font-size:13px;min-width:0}
+.brandpix-add select{width:110px;flex:0 0 auto;padding:9px 8px;font-size:13px}
+.brandpix-add button{flex:0 0 auto}
+@media(max-width:640px){.brandpix-add{flex-wrap:wrap}.brandpix-add input{flex:1 1 100%}}
 
 /* details pane */
 .details-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:30px;align-items:start}

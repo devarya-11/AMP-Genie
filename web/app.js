@@ -435,12 +435,16 @@
     S.brand = data.brand || data;
     S.assets = listOf(data, ['assets']).length ? listOf(data, ['assets']) : listOf(S.brand, ['assets']);
     S.contacts = listOf(data, ['contacts']).length ? listOf(data, ['contacts']) : listOf(S.brand, ['contacts']);
+    // The curated picture library rides the same detail response as a sibling
+    // of assets; attach it to the brand so renderBrandImages reads one place.
+    S.brand.images = listOf(data, ['images']);
   }
 
   function renderWorkspace() {
     renderHeader();
     renderGallery();
     renderAssets();
+    renderBrandImages();
     renderContacts();
     renderDetails();
   }
@@ -683,6 +687,81 @@
       card.appendChild(actions);
       grid.appendChild(card);
     });
+  }
+
+  // ---- curated brand pictures: the TOP rung of the image ladder ----
+  //      A brand's OWN hero/product photos, pasted as URLs (R2 uploads will
+  //      share the same list). At BUILD time they beat the scraped og:image and
+  //      the auto-picked stock floor — a kind='hero' picture takes the header,
+  //      kind='product' pictures take the tiles by position. Managed whole-list
+  //      through POST /kit { images }, exactly the way products are.
+  function brandImages() { return (S.brand && Array.isArray(S.brand.images)) ? S.brand.images : []; }
+  // Project the current library back to the wire shape the whole-list save
+  // expects; the server re-sanitises every row (cleanBrandImageRow).
+  function brandImagesWire(list) {
+    return (list || []).map((im) => ({
+      url: im.url || im.image, kind: im.kind, alt: im.alt || undefined, source: im.source,
+    })).filter((im) => im.url);
+  }
+  function renderBrandImages() {
+    const grid = $('bpGrid'); if (!grid) return;
+    grid.innerHTML = '';
+    const imgs = brandImages();
+    if (!imgs.length) {
+      grid.appendChild(el('div', 'empty-note',
+        'No brand pictures yet — paste a hero or product image URL above and it is used first in every email, ahead of the auto-picked stock.'));
+      return;
+    }
+    imgs.forEach((im, idx) => {
+      const url = im.url || im.image || '';
+      const card = el('div', 'asset-card');
+      const img = el('img', 'asset-thumb'); img.src = url; img.loading = 'lazy'; img.alt = im.alt || (im.kind || 'picture');
+      card.appendChild(img);
+      const meta = el('div', 'asset-meta');
+      const sub = el('div', 'asset-sub');
+      sub.appendChild(el('span', 'chip', im.kind || 'other'));
+      if (im.source === 'upload') sub.appendChild(el('span', 'chip', 'uploaded'));
+      meta.appendChild(sub);
+      card.appendChild(meta);
+      const actions = el('div', 'asset-actions');
+      const del = el('button', 'ghost sm danger', 'Remove'); del.type = 'button';
+      del.onclick = () => removeBrandImage(idx);
+      actions.appendChild(del);
+      card.appendChild(actions);
+      grid.appendChild(card);
+    });
+  }
+  async function addBrandImageUrl() {
+    if (!S.brand) { setLine('bpStatus', 'Research the brand first — pictures need a brand to land in.'); return; }
+    const url = ($('bpUrl').value || '').trim();
+    const kind = $('bpKind').value || 'other';
+    if (!/^https?:\/\/\S+$/i.test(url)) { setLine('bpStatus', 'Paste a full image URL that starts with https://'); $('bpUrl').focus(); return; }
+    const next = brandImagesWire(brandImages()).concat([{ url, kind }]);
+    const saved = await saveBrandImages(next, 'bpAdd');
+    // Clear the input only when the URL actually landed (the server keeps http(s)
+    // rows and drops junk, so a rejected paste stays put for the user to fix).
+    if (saved && brandImages().some((im) => (im.url || im.image) === url)) $('bpUrl').value = '';
+  }
+  async function removeBrandImage(idx) {
+    const imgs = brandImages();
+    if (idx < 0 || idx >= imgs.length) return;
+    await saveBrandImages(brandImagesWire(imgs.filter((_, i) => i !== idx)), null);
+  }
+  async function saveBrandImages(list, btnId) {
+    if (!S.brand) return false;
+    const btn = btnId ? $(btnId) : null;
+    if (btn) busy(btn, true);
+    setLine('bpStatus', 'Saving…', true);
+    try {
+      const out = await api('/api/brands/' + encodeURIComponent(S.brand.id) + '/kit', { images: list, author: author() });
+      if (out && out.error) { setLine('bpStatus', 'Error: ' + out.error); return false; }
+      S.brand.images = listOf(out, ['images']);
+      const n = S.brand.images.length;
+      setLine('bpStatus', n + ' picture' + (n === 1 ? '' : 's') + ' in the library — used first in every email.');
+      renderBrandImages();
+      return true;
+    } catch (e) { setLine('bpStatus', 'Error: ' + e.message); return false; }
+    finally { if (btn) busy(btn, false); }
   }
 
   // ---- contacts (workspace assets pane) ----
@@ -1006,6 +1085,7 @@
     if (assets.length || !S.assets) S.assets = assets;
     const prods = listOf(data, ['products']);
     if (prods.length && S.brand) S.brand.products = prods;
+    if (S.brand) S.brand.images = listOf(data, ['images']);
     if (document.getElementById('view-editor') && document.getElementById('view-editor').classList.contains('on')) {
       renderLibrary();
       if (selectedBlock() && selectedBlock().type === 'products') renderProps();
@@ -2139,6 +2219,8 @@
 
     // assets + contacts
     wireDropzone($('assetDrop'), $('assetFile'), assetsUpload);
+    $('bpAdd').onclick = addBrandImageUrl;
+    $('bpUrl').onkeydown = (e) => { if (e.key === 'Enter') addBrandImageUrl(); };
     $('ctAdd').onclick = addContact;
 
     // details
