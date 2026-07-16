@@ -29,8 +29,9 @@ const { newId, brandSlug } = require('./store');
 const {
   ID_SHAPE, SLUG_SHAPE, KIT_COLUMNS,
   cleanStr, optText, toJsonOrNull, nowIso,
-  contactPatch, cleanProductRow,
+  contactPatch, cleanProductRow, cleanBrandImageRow,
   NAME_MAX, TITLE_MAX, GOAL_MAX, BRIEF_MAX, TWEAK_PROMPT_MAX, DETAIL_MAX, PRODUCTS_MAX,
+  BRAND_IMAGES_MAX,
 } = repoLocal._pure;
 
 const { sanitizeKitPatch } = require('./store');
@@ -228,6 +229,71 @@ function createSupabaseRepo({ url, secretKey, fetchImpl = fetch } = {}) {
       await call('products', { method: 'POST', body, prefer: 'return=minimal' });
     }
     return listProducts(brand.id);
+  }
+
+  // ---- brand images -------------------------------------------------------------
+
+  // The PostgREST twin of repo.js's brand-images DAOs. listBrandImages is
+  // naturally the tolerant read the ladder needs: call() maps EVERY failure
+  // (including a table that does not exist yet) to null, and many(null) is [].
+  async function listBrandImages(brandId) {
+    if (!ID_SHAPE.test(String(brandId || ''))) return [];
+    return many(await call('brand_images?brand_id=eq.' + enc(String(brandId))
+      + '&select=id,brand_id,url,kind,alt,pos,source,created_at&order=pos.asc,id.asc'));
+  }
+
+  // DELETE + one bulk POST, same whole-list stance and last-writer-wins caveat
+  // as replaceProducts above.
+  async function replaceBrandImages(brandId, images) {
+    const brand = await getBrandById(brandId);
+    if (!brand) return null;
+    const rows = (Array.isArray(images) ? images : [])
+      .slice(0, 60).map(cleanBrandImageRow).filter(Boolean).slice(0, BRAND_IMAGES_MAX);
+    const del = await call('brand_images?brand_id=eq.' + enc(brand.id), { method: 'DELETE' });
+    if (del === null) return null; // delete failed — leave whatever is stored
+    if (rows.length) {
+      const body = rows.map((row, pos) => ({
+        id: newId(),
+        brand_id: brand.id,
+        url: row.url,
+        kind: row.kind,
+        alt: row.alt,
+        pos,
+        source: row.source,
+        created_at: nowIso(),
+      }));
+      await call('brand_images', { method: 'POST', body, prefer: 'return=minimal' });
+    }
+    return listBrandImages(brand.id);
+  }
+
+  async function addBrandImage(brandId, img) {
+    const brand = await getBrandById(brandId);
+    if (!brand) return null;
+    const row = cleanBrandImageRow(img);
+    if (!row) return null;
+    const existing = await listBrandImages(brand.id);
+    if (existing.length >= BRAND_IMAGES_MAX) return null;
+    const pos = existing.reduce((m, r) => Math.max(m, Number(r.pos) || 0), -1) + 1;
+    const body = {
+      id: newId(),
+      brand_id: brand.id,
+      url: row.url,
+      kind: row.kind,
+      alt: row.alt,
+      pos,
+      source: row.source,
+      created_at: nowIso(),
+    };
+    return one(await call('brand_images', { method: 'POST', body, prefer: 'return=representation' }));
+  }
+
+  async function deleteBrandImage(id) {
+    if (!ID_SHAPE.test(String(id || ''))) return false;
+    const out = await call('brand_images?id=eq.' + enc(String(id)), {
+      method: 'DELETE', prefer: 'return=representation',
+    });
+    return Array.isArray(out) && out.length > 0;
   }
 
   // ---- contacts -----------------------------------------------------------------
@@ -574,6 +640,10 @@ function createSupabaseRepo({ url, secretKey, fetchImpl = fetch } = {}) {
     setBrandKitFields,
     replaceProducts,
     listProducts,
+    listBrandImages,
+    replaceBrandImages,
+    addBrandImage,
+    deleteBrandImage,
     addContact,
     updateContact,
     deleteContact,

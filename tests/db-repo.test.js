@@ -38,13 +38,18 @@ test('node:sqlite is available on this Node with no flag (DatabaseSync)', () => 
 
 // ---- migrations -----------------------------------------------------------------
 
-test('server/migrations.js is a byte-identical mirror of migrations/0001_init.sql', () => {
+test('server/migrations.js is a byte-identical mirror of migrations/*.sql', () => {
   const onDisk = fs.readFileSync(
     path.join(__dirname, '..', 'migrations', '0001_init.sql'), 'utf8');
-  assert.strictEqual(MIGRATIONS.length, 1);
+  assert.strictEqual(MIGRATIONS.length, 2);
   assert.strictEqual(MIGRATIONS[0].name, '0001_init');
   assert.strictEqual(MIGRATIONS[0].sql, onDisk,
     'the embedded copy drifted from the .sql — regenerate server/migrations.js (edit BOTH files together)');
+  const onDisk0002 = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', '0002_brand_images.sql'), 'utf8');
+  assert.strictEqual(MIGRATIONS[1].name, '0002_brand_images');
+  assert.strictEqual(MIGRATIONS[1].sql, onDisk0002,
+    'the embedded 0002 copy drifted from the .sql — edit BOTH files together');
 });
 
 test('splitStatements: end-of-line semicolons split, comment-only pieces dropped', () => {
@@ -58,19 +63,19 @@ test('splitStatements: end-of-line semicolons split, comment-only pieces dropped
     '0001_init carries 8 CREATE TABLE + 9 CREATE INDEX statements');
 });
 
-test('applyMigrations applies 0001 once; a second run is a clean no-op', async () => {
+test('applyMigrations applies each migration once; a second run is a clean no-op', async () => {
   const db = createLocalDb(':memory:');
-  assert.deepStrictEqual(await db.applyMigrations(), ['0001_init']);
+  assert.deepStrictEqual(await db.applyMigrations(), ['0001_init', '0002_brand_images']);
   assert.deepStrictEqual(await db.applyMigrations(), [],
     'twice must apply nothing and must not throw');
   const names = (await db.all("SELECT name FROM sqlite_master WHERE type = 'table'"))
     .map((t) => t.name);
-  for (const t of ['_migrations', 'brands', 'products', 'contacts', 'pitches',
-    'examples', 'assets', 'settings', 'activity']) {
+  for (const t of ['_migrations', 'brands', 'products', 'brand_images', 'contacts',
+    'pitches', 'examples', 'assets', 'settings', 'activity']) {
     assert.ok(names.includes(t), t + ' table must exist after migration');
   }
   const ledger = await db.all('SELECT name FROM _migrations');
-  assert.strictEqual(ledger.length, 1, 'the ledger records 0001 exactly once');
+  assert.strictEqual(ledger.length, 2, 'the ledger records each migration exactly once');
   db.close();
 });
 

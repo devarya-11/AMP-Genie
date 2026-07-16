@@ -241,6 +241,94 @@ async function listProducts(db, brandId) {
     [String(brandId)]);
 }
 
+// ---- brand images (the curated TOP of the image ladder) -------------------------
+
+// A brand's OWN pictures — pasted URLs today, R2-uploaded file URLs once that
+// lands — in ONE table so consumers never care which. These sit ABOVE the
+// scraped og:image and the Openverse/loremflickr floors: a curated 'hero'
+// wins the hero slot, curated 'product' rows win the tiles.
+const IMAGE_KINDS = ['hero', 'product', 'other'];
+const IMAGE_SOURCES = ['manual', 'upload'];
+const BRAND_IMAGES_MAX = 24;
+const ALT_MAX = 200;
+
+// url is REQUIRED and http(s)-only (the cleanUrl gate products use) — no url,
+// no row. A kind/source that is absent or off-allowlist falls back to its
+// column default ('other'/'manual'): a typo files the picture, never drops
+// it. alt is optional, stripped and capped.
+function cleanBrandImageRow(img) {
+  if (!img || typeof img !== 'object') return null;
+  const url = cleanUrl(img.url !== undefined ? img.url : img.image);
+  if (!url) return null;
+  const kind = IMAGE_KINDS.includes(img.kind) ? img.kind : 'other';
+  const source = IMAGE_SOURCES.includes(img.source) ? img.source : 'manual';
+  const alt = cleanStr(img.alt || '').slice(0, ALT_MAX) || null;
+  return { url, kind, source, alt };
+}
+
+// listBrandImages is the ONLY brand-images path the build pipeline reads, so
+// it is the one that must never throw: a brand_images table that does not yet
+// exist (code deployed AHEAD of its remote migration) degrades to [] — the
+// ladder just falls through to og:image/Openverse, exactly like a brand with
+// no curated pictures. The Supabase twin is already tolerant (its transport
+// maps every failure to null -> []).
+async function listBrandImages(db, brandId) {
+  if (!ID_SHAPE.test(String(brandId || ''))) return [];
+  try {
+    return await db.all(
+      'SELECT id, brand_id, url, kind, alt, pos, source, created_at FROM brand_images WHERE brand_id = ? ORDER BY pos, rowid',
+      [String(brandId)]);
+  } catch (e) {
+    console.error('[repo] brand_images unavailable, treating as empty:', e && e.message);
+    return [];
+  }
+}
+
+// replaceBrandImages(db, brandId, images[]) -> stored rows | null (unknown
+// brand / bad id). Whole-list semantics like replaceProducts: what you post
+// is the brand's set, ordered, junk rows dropped, capped AFTER the junk filter
+// so a bad row never evicts a good one. Atomic via db.batch — a failure leaves
+// the previous list intact.
+async function replaceBrandImages(db, brandId, images) {
+  const brand = await getBrandById(db, brandId);
+  if (!brand) return null;
+  const rows = (Array.isArray(images) ? images : [])
+    .slice(0, 60).map(cleanBrandImageRow).filter(Boolean).slice(0, BRAND_IMAGES_MAX);
+  const statements = [{ sql: 'DELETE FROM brand_images WHERE brand_id = ?', params: [brand.id] }];
+  rows.forEach((row, pos) => {
+    statements.push({
+      sql: 'INSERT INTO brand_images (id, brand_id, url, kind, alt, pos, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      params: [newId(), brand.id, row.url, row.kind, row.alt, pos, row.source, nowIso()],
+    });
+  });
+  await db.batch(statements);
+  return listBrandImages(db, brand.id);
+}
+
+// addBrandImage(db, brandId, img) -> the new row | null. Appends ONE picture
+// at the end (pos = max+1) — the path the paste-a-URL control and the R2
+// upload endpoint share. Refuses past the cap rather than silently dropping.
+async function addBrandImage(db, brandId, img) {
+  const brand = await getBrandById(db, brandId);
+  if (!brand) return null;
+  const row = cleanBrandImageRow(img);
+  if (!row) return null;
+  const existing = await listBrandImages(db, brand.id);
+  if (existing.length >= BRAND_IMAGES_MAX) return null;
+  const pos = existing.reduce((m, r) => Math.max(m, Number(r.pos) || 0), -1) + 1;
+  const id = newId();
+  await db.run(
+    'INSERT INTO brand_images (id, brand_id, url, kind, alt, pos, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, brand.id, row.url, row.kind, row.alt, pos, row.source, nowIso()]);
+  return db.first('SELECT * FROM brand_images WHERE id = ?', [id]);
+}
+
+async function deleteBrandImage(db, id) {
+  if (!ID_SHAPE.test(String(id || ''))) return false;
+  const { changes } = await db.run('DELETE FROM brand_images WHERE id = ?', [String(id)]);
+  return changes > 0;
+}
+
 // ---- contacts -------------------------------------------------------------------
 
 // Deliberately lite (this is a CRM nicety, not auth): something@something.tld
@@ -617,8 +705,9 @@ async function listActivity(db, opts) {
 const _pure = {
   ID_SHAPE, SLUG_SHAPE, KIT_COLUMNS,
   cleanStr, cleanUrl, optText, toJsonOrNull, nowIso,
-  contactPatch, cleanProductRow,
+  contactPatch, cleanProductRow, cleanBrandImageRow,
   NAME_MAX, TITLE_MAX, GOAL_MAX, BRIEF_MAX, TWEAK_PROMPT_MAX, DETAIL_MAX, PRODUCTS_MAX,
+  IMAGE_KINDS, IMAGE_SOURCES, BRAND_IMAGES_MAX, ALT_MAX,
 };
 
 module.exports = {
@@ -627,6 +716,8 @@ module.exports = {
   upsertBrand, getBrandBySlug, getBrandById, listBrands, setBrandKitFields,
   // products
   replaceProducts, listProducts,
+  // brand images
+  listBrandImages, replaceBrandImages, addBrandImage, deleteBrandImage,
   // contacts
   addContact, updateContact, deleteContact, listContacts,
   // pitches
