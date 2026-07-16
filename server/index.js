@@ -30,7 +30,7 @@ const { createSupabaseRepo, bindLocalRepo } = require('./repo-supabase');
 const { createLocalDb, MIGRATIONS } = require('./db');
 const {
   validateUpload, b64ToBytes, createSupabaseStorage,
-  putAssetBytes, getAssetBytes, delAssetBytes,
+  isAssetId, putAssetBytes, getAssetBytes, delAssetBytes,
 } = require('./asset-store');
 const {
   sanitizePoolEntry, maskKey, getMergedProviders, resetPoolCache, PROVIDER_ORDER, POOL_SETTINGS_KEY,
@@ -381,6 +381,21 @@ app.delete('/assets/:id', async (req, res) => {
   else await delAssetBytes(kv, row.id);
   await repo.deleteAsset(row.id);
   res.json({ ok: true });
+});
+
+// ---- brand-picture upload bytes (the R2/KV fallback serving route) ----------
+// GET /brand-images/:id streams an uploaded curated picture whose bytes live in
+// the byte store (no Supabase). No DB row is needed — the id keys the store
+// directly. Wire-identical to functions/brand-images/[id].js; the Pages twin
+// reads R2 (env.ASSETS) then KV (env.HISTORY), here there is only the fs kv.
+app.get('/brand-images/:id', async (req, res) => {
+  const id = String(req.params.id || '');
+  if (!isAssetId(id)) return res.status(404).json({ error: 'not found' });
+  const stored = await getAssetBytes(kv, id);
+  if (!stored) return res.status(404).json({ error: 'not found' });
+  res.setHeader('Content-Type', stored.mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.send(Buffer.from(stored.bytes));
 });
 
 app.get('/brands/:id/assets', async (req, res) => {

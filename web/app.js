@@ -742,6 +742,32 @@
     // rows and drops junk, so a rejected paste stays put for the user to fix).
     if (saved && brandImages().some((im) => (im.url || im.image) === url)) $('bpUrl').value = '';
   }
+  // A REAL file upload: the byte-store sibling of the paste-a-URL path. Reads the
+  // file to base64 and POSTs to the dedicated upload route, which vets the
+  // mime/size, stores the bytes (Supabase → R2 → KV) and appends a source='upload'
+  // row. The returned images list refreshes the library — the picture enters the
+  // SAME top rung of the image ladder a pasted URL does, so it beats the auto-stock.
+  async function uploadBrandImageFile(file) {
+    if (!S.brand) { setLine('bpStatus', 'Research the brand first — pictures need a brand to land in.'); return; }
+    if (!file) return;
+    if (!/^image\//.test(file.type || '')) { setLine('bpStatus', 'Pick an image file (PNG, JPEG, GIF or WebP).'); return; }
+    const kind = $('bpKind').value || 'other';
+    const btn = $('bpUploadBtn');
+    if (btn) busy(btn, true);
+    setLine('bpStatus', 'Uploading ' + file.name + '…', true);
+    try {
+      const dataBase64 = await readFileB64(file);
+      const out = await api('/api/brands/' + encodeURIComponent(S.brand.id) + '/images/upload', {
+        dataBase64, mime: file.type || 'image/png', filename: file.name, kind, author: author(),
+      });
+      if (out && out.error) { setLine('bpStatus', 'Error: ' + out.error); return; }
+      S.brand.images = listOf(out, ['images']);
+      const n = S.brand.images.length;
+      setLine('bpStatus', n + ' picture' + (n === 1 ? '' : 's') + ' in the library — ' + file.name + ' uploaded, used first in every email.');
+      renderBrandImages();
+    } catch (e) { setLine('bpStatus', 'Error: ' + e.message); }
+    finally { if (btn) busy(btn, false); }
+  }
   async function removeBrandImage(idx) {
     const imgs = brandImages();
     if (idx < 0 || idx >= imgs.length) return;
@@ -2221,6 +2247,14 @@
     wireDropzone($('assetDrop'), $('assetFile'), assetsUpload);
     $('bpAdd').onclick = addBrandImageUrl;
     $('bpUrl').onkeydown = (e) => { if (e.key === 'Enter') addBrandImageUrl(); };
+    // The "Upload file…" button just opens the hidden file picker; picking a file
+    // uploads it, then clears the input so the same file can be re-picked later.
+    $('bpUploadBtn').onclick = () => $('bpFile').click();
+    $('bpFile').onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (f) uploadBrandImageFile(f);
+    };
     $('ctAdd').onclick = addContact;
 
     // details

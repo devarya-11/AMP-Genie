@@ -34,3 +34,15 @@ id = "45848d264860419eae8c4869900eff10"
 binding = "DB"
 database_name = "amp-genie-db"
 database_id = "71b354a8-bd3e-486f-92f7-5e0b0b3aafa9"
+
+# Uploaded brand-picture bytes. The Pages Functions reach it as env.ASSETS;
+# server/asset-store.js stores the raw image under 'assetbytes:<id>' and the
+# GET /brand-images/:id route streams it straight back. When ASSETS is absent
+# (local `wrangler pages dev` without --r2, or the Node dev server) uploads
+# fall back to the KV/fs byte store, so the endpoint works with or without R2.
+# Create the bucket once (after `wrangler login`):
+#   npx wrangler r2 bucket create amp-genie-assets
+# then `npx wrangler pages deploy`. Local: `wrangler pages dev --r2 ASSETS`.
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "amp-genie-assets"

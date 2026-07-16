@@ -36,6 +36,18 @@ function registerPitchRoutes(app, ctx) {
       id: req.params.id, patch: b.patch, products: b.products, images: b.images, author: b.author,
     }));
   });
+  // A real file upload into the curated library. origin is parsed off the
+  // request so the byte-store fallback URL (/brand-images/:id) is absolute —
+  // the Pages twin (functions/api/brands/[id]/images/upload.js) does the same.
+  app.post('/api/brands/:id/images/upload', async (req, res) => {
+    const b = body(req);
+    send(res, await api.uploadBrandImageH({
+      id: req.params.id,
+      dataBase64: b.dataBase64, mime: b.mime, filename: b.filename,
+      kind: b.kind, alt: b.alt, author: b.author,
+      origin: req.protocol + '://' + req.get('host'),
+    }));
+  });
   app.get('/api/brands/:id/activity', async (req, res) => {
     send(res, await api.brandActivityH({ brandId: req.params.id }));
   });

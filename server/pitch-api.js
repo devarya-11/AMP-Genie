@@ -38,7 +38,11 @@ const { buildDossier, stockImageUrl, verticalStockImageUrl } = require('./brand-
 const { resolveBrandColor, resolveBrandLogo } = require('./brand');
 const { createBuild } = require('./build-pipeline');
 const { applyTweak } = require('./tweak-engine');
-const { brandSlug, putBrandKit, putBuild } = require('./store');
+const { brandSlug, putBrandKit, putBuild, newId } = require('./store');
+// Byte storage for uploaded brand-picture files. Runtime-agnostic (no fs/path),
+// so it bundles for Workers with the rest of this module. The store handle
+// (r2 || kv) is chosen by the caller; this module never learns which answered.
+const { validateUpload, b64ToBytes, putAssetBytes } = require('./asset-store');
 const emailDoc = require('./email-doc');
 const { validateDoc, renderDoc } = emailDoc;
 // GENIE 2.0: turning a legacy interactive example into an editable doc needs
@@ -174,6 +178,19 @@ function curatedImagePicks(images) {
   return { hero: hero ? hero.url : null, products };
 }
 
+// The serving path for a byte-stored (R2/KV) upload, absolutised against the
+// request origin. cleanBrandImageRow requires http(s) and an email cannot embed
+// a relative src, so a bare '/brand-images/:id' would be dropped at the DAO —
+// the origin the route parsed off the request turns it into a real URL that GET
+// /brand-images/:id then streams. Supabase uploads skip this: putObject already
+// returns an absolute, permanent CDN URL. Returns null on a junk/missing origin
+// so the handler can fail honestly rather than store an unservable path.
+function absoluteImageUrl(origin, id) {
+  const base = String(origin || '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(base)) return null;
+  return base + '/brand-images/' + id;
+}
+
 // The wire dossier — mirrors functions/usecases.js's publicDossier field for
 // field, so the wizard reads one dossier shape whichever endpoint built it.
 // Cache bookkeeping (notes, notesHash) never leaks into the UI contract.
@@ -224,7 +241,7 @@ function assetItems(rows, storage) {
 }
 
 function createPitchApi(ctx = {}) {
-  const { repo = null, storage = null, kv = null } = ctx;
+  const { repo = null, storage = null, kv = null, r2 = null } = ctx;
   const validate = ctx.validate;
 
   // The provider seam never throws and never forces callers to null-check:
@@ -387,6 +404,51 @@ function createPitchApi(ctx = {}) {
       : await repo.listBrandImages(id);
     await repo.logActivity({ actor: cleanAuthor(author), brandId: brand.id, verb: 'kit-updated' });
     return ok({ brand: publicBrand(brand), products: rows || [], images: imageRows || [] });
+  }
+
+  // uploadBrandImageH — a REAL file upload into the curated library (the
+  // source:'upload' arm of brand_images, the sibling of the paste-a-URL path).
+  // Bytes land in R2 (env.ASSETS) or, absent that binding, the KV byte store,
+  // and GET /brand-images/:id streams them back; when Supabase Storage is
+  // configured they take its permanent public CDN URL instead, needing no
+  // serving route — the exact three-tier the /assets upload path uses. The
+  // picture then appends to brand_images at source='upload', so it enters the
+  // SAME top rung of the image ladder a pasted URL does. `origin` is the request
+  // origin the route parsed, needed only for the byte-store fallback URL.
+  async function uploadBrandImageH({
+    id, dataBase64, mime, filename, kind, alt, author, origin,
+  } = {}) {
+    if (!ID_SHAPE.test(String(id || ''))) return bad('bad brand id');
+    const vetted = validateUpload({ filename, mime, dataBase64 });
+    if (!vetted.ok) return bad(vetted.error);
+    const brand = await repo.getBrandById(id);
+    if (!brand) return missing('no such brand');
+
+    const objId = newId();
+    let url = null;
+    // Prefer Supabase (permanent public CDN URL, email-safe, no serving route);
+    // fall back to the R2/KV byte store rather than hard-failing when Supabase
+    // is unreachable or simply unconfigured (the Cloudflare-native deploy).
+    if (storage) {
+      const objPath = storage.objectPath(brand.slug, objId, vetted.filename);
+      url = await storage.putObject(objPath, b64ToBytes(dataBase64), vetted.mime);
+    }
+    if (!url) {
+      if (!(await putAssetBytes(r2 || kv, objId, { base64: dataBase64, mime: vetted.mime }))) {
+        return { status: 502, json: { error: 'storage upload failed' } };
+      }
+      url = absoluteImageUrl(origin, objId);
+      if (!url) return bad('server origin unknown — cannot store the uploaded picture');
+    }
+
+    const image = await repo.addBrandImage(brand.id, {
+      url, kind, alt, source: 'upload',
+    });
+    if (!image) return bad('could not add the picture (the library may be full)');
+    await repo.logActivity({
+      actor: cleanAuthor(author), brandId: brand.id, verb: 'image-uploaded', detail: vetted.filename,
+    });
+    return ok({ image, images: await repo.listBrandImages(brand.id) });
   }
 
   // ---- contacts ---------------------------------------------------------------
@@ -993,6 +1055,7 @@ function createPitchApi(ctx = {}) {
     getBrandH: guarded(getBrandH),
     getBrandBySlugH: guarded(getBrandBySlugH),
     updateBrandKitH: guarded(updateBrandKitH),
+    uploadBrandImageH: guarded(uploadBrandImageH),
     addContactH: guarded(addContactH),
     updateContactH: guarded(updateContactH),
     deleteContactH: guarded(deleteContactH),

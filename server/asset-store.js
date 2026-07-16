@@ -9,11 +9,13 @@
 // value cap is 25MB; our upload cap (MAX_ASSET_BYTES, 2MB decoded) sits far
 // below it, so a vetted upload can never hit the KV limit.
 //
-// TODO(R2): when R2 is enabled on the account, add an R2-backed twin of
-// putAssetBytes/getAssetBytes/delAssetBytes (env.ASSETS.put(id, bytes,
-// { httpMetadata: { contentType: mime } }) / .get / .delete — raw bytes, no
-// base64 tax) and pick per-call by binding presence. The route handlers only
-// ever see put/get/del, so the swap is confined to this file.
+// R2 (DONE): putAssetBytes/getAssetBytes/delAssetBytes now take EITHER a KV
+// namespace OR an R2 bucket and branch on isR2Bucket() — R2 stores the raw
+// bytes (env.ASSETS.put(key, bytes, { httpMetadata: { contentType } }) / .get /
+// .delete, no base64 tax), KV keeps the JSON-wrapped { mime, base64 } record.
+// The route handlers only ever see put/get/del, so which store backs the bytes
+// is confined to this file; the caller picks the store by binding presence
+// (r2 || kv) and never learns which one answered.
 //
 // Runtime-agnostic on purpose: no fs/path/__dirname, decode picks Buffer
 // (Node, and Workers under nodejs_compat) or atob (Workers-native) by a
@@ -133,15 +135,30 @@ function b64ToBytes(base64) {
 
 // ---- the swappable store -----------------------------------------------------
 
-// putAssetBytes(kv, id, { base64, mime }) -> true/false. Assumes the caller
-// already ran validateUpload; still refuses a junk id or payload so a bug
-// upstream can't write an unkeyed or unreadable record.
-async function putAssetBytes(kv, id, payload) {
-  if (!kv || !isAssetId(id)) return false;
+// R2 buckets expose head(); KV namespaces (and the tests' Map-backed fake, and
+// the Express fs shim) do not. That one-method tell is the whole discriminator
+// — it lets the trio serve either backing store while every route handler sees
+// only put/get/del. Guarded on put() too so a stray object with a head method
+// can never be mistaken for a bucket.
+function isR2Bucket(store) {
+  return !!store && typeof store.head === 'function' && typeof store.put === 'function';
+}
+
+// putAssetBytes(store, id, { base64, mime }) -> true/false. store is a KV
+// namespace OR an R2 bucket. Assumes the caller already ran validateUpload;
+// still refuses a junk id or payload so a bug upstream can't write an unkeyed
+// or unreadable record. R2 gets the decoded bytes (content type on
+// httpMetadata); KV keeps the JSON-wrapped { mime, base64 }.
+async function putAssetBytes(store, id, payload) {
+  if (!store || !isAssetId(id)) return false;
   const { base64, mime } = payload || {};
   if (typeof base64 !== 'string' || !base64 || typeof mime !== 'string' || !mime) return false;
   try {
-    await kv.put(BYTES_PREFIX + id, JSON.stringify({ mime, base64 }));
+    if (isR2Bucket(store)) {
+      await store.put(BYTES_PREFIX + id, b64ToBytes(base64), { httpMetadata: { contentType: mime } });
+    } else {
+      await store.put(BYTES_PREFIX + id, JSON.stringify({ mime, base64 }));
+    }
     return true;
   } catch (e) {
     console.error('[asset-store] failed to persist ' + id + ':', e && e.message);
@@ -149,11 +166,20 @@ async function putAssetBytes(kv, id, payload) {
   }
 }
 
-// getAssetBytes(kv, id) -> { mime, bytes: Uint8Array } | null.
-async function getAssetBytes(kv, id) {
-  if (!kv || !isAssetId(id)) return null;
+// getAssetBytes(store, id) -> { mime, bytes: Uint8Array } | null. R2 hands back
+// an R2ObjectBody (arrayBuffer() + httpMetadata.contentType); KV hands back the
+// JSON record. Either way the caller gets the same { mime, bytes } shape.
+async function getAssetBytes(store, id) {
+  if (!store || !isAssetId(id)) return null;
   try {
-    const value = await kv.get(BYTES_PREFIX + id, 'json');
+    if (isR2Bucket(store)) {
+      const obj = await store.get(BYTES_PREFIX + id);
+      if (!obj) return null;
+      const mime = (obj.httpMetadata && obj.httpMetadata.contentType) || 'application/octet-stream';
+      const buf = await obj.arrayBuffer();
+      return { mime: String(mime), bytes: new Uint8Array(buf) };
+    }
+    const value = await store.get(BYTES_PREFIX + id, 'json');
     if (!value || typeof value !== 'object' || typeof value.base64 !== 'string' || !value.base64) return null;
     return { mime: String(value.mime || 'application/octet-stream'), bytes: b64ToBytes(value.base64) };
   } catch {
@@ -161,15 +187,15 @@ async function getAssetBytes(kv, id) {
   }
 }
 
-// delAssetBytes(kv, id) -> true/false. Real KV (and the tests' fake) expose
-// delete(); the Express dev server's fs shim (server/store-fs.js) predates
-// deletes, so a kv without one gets a 'null' tombstone instead — getAssetBytes
-// reads that back as a miss, which is all "deleted" means here.
-async function delAssetBytes(kv, id) {
-  if (!kv || !isAssetId(id)) return false;
+// delAssetBytes(store, id) -> true/false. R2 and real KV (and the tests' fake)
+// expose delete(); the Express dev server's fs shim (server/store-fs.js)
+// predates deletes, so a kv without one gets a 'null' tombstone instead —
+// getAssetBytes reads that back as a miss, which is all "deleted" means here.
+async function delAssetBytes(store, id) {
+  if (!store || !isAssetId(id)) return false;
   try {
-    if (typeof kv.delete === 'function') await kv.delete(BYTES_PREFIX + id);
-    else await kv.put(BYTES_PREFIX + id, 'null');
+    if (isR2Bucket(store) || typeof store.delete === 'function') await store.delete(BYTES_PREFIX + id);
+    else await store.put(BYTES_PREFIX + id, 'null');
     return true;
   } catch (e) {
     console.error('[asset-store] failed to delete ' + id + ':', e && e.message);
@@ -245,6 +271,6 @@ module.exports = {
   BYTES_PREFIX, MAX_ASSET_BYTES, FILENAME_MAX, MIME_ALLOWED,
   isAssetId, sanitizeFilename, validateUpload,
   b64ToBytes, b64ToBytesAtob,
-  putAssetBytes, getAssetBytes, delAssetBytes,
+  isR2Bucket, putAssetBytes, getAssetBytes, delAssetBytes,
   createSupabaseStorage,
 };

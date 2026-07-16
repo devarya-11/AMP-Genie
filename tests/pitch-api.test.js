@@ -18,6 +18,7 @@ delete process.env.OLLAMA_BASE_URL;
 globalThis.fetch = async () => { throw new Error('offline test: network disabled'); };
 
 const { createPitchApi, curatedImagePicks } = require('../server/pitch-api');
+const { getAssetBytes, BYTES_PREFIX } = require('../server/asset-store');
 const { bindLocalRepo } = require('../server/repo-supabase');
 const { createLocalDb, MIGRATIONS } = require('../server/db');
 const { validate } = require('../server/validator');
@@ -510,6 +511,177 @@ test('aiDoc: the curated product library reaches the drafted doc\'s products gri
     'the curated product photo wins tile #1 in the AI-drafted doc');
   assert.strictEqual(imgs[1], 'https://cdn.zentara.example/stock-grip.png',
     'tile #2, with no curated photo, keeps its stored image');
+});
+
+// ---- uploadBrandImageH: the real-file-upload arm of the curated library -----------
+
+// The 1x1 PNG fixture (same bytes tests/asset-store.test.js uses): a real,
+// allow-listed image body the upload path can vet, store and stream back.
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+// A Map-backed stand-in for the Cloudflare R2 binding — the head/put/get/delete
+// subset asset-store.js's R2 arm targets. isR2Bucket() keys off .head + .put, so
+// this reads as R2 while fakeKv() (no .head) reads as a KV namespace.
+function fakeR2() {
+  const map = new Map();
+  return {
+    map,
+    async head(key) { return map.has(key) ? {} : null; },
+    async put(key, bytes, opts) {
+      const u8 = new Uint8Array(bytes);
+      map.set(key, { bytes: u8, mime: opts && opts.httpMetadata && opts.httpMetadata.contentType });
+    },
+    async get(key) {
+      if (!map.has(key)) return null;
+      const rec = map.get(key);
+      return {
+        httpMetadata: { contentType: rec.mime },
+        async arrayBuffer() {
+          return rec.bytes.buffer.slice(rec.bytes.byteOffset, rec.bytes.byteOffset + rec.bytes.byteLength);
+        },
+      };
+    },
+    async delete(key) { map.delete(key); },
+  };
+}
+
+// A stand-in for the Supabase Storage adapter (createSupabaseStorage's public
+// shape). objectPath composes the readable key; putObject returns a permanent
+// absolute CDN URL and records what it was handed so a test can prove the byte
+// store was never touched when Supabase is configured.
+function fakeStorage() {
+  const puts = [];
+  return {
+    puts,
+    objectPath(slug, id, filename) { return String(slug) + '/' + id + '-' + filename; },
+    async putObject(path, bytes, mime) {
+      puts.push({ path, bytes: new Uint8Array(bytes), mime });
+      return 'https://cdn.supabase.example/storage/v1/object/public/brand-assets/' + path;
+    },
+  };
+}
+
+// Like freshApi(), but lets a test choose the byte-storage backends the upload
+// path branches over: a Supabase storage (top tier), an R2 bucket, or neither
+// (the KV fallback). The KV is always present as the last-resort dev store.
+async function uploadApi({ storage = null, r2 = null } = {}) {
+  const db = createLocalDb(':memory:');
+  await db.applyMigrations(MIGRATIONS);
+  const repo = bindLocalRepo(db);
+  const kv = fakeKv();
+  const api = createPitchApi({
+    repo, storage, kv, r2, validate, llmProviders: async () => undefined,
+  });
+  return { api, repo, kv };
+}
+
+test('uploadBrandImageH: a real file lands a source=upload row with an absolute /brand-images/:id url, bytes servable', async () => {
+  // No Supabase, no R2 -> the KV byte store is the fallback (the keyless dev path).
+  const { api, kv } = await uploadApi();
+  const brandId = (await api.createBrandH({ name: 'Zentara' })).json.brand.id;
+  const res = await api.uploadBrandImageH({
+    id: brandId, dataBase64: PNG_B64, mime: 'image/png', filename: 'Diwali Hero.png',
+    kind: 'hero', alt: 'Lobby', author: 'hriday', origin: 'https://amp-genie.pages.dev',
+  });
+  assert.strictEqual(res.status, 200);
+  const { image, images } = res.json;
+  assert.strictEqual(image.source, 'upload', 'the picture enters the upload arm of brand_images');
+  assert.strictEqual(image.kind, 'hero');
+  assert.strictEqual(image.alt, 'Lobby');
+  // The served url is ABSOLUTE (cleanBrandImageRow rejects a relative one) and is
+  // the dedicated byte-serving route, not the /assets one.
+  assert.match(image.url, /^https:\/\/amp-genie\.pages\.dev\/brand-images\/[a-z0-9-]{6,64}$/,
+    'the fallback url is the absolute /brand-images/:id serving path');
+  assert.strictEqual(images.length, 1, 'the images list comes back carrying the new row');
+  assert.strictEqual(images[0].id, image.id);
+
+  // The bytes really landed under the id parsed off the url, and decode back to
+  // the exact PNG — GET /brand-images/:id would stream precisely these.
+  const objId = image.url.split('/').pop();
+  const stored = await getAssetBytes(kv, objId);
+  assert.ok(stored, 'the bytes are retrievable from the byte store');
+  assert.strictEqual(stored.mime, 'image/png');
+  assert.deepStrictEqual(Array.from(stored.bytes), Array.from(Buffer.from(PNG_B64, 'base64')),
+    'the stored bytes are the exact uploaded PNG, no base64 tax leaking through');
+
+  // It rides the brand detail view like any curated picture and stamps activity.
+  assert.strictEqual((await api.getBrandH({ id: brandId })).json.images.length, 1);
+  const feed = await api.brandActivityH({ brandId });
+  assert.ok(feed.json.items.some((i) => i.verb === 'image-uploaded' && i.detail === 'Diwali Hero.png'),
+    'the upload stamped the activity feed with the sanitised filename');
+});
+
+test('uploadBrandImageH: an R2 bucket takes the bytes RAW and the served url still points at /brand-images/:id', async () => {
+  const r2 = fakeR2();
+  const { api } = await uploadApi({ r2 });
+  const brandId = (await api.createBrandH({ name: 'Zentara' })).json.brand.id;
+  const res = await api.uploadBrandImageH({
+    id: brandId, dataBase64: PNG_B64, mime: 'image/png', filename: 'arm.png',
+    kind: 'product', origin: 'https://amp-genie.pages.dev', author: 'dev',
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.image.source, 'upload');
+  assert.match(res.json.image.url, /^https:\/\/amp-genie\.pages\.dev\/brand-images\/[a-z0-9-]{6,64}$/);
+
+  // The bytes are in R2 (not the KV), stored decoded (no base64 JSON wrapper),
+  // and round-trip back through the SAME getAssetBytes the serving route uses.
+  const objId = res.json.image.url.split('/').pop();
+  const stored = await getAssetBytes(r2, objId);
+  assert.ok(stored, 'R2 holds the bytes under the served id');
+  assert.deepStrictEqual(Array.from(stored.bytes), Array.from(Buffer.from(PNG_B64, 'base64')),
+    'R2 stored the raw decoded PNG, byte-for-byte');
+});
+
+test('uploadBrandImageH: Supabase (when configured) wins — the picture takes the permanent CDN url and the byte store is untouched', async () => {
+  const storage = fakeStorage();
+  const { api, kv } = await uploadApi({ storage });
+  const brandId = (await api.createBrandH({ name: 'Zentara' })).json.brand.id;
+  const res = await api.uploadBrandImageH({
+    id: brandId, dataBase64: PNG_B64, mime: 'image/png', filename: 'hero.png',
+    kind: 'hero', origin: 'https://amp-genie.pages.dev', author: 'dev',
+  });
+  assert.strictEqual(res.status, 200);
+  // The CDN url is used verbatim — no serving route, so NOT a /brand-images/ path.
+  assert.match(res.json.image.url, /^https:\/\/cdn\.supabase\.example\/storage\/v1\/object\/public\/brand-assets\/zentara\//,
+    'a configured Supabase gives the permanent public CDN url');
+  assert.strictEqual(storage.puts.length, 1, 'the bytes went to Supabase exactly once');
+  assert.deepStrictEqual(Array.from(storage.puts[0].bytes), Array.from(Buffer.from(PNG_B64, 'base64')),
+    'Supabase got the exact decoded PNG bytes');
+  // The KV byte store never saw this upload — Supabase short-circuits the fallback.
+  // (createBrandH does cache a dossier:<slug> key, so we check the byte prefix
+  // specifically, not the whole map.)
+  assert.ok(![...kv.map.keys()].some((k) => k.startsWith(BYTES_PREFIX)),
+    'no bytes hit the KV fallback when Supabase is configured');
+});
+
+test('uploadBrandImageH: bad brand id 400, unknown brand 404, a rejected file 400, and a missing origin on the fallback 400', async () => {
+  const { api, kv } = await uploadApi();
+  const brandId = (await api.createBrandH({ name: 'Zentara' })).json.brand.id;
+
+  assert.strictEqual((await api.uploadBrandImageH({
+    id: 'z!', dataBase64: PNG_B64, mime: 'image/png', filename: 'a.png', origin: 'https://x.dev',
+  })).status, 400, 'a malformed brand id is a 400');
+  assert.strictEqual((await api.uploadBrandImageH({
+    id: 'aaaaaabbbbbb', dataBase64: PNG_B64, mime: 'image/png', filename: 'a.png', origin: 'https://x.dev',
+  })).status, 404, 'a well-formed but unknown brand is a 404');
+
+  // validateUpload's allowlist is enforced: an svg body is refused BEFORE any store.
+  const svg = await api.uploadBrandImageH({
+    id: brandId, dataBase64: PNG_B64, mime: 'image/svg+xml', filename: 'x.svg', origin: 'https://x.dev',
+  });
+  assert.strictEqual(svg.status, 400, 'a disallowed mime is refused');
+  assert.strictEqual(typeof svg.json.error, 'string');
+
+  // The byte store fell back to KV, but with no absolute origin the served url
+  // cannot be built — the handler refuses rather than store an unservable path.
+  const noOrigin = await api.uploadBrandImageH({
+    id: brandId, dataBase64: PNG_B64, mime: 'image/png', filename: 'a.png', origin: '',
+  });
+  assert.strictEqual(noOrigin.status, 400, 'no server origin on the fallback path is a 400');
+  assert.match(noOrigin.json.error, /origin/i);
+
+  // Every rejection left the library empty — nothing half-written.
+  assert.strictEqual((await api.getBrandH({ id: brandId })).json.images.length, 0);
 });
 
 // ---- tweak: the zero-key floor makes a new version --------------------------------

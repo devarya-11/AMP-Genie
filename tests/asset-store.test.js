@@ -6,7 +6,7 @@ const {
   MAX_ASSET_BYTES, BYTES_PREFIX,
   validateUpload, sanitizeFilename, isAssetId,
   b64ToBytes, b64ToBytesAtob,
-  putAssetBytes, getAssetBytes, delAssetBytes,
+  isR2Bucket, putAssetBytes, getAssetBytes, delAssetBytes,
 } = require('../server/asset-store');
 
 // In-memory stand-in for the Cloudflare KV binding (same shape as
@@ -151,4 +151,72 @@ test('junk ids, missing kv and corrupt stored values are refusals and misses, ne
 
   assert.strictEqual(isAssetId('abc123def456'), true);
   assert.strictEqual(isAssetId('ABC'), false, 'uppercase/short ids fail the shared id shape');
+});
+
+// ---- R2 backend: the same trio, raw bytes, picked by isR2Bucket() -----------
+// A Map-backed stand-in for the Cloudflare R2 bucket binding: head() is the tell
+// that makes putAssetBytes/getAssetBytes/delAssetBytes take the raw-bytes path,
+// and get() hands back an R2ObjectBody (arrayBuffer() + httpMetadata.contentType)
+// exactly as the real binding does. The point of these tests: the route handlers
+// call the SAME three functions whether the store is KV or R2.
+function fakeR2() {
+  const map = new Map(); // key -> { bytes: Uint8Array, contentType }
+  return {
+    map,
+    async head(key) {
+      return map.has(key) ? { httpMetadata: { contentType: map.get(key).contentType } } : null;
+    },
+    async put(key, bytes, opts) {
+      const contentType = opts && opts.httpMetadata && opts.httpMetadata.contentType;
+      map.set(key, { bytes: new Uint8Array(bytes), contentType });
+    },
+    async get(key) {
+      if (!map.has(key)) return null;
+      const o = map.get(key);
+      return {
+        httpMetadata: { contentType: o.contentType },
+        async arrayBuffer() {
+          return o.bytes.buffer.slice(o.bytes.byteOffset, o.bytes.byteOffset + o.bytes.byteLength);
+        },
+      };
+    },
+    async delete(key) { map.delete(key); },
+  };
+}
+
+test('isR2Bucket tells an R2 bucket (head + put) from a KV namespace and junk', () => {
+  assert.strictEqual(isR2Bucket(fakeR2()), true, 'head() + put() is the R2 tell');
+  assert.strictEqual(isR2Bucket(fakeKv()), false, 'a KV namespace has no head()');
+  assert.strictEqual(isR2Bucket(null), false);
+  assert.strictEqual(isR2Bucket({ put() {} }), false, 'put alone is not an R2 bucket');
+  assert.strictEqual(isR2Bucket({ head() {} }), false, 'head without put is not a bucket');
+});
+
+test('the same trio stores RAW bytes in R2 (no base64 tax), decodes them back, and deletes', async () => {
+  const r2 = fakeR2();
+  const id = 'abc123def456';
+
+  assert.strictEqual(await putAssetBytes(r2, id, { base64: PNG_B64, mime: 'image/png' }), true);
+  const stored = r2.map.get(BYTES_PREFIX + id);
+  assert.ok(stored.bytes instanceof Uint8Array, 'R2 holds the decoded bytes, not a JSON wrapper');
+  assert.strictEqual(stored.bytes.length, PNG_SIZE, 'exactly the decoded image, no base64 inflation');
+  assert.strictEqual(stored.contentType, 'image/png', 'the mime rides httpMetadata');
+  assert.deepStrictEqual(Array.from(stored.bytes.slice(0, 8)), PNG_SIGNATURE, 'PNG signature intact in R2');
+
+  const got = await getAssetBytes(r2, id);
+  assert.strictEqual(got.mime, 'image/png', 'mime comes back off httpMetadata, not a wrapper');
+  assert.deepStrictEqual(Array.from(got.bytes), Array.from(Buffer.from(PNG_B64, 'base64')),
+    'R2 roundtrip is byte-equal to the original image');
+
+  assert.strictEqual(await delAssetBytes(r2, id), true);
+  assert.strictEqual(r2.map.has(BYTES_PREFIX + id), false, 'R2 delete really removes the object');
+  assert.strictEqual(await getAssetBytes(r2, id), null, 'a deleted R2 object reads as a miss');
+});
+
+test('R2 misses and a junk id are misses/refusals, never throws', async () => {
+  const r2 = fakeR2();
+  assert.strictEqual(await getAssetBytes(r2, 'abc123def456'), null, 'a never-written R2 id is a miss');
+  assert.strictEqual(await putAssetBytes(r2, '../etc/passwd', { base64: PNG_B64, mime: 'image/png' }), false);
+  assert.strictEqual(r2.map.size, 0, 'a refused put writes nothing to R2 either');
+  assert.strictEqual(await delAssetBytes(r2, 'abc123def456'), true, 'deleting a missing R2 object is idempotent success');
 });

@@ -15,18 +15,22 @@ import { getGenie, llmProviders } from './genie.js';
 
 const { createPitchApi } = pitchApiMod;
 
-let cached = { genie: null, kv: null, api: null };
+let cached = { genie: null, kv: null, r2: null, api: null };
 
 export function getPitchApi(env) {
   const genie = getGenie(env);
-  if (!cached.api || cached.genie !== genie || cached.kv !== env.HISTORY) {
+  if (!cached.api || cached.genie !== genie || cached.kv !== env.HISTORY || cached.r2 !== env.ASSETS) {
     cached = {
       genie,
       kv: env.HISTORY,
+      r2: env.ASSETS,
       api: createPitchApi({
         repo: genie.repo,
         storage: genie.storage,
         kv: env.HISTORY,
+        // R2 bucket for uploaded brand-picture bytes; absent in local dev,
+        // where uploadBrandImageH falls back to the KV byte store.
+        r2: env.ASSETS,
         validate,
         llmProviders: () => llmProviders(env),
       }),
