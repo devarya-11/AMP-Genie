@@ -104,7 +104,8 @@ test('a pre-seeded brand kit wins: colorSource kit, palette from kit.primary, ze
   // land on 'hash' — a kit hit must pre-empt all of that.
   const { response } = await createBuild({ brand: 'Zzyzx Labs', counter: 0 }, { validate, kv });
   assert.strictEqual(response.colorSource, 'kit');
-  assert.deepStrictEqual(response.palette, derivePalette(kit.primary), 'palette derives from the kit primary');
+  assert.deepStrictEqual(response.palette, derivePalette(kit.primary, kit.accent), 'palette uses the kit primary AND its curated accent');
+  assert.strictEqual(response.palette.accent, kit.accent, 'a kit-supplied accent renders as-is, not a hue derived from the primary');
   assert.strictEqual(fetchCalls, 0, 'a kit hit must skip the live colour/logo fetches entirely');
   assert.strictEqual(response.vertical, 'Food', 'kit vertical is the inference fallback');
   assert.ok(response.ampHtml.includes(kit.logoUrl), 'kit logo replaces the placeholder image');

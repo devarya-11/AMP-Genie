@@ -237,6 +237,11 @@ async function createBuild(body, deps = {}) {
     // explicit b.currency still wins, and generate() defaults to INR.
     currency: b.currency || prod.currency,
     color: colorResolved.primary,
+    // A kit-curated accent (validated '#rrggbb') renders as the brand's real
+    // secondary colour; a live/hash colour has no curated accent, so this is
+    // undefined there and generate() keeps DERIVING one from the primary —
+    // every non-kit build stays byte-identical.
+    accent: colorResolved.source === 'kit' ? colorResolved.accent : undefined,
     moduleId,
     counter: b.counter,
     copy,

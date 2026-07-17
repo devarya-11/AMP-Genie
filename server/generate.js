@@ -86,10 +86,16 @@ function hslToHex({ h, s, l }) {
   return rgbToHex({ r: r * 255, g: g * 255, b: b * 255 });
 }
 
-function derivePalette(primaryHex) {
+function derivePalette(primaryHex, accentOverride) {
   const primary = rgbToHex(hexToRgb(primaryHex)); // normalise
   const hsl = rgbToHsl(hexToRgb(primary));
-  const accent = hslToHex({ h: hsl.h + 28, s: Math.min(0.85, Math.max(0.5, hsl.s + 0.15)), l: Math.min(0.6, Math.max(0.45, hsl.l)) });
+  // A brand kit can supply its own accent (a two-colour identity — e.g. a blue
+  // primary with a gold secondary band). Honour it when it's a real '#rrggbb';
+  // otherwise keep DERIVING one from the primary so every caller that supplies
+  // no accent stays byte-identical to before this parameter existed.
+  const accent = /^#[0-9a-f]{6}$/i.test(String(accentOverride || ''))
+    ? String(accentOverride).toLowerCase()
+    : hslToHex({ h: hsl.h + 28, s: Math.min(0.85, Math.max(0.5, hsl.s + 0.15)), l: Math.min(0.6, Math.max(0.45, hsl.l)) });
   return {
     primary,
     primaryDark: mix(primary, '#000000', 0.28),
@@ -1338,7 +1344,7 @@ function generate(opts = {}) {
   // given, derive a deterministic, brandable hue from the brand name so the
   // legacy path never paints every brand the same teal (the old #2c4152 bug).
   const fallbackColor = hslToHex({ h: hashSeed(brand) % 360, s: 0.6, l: 0.47 });
-  const palette = opts.palette || derivePalette(opts.color || fallbackColor);
+  const palette = opts.palette || derivePalette(opts.color || fallbackColor, opts.accent);
   const content = getContent(vertical);
   const t = TONES[tone];
   const rng = mulberry32(hashSeed(brand + ':' + counter));
@@ -1409,7 +1415,7 @@ function buildModuleFragment(moduleId, opts = {}) {
   const currency = CURRENCIES[opts.currency] ? opts.currency : 'INR';
   const counter = Number.isFinite(opts.counter) ? opts.counter : 0;
   const fallbackColor = hslToHex({ h: hashSeed(brand) % 360, s: 0.6, l: 0.47 });
-  const palette = opts.palette || derivePalette(opts.color || fallbackColor);
+  const palette = opts.palette || derivePalette(opts.color || fallbackColor, opts.accent);
   const content = getContent(vertical);
   const t = TONES[tone];
   const rng = mulberry32(hashSeed(brand + ':' + counter));
