@@ -124,6 +124,63 @@ test('an interactive block with no brand assets keeps the placeholder logo and n
   }
 });
 
+// ---- interactive product modules paint the doc brand's REAL catalogue --------
+// Regression ("Take 2"): the user filled in real product names / prices / photos
+// but the reveal module still showed the vertical's SYNTHETIC items. The cause:
+// renderInteractive dropped the brand catalogue — a block's props can't hold an
+// array (sanitizeInteractiveProps strips them), so the DOC brand is the ONLY
+// channel that survives the trust boundary, and it was never forwarded into the
+// module's copy.items. Exercised through validateDoc → renderDoc, exactly the
+// path /api/docs/render runs.
+test('a reveal module paints the doc brand REAL products (name + price + photo), not synthetics', () => {
+  const IMG_A = 'https://cdn.acme.com/predator.jpg';
+  const IMG_B = 'https://cdn.acme.com/copa.jpg';
+  const v = validateDoc({
+    version: 1,
+    currency: 'USD',
+    brand: {
+      name: 'Acme', primaryHex: '#4f46e5',
+      items: [
+        { name: 'Predator Elite Boot', price: 275, imageUrl: IMG_A },
+        { name: 'Copa Pure Boot', price: 190, imageUrl: IMG_B },
+      ],
+    },
+    blocks: [{ id: 'b', type: 'reveal', props: {} }],
+  });
+  assert.ok(v.ok, 'catalogue-bearing doc validates');
+  assert.ok(v.doc.brand.items && v.doc.brand.items.length === 2, 'validated items survive on the doc brand');
+  const amp = renderDoc(v.doc).ampHtml;
+  assert.ok(amp.includes('Predator Elite Boot') && amp.includes('Copa Pure Boot'), 'both REAL product names render');
+  assert.ok(amp.includes(`src="${IMG_A}"`) && amp.includes(`src="${IMG_B}"`), 'both REAL product photos render');
+  assert.ok(amp.includes('$275') && amp.includes('$190'), 'both REAL prices render (USD)');
+});
+
+// The catalogue channel must be strictly additive: an absent, empty, or
+// all-invalid catalogue forwards NOTHING, so a module without real products is
+// byte-identical to before this channel existed (synthetics unchanged).
+test('an interactive module with no valid catalogue is byte-identical (channel is inert)', () => {
+  const mk = (brand) => renderDoc(validateDoc({ version: 1, brand, blocks: [{ id: 'b', type: 'reveal', props: {} }] }).doc).ampHtml;
+  const a = mk({ name: 'Acme', primaryHex: '#4f46e5' });
+  const b = mk({ name: 'Acme', primaryHex: '#4f46e5', items: [] });
+  // Entries with no usable name are dropped entirely; an empty result is inert.
+  const c = mk({ name: 'Acme', primaryHex: '#4f46e5', items: [{ foo: 1 }, { name: '' }, 'nope'] });
+  assert.strictEqual(a, b, 'empty items render identically to no items key');
+  assert.strictEqual(a, c, 'an all-invalid catalogue is dropped → byte-identical');
+});
+
+// Security: a catalogue that survives (valid name) must never leak an unsafe
+// image URL into an <amp-img src>. sanitizeBrandItems accepts only https images,
+// so a javascript:/data: url is dropped and the item placeholders its photo.
+test('a real product with an unsafe image url renders the name but never the url', () => {
+  const amp = renderDoc(validateDoc({
+    version: 1,
+    brand: { name: 'Acme', primaryHex: '#4f46e5', items: [{ name: 'Sneaker', price: 99, imageUrl: 'javascript:alert(1)' }] },
+    blocks: [{ id: 'b', type: 'reveal', props: {} }],
+  }).doc).ampHtml;
+  assert.ok(amp.includes('Sneaker'), 'the valid product name still renders');
+  assert.ok(!amp.includes('javascript:alert(1)'), 'the unsafe image url never reaches the render');
+});
+
 // ---- custom-AMP sanitizer: the same-origin-iframe safety gate ----------------
 test('sanitizeCustomHtml neutralizes every script/handler/url evasion', () => {
   const cases = [

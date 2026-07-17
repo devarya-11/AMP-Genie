@@ -990,6 +990,19 @@
       heroUrl: S.brand.hero_url || undefined,
       site: S.brand.site || undefined,
     } : {};
+    // Carry the brand's real catalogue so an interactive module paints REAL
+    // products (name / price / photo) in its reveal grid instead of the
+    // vertical's synthetics. The server (validateDoc→sanitizeBrand) validates
+    // each item, so a loose client shape is fine; an empty/absent catalogue
+    // leaves brand.items unset → byte-identical render.
+    if (S.brand && Array.isArray(S.brand.products) && S.brand.products.length) {
+      const items = S.brand.products
+        .map((p) => (typeof p === 'string'
+          ? { name: p }
+          : { name: p.name, price: p.price, imageUrl: p.image || p.imageUrl }))
+        .filter((it) => it && it.name);
+      if (items.length) brand.items = items;
+    }
     enterEditor({ version: 1, brand, blocks: [] }, null,
       (S.pitch && S.pitch.title) ? (S.pitch.title + ' email') : 'New email');
     setLine('edAiStatus', '');

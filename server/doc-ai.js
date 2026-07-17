@@ -388,6 +388,11 @@ function assembleDoc({ brand, currency, blocks }) {
   if (brand.logoUrl) docBrand.logoUrl = brand.logoUrl;
   if (brand.heroUrl) docBrand.heroUrl = brand.heroUrl;
   if (brand.site) docBrand.site = brand.site;
+  // The brand's real catalogue rides on the doc brand so the interactive module
+  // paints REAL products in its reveal grid (email-doc's renderInteractive maps
+  // it in). validateDoc re-sanitizes each item; a brand with no catalogue leaves
+  // this unset and the doc renders byte-identically.
+  if (Array.isArray(brand.items) && brand.items.length) docBrand.items = brand.items;
   const raw = { brand: docBrand, blocks: Array.isArray(blocks) ? blocks : [] };
   if (currency) raw.currency = currency;
   return raw;

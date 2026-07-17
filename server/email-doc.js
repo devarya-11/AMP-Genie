@@ -269,6 +269,31 @@ function globalCss(settings) {
  * Never throws — a fundamentally unusable input returns { ok:false, error }.
  * ------------------------------------------------------------------ */
 
+// Validate a brand catalogue into the trusted item shape the interactive module
+// (and the static products block) both consume: name required (60 chars),
+// optional integer price>0, optional https image. Mirrors BLOCK_SANITIZERS
+// .products' per-item logic exactly and caps at 9 (a sane grid; the reveal
+// module itself slices to 2). A non-array or an all-invalid list yields [], so
+// a brand without a real catalogue leaves out.items unset and renders
+// byte-identically to before this channel existed. Never throws.
+function sanitizeBrandItems(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((it) => {
+      if (!it || typeof it !== 'object') return null;
+      const name = cleanStr(it.name, 60);
+      if (!name) return null;
+      const out = { name };
+      const price = Math.round(Number(it.price));
+      if (Number.isFinite(price) && price > 0) out.price = price;
+      const img = validImgUrl(it.imageUrl);
+      if (img) out.imageUrl = img;
+      return out;
+    })
+    .filter(Boolean)
+    .slice(0, 9);
+}
+
 function sanitizeBrand(brand) {
   if (!brand || typeof brand !== 'object') return undefined;
   const out = {};
@@ -285,6 +310,14 @@ function sanitizeBrand(brand) {
   if (hero) out.heroUrl = hero;
   const site = safeHttpUrl(brand.site);
   if (site) out.site = site;
+  // The brand's real catalogue travels on the doc brand too, so the interactive
+  // module paints REAL products (name / price / photo) in its reveal grid
+  // instead of the vertical's synthetic placeholders. Validated exactly like a
+  // products block's items and injected at render time — an interactive block's
+  // own props can't hold an array (sanitizeInteractiveProps strips them), so the
+  // doc brand is the only channel that survives the trust boundary.
+  const items = sanitizeBrandItems(brand.items);
+  if (items.length) out.items = items;
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -674,6 +707,21 @@ function renderInteractive(block, ctx, warnings) {
   if (ctx.logoUrl) inherited.logoUrl = ctx.logoUrl;
   if (ctx.heroUrl) inherited.heroUrl = ctx.heroUrl;
   if (ctx.site) inherited.site = ctx.site;
+  // The brand's real catalogue lives on the DOC (→ ctx.items), never in the
+  // block's copy fields (the validator strips arrays from interactive props).
+  // Forward it as the module's `items` so its reveal grid paints REAL products
+  // instead of the vertical's synthetics. The module's validItems reads
+  // `it.image`, so map imageUrl->image here. block.props carries only string
+  // keys (never an `items` array), so the spread below can't clobber this; and
+  // when the brand has no items we add nothing, so the render stays identical.
+  if (Array.isArray(ctx.items) && ctx.items.length) {
+    inherited.items = ctx.items.map((it) => {
+      const m = { name: it.name };
+      if (it.price != null) m.price = it.price;
+      if (it.imageUrl) m.image = it.imageUrl;
+      return m;
+    });
+  }
   const fragment = buildModuleFragment(block.type, {
     brand: ctx.brandName || undefined,
     color: ctx.primaryHex || undefined,
@@ -807,6 +855,10 @@ function renderDoc(doc, opts = {}) {
     logoUrl: (d.brand && d.brand.logoUrl) || undefined,
     heroUrl: (d.brand && d.brand.heroUrl) || undefined,
     site: (d.brand && d.brand.site) || undefined,
+    // The brand's real catalogue, forwarded into an interactive module's reveal
+    // grid (renderInteractive maps imageUrl->image). Empty when the brand has no
+    // items, keeping a catalogue-less render byte-identical.
+    items: (d.brand && Array.isArray(d.brand.items) && d.brand.items) || [],
   };
 
   // A doc that reached here still holding 2+ interactive blocks was rendered

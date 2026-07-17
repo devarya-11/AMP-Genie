@@ -123,6 +123,22 @@ test('buildFallbackDoc frames the module with the brand catalogue when items exi
   assert.strictEqual(interactiveBlocks(doc).length, 1, 'still exactly one interactive block');
 });
 
+// Regression ("Take 2"): the catalogue must reach the interactive MODULE's own
+// product grid, not only the static products block below it. assembleDoc now
+// carries brand.items onto the doc brand, and email-doc's renderInteractive
+// forwards it into the module's copy.items — so a real product renders BOTH in
+// the static grid AND inside the module (>= 2 occurrences). Before the fix the
+// module showed the vertical's synthetics and the name appeared only once.
+test('the generated doc carries the catalogue onto the doc brand AND the module paints it', (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const doc = buildFallbackDoc({ brand: BRAND, brief: 'weekend offer', moduleId: 'reveal', currency: 'INR' });
+  assert.ok(Array.isArray(doc.brand.items) && doc.brand.items.length === 2, 'the catalogue rides on the doc brand (the render-time channel)');
+  assert.strictEqual(doc.brand.items[0].name, 'Index Fund Starter', 'the real product name survives the trust boundary');
+  const amp = renderDoc(doc).ampHtml;
+  const count = amp.split('Index Fund Starter').length - 1;
+  assert.ok(count >= 2, `the real product renders in the module too, not only the static grid (found ${count}x, expected >= 2)`);
+});
+
 test('buildFallbackDoc never throws on junk input and still returns a valid interactive doc', (t) => {
   if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
   for (const junk of [undefined, null, {}, { brand: 42 }, { brand: { name: '<script>' } }]) {
