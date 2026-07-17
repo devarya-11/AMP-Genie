@@ -29,6 +29,7 @@
 const {
   enc, formatPrice, CURRENCIES, derivePalette,
   buildModuleFragment, MODULE_FIELDS, MODULE_IDS,
+  hashSeed, hslToHex,
 } = require('./generate');
 const { newId } = require('./store');
 
@@ -132,7 +133,21 @@ ${body}
 
 const DOC_VERSION = 1;
 const MAX_BLOCKS = 40;
-const DEFAULT_PRIMARY = '#4f46e5'; // a neutral, brandable indigo when no brand colour is given
+const DEFAULT_PRIMARY = '#4f46e5'; // a neutral, brandable indigo when no brand colour AND no brand name is given
+// A deterministic per-brand colour for a brand that has a NAME but no real
+// colour of its own (research could only guess one, so none was stored). Mirrors
+// generate.js:buildModuleFragment's own fallback EXACTLY — hslToHex({ h:
+// hashSeed(name) % 360, s: 0.6, l: 0.47 }) — so the editor and the /generate
+// build pipeline paint the SAME brand hue, and (because renderInteractive feeds
+// this same primaryHex into the module as its colour) a doc's static blocks and
+// its interactive module resolve to ONE colour instead of a generic indigo.
+// Returns null for an empty/absent name, so an unbranded doc keeps the indigo
+// default and renders byte-identically to before.
+function brandFallbackColor(name) {
+  const b = String(name == null ? '' : name).trim();
+  if (!b) return null;
+  return hslToHex({ h: hashSeed(b) % 360, s: 0.6, l: 0.47 });
+}
 const HEX_ANY = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const ALIGNS = ['left', 'center', 'right']; // the only allowed text-align values
 const BTN_SIZES = ['S', 'M', 'L']; // allowed button sizes (M === base default)
@@ -844,7 +859,14 @@ function renderDoc(doc, opts = {}) {
   }
   if (Array.isArray(d.notes)) warnings.push(...d.notes);
 
-  const primaryHex = (d.brand && d.brand.primaryHex) || DEFAULT_PRIMARY;
+  // A real brand colour wins; failing that, a brand with a NAME gets its own
+  // deterministic hue (never a generic indigo) — the same colour its interactive
+  // module would derive, since ctx.primaryHex below is what renderInteractive
+  // hands the module. Only a truly nameless doc falls through to the indigo
+  // default, so an unbranded render stays byte-identical.
+  const primaryHex = (d.brand && d.brand.primaryHex)
+    || brandFallbackColor(d.brand && d.brand.name)
+    || DEFAULT_PRIMARY;
   const palette = derivePalette(primaryHex);
   const brandName = (d.brand && d.brand.name) || '';
   const ctx = {

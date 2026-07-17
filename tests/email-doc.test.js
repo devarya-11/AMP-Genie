@@ -14,7 +14,16 @@ const {
   sanitizeCustomHtml,
 } = require('../server/email-doc');
 const { validate } = require('../server/validator');
-const { MODULE_IDS } = require('../server/generate');
+const {
+  MODULE_IDS, hashSeed, hslToHex, derivePalette,
+} = require('../server/generate');
+
+// The deterministic per-brand primary a NAMED, colour-less brand should render
+// in — the exact hue renderDoc.brandFallbackColor derives, so the assertions
+// below are pinned to the real formula, not a hand-copied constant.
+function expectedBrandPrimary(name) {
+  return derivePalette(hslToHex({ h: hashSeed(name) % 360, s: 0.6, l: 0.47 })).primary;
+}
 
 // Every interactive module id — the interactive block `type`s. Sourced from
 // generate()'s registry (the source of truth) so a newly added module (e.g.
@@ -179,6 +188,55 @@ test('a real product with an unsafe image url renders the name but never the url
   }).doc).ampHtml;
   assert.ok(amp.includes('Sneaker'), 'the valid product name still renders');
   assert.ok(!amp.includes('javascript:alert(1)'), 'the unsafe image url never reaches the render');
+});
+
+// ---- brand-specific colour: a NAMED brand with no colour gets its OWN hue -----
+// Part B ("Take 2"): a brand whose research could only GUESS a colour (so none
+// was stored) rendered in a generic indigo. renderDoc now derives a
+// deterministic per-brand hue from the name — the SAME hue its interactive
+// module derives — so the mailer looks on-brand. Only a truly nameless doc keeps
+// the indigo default.
+test('a named brand with no colour renders a deterministic per-brand hue, not indigo', () => {
+  const name = 'Zephyr Athletics';
+  const amp = renderDoc(validateDoc({
+    version: 1,
+    brand: { name },
+    blocks: [{ id: 'btn', type: 'button', props: { label: 'Shop', href: 'https://example.com' } }],
+  }).doc).ampHtml;
+  const hue = expectedBrandPrimary(name);
+  assert.notStrictEqual(hue, '#4f46e5', 'sanity: the derived per-brand hue is not the indigo default');
+  assert.ok(amp.includes(hue), `the per-brand hue ${hue} paints the static blocks`);
+  assert.ok(!amp.includes('#4f46e5'), 'no generic indigo once a brand name exists');
+});
+
+test('static blocks and the interactive module share ONE per-brand hue (no colour on the doc)', () => {
+  const name = 'Zephyr Athletics';
+  const hue = expectedBrandPrimary(name);
+  const amp = renderDoc(validateDoc({
+    version: 1,
+    brand: { name },
+    blocks: [{ id: 'r', type: 'reveal', props: {} }],
+  }).doc).ampHtml;
+  // renderInteractive feeds renderDoc's primaryHex into the module as its colour,
+  // so the module's palette resolves to the very same brand hue as the statics.
+  assert.ok(amp.includes(hue), 'the interactive module paints the same per-brand hue');
+  assert.ok(!amp.includes('#4f46e5'), 'the module is not the indigo default either');
+});
+
+test('an unbranded doc (no brand name) still renders the indigo default', () => {
+  const amp = renderDoc(validateDoc({
+    version: 1,
+    blocks: [{ id: 'btn', type: 'button', props: { label: 'Go', href: 'https://example.com' } }],
+  }).doc).ampHtml;
+  assert.ok(amp.includes('#4f46e5'), 'a nameless doc keeps the indigo default (unchanged)');
+});
+
+test('two different brand names get two different deterministic hues', () => {
+  assert.notStrictEqual(
+    expectedBrandPrimary('Aloe Cosmetics'),
+    expectedBrandPrimary('Vertex Tools'),
+    'different brands resolve to different hues',
+  );
 });
 
 // ---- custom-AMP sanitizer: the same-origin-iframe safety gate ----------------

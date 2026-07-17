@@ -1437,4 +1437,8 @@ module.exports = {
   generate, derivePalette, MODULES, MODULE_IDS, pickModuleId,
   enc, formatPrice, CURRENCIES, VERTICALS,
   buildModuleFragment, MODULE_FIELDS, shell,
+  // The deterministic per-brand colour primitives, so email-doc can compute the
+  // SAME brand-hued fallback a module does (buildModuleFragment) instead of a
+  // generic indigo — one source of truth, no drift.
+  hashSeed, hslToHex,
 };
