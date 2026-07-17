@@ -92,6 +92,38 @@ test('BLOCK_TYPES registers every static type plus every interactive module; eac
   }
 });
 
+// ---- interactive modules inherit the doc brand's real logo + hero ------------
+// Regression: renderInteractive used to hand the module only { brand, color,
+// currency, copy: block.props } — dropping ctx.logoUrl/heroUrl — so a module's
+// OWN header always painted the palette placeholder even when the brand had a
+// real logo ("pulled but not displayed"). Exercised through the trust boundary
+// (validateDoc → renderDoc), exactly the path /api/docs/render runs.
+test('an interactive block inherits the doc brand real logo + hero band (through validateDoc)', () => {
+  const LOGO = 'https://cdn.acme.com/real-logo.png';
+  const HERO = 'https://cdn.acme.com/real-hero.jpg';
+  for (const type of INTERACTIVE_IDS) {
+    const v = validateDoc({
+      version: 1,
+      brand: { name: 'Acme', primaryHex: '#4f46e5', logoUrl: LOGO, heroUrl: HERO },
+      blocks: [{ id: 'b', type, props: {} }],
+    });
+    assert.ok(v.ok, `${type}: asset-bearing doc validates`);
+    const amp = renderDoc(v.doc).ampHtml;
+    assert.ok(amp.includes(`src="${LOGO}"`), `${type}: the real logo reaches the interactive module header`);
+    assert.ok(amp.includes('class="hero"') && amp.includes(`src="${HERO}"`), `${type}: the real hero band renders on the interactive module`);
+    assert.ok(!amp.includes('placehold.co/96x32'), `${type}: no placeholder wordmark once a real logo exists`);
+  }
+});
+
+test('an interactive block with no brand assets keeps the placeholder logo and no hero (unchanged)', () => {
+  for (const type of INTERACTIVE_IDS) {
+    const v = validateDoc({ version: 1, brand: { name: 'Acme', primaryHex: '#4f46e5' }, blocks: [{ id: 'b', type, props: {} }] });
+    const amp = renderDoc(v.doc).ampHtml;
+    assert.ok(!amp.includes('class="hero"'), `${type}: no hero band without a brand hero`);
+    assert.ok(amp.includes('placehold.co/96x32'), `${type}: placeholder wordmark without a real logo`);
+  }
+});
+
 // ---- custom-AMP sanitizer: the same-origin-iframe safety gate ----------------
 test('sanitizeCustomHtml neutralizes every script/handler/url evasion', () => {
   const cases = [

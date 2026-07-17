@@ -983,6 +983,12 @@
       name: S.brand.name,
       primaryHex: S.brand.primary_hex || undefined,
       logoUrl: S.brand.logo_url || undefined,
+      // Carry the brand's real hero photo and site so an interactive module
+      // paints the hero band (not a placeholder) and links its logo to the real
+      // domain. Dropped before, which is why blank-canvas modules rendered
+      // logo/hero-less. Absent fields stay undefined → byte-identical render.
+      heroUrl: S.brand.hero_url || undefined,
+      site: S.brand.site || undefined,
     } : {};
     enterEditor({ version: 1, brand, blocks: [] }, null,
       (S.pitch && S.pitch.title) ? (S.pitch.title + ' email') : 'New email');

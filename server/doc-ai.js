@@ -386,6 +386,7 @@ function assembleDoc({ brand, currency, blocks }) {
   const docBrand = { name: brand.name };
   if (brand.primaryHex) docBrand.primaryHex = brand.primaryHex;
   if (brand.logoUrl) docBrand.logoUrl = brand.logoUrl;
+  if (brand.heroUrl) docBrand.heroUrl = brand.heroUrl;
   if (brand.site) docBrand.site = brand.site;
   const raw = { brand: docBrand, blocks: Array.isArray(blocks) ? blocks : [] };
   if (currency) raw.currency = currency;
@@ -413,6 +414,7 @@ function interactiveBase({
       name: brand.name,
       primaryHex: brand.primaryHex,
       logoUrl: brand.logoUrl,
+      heroUrl: brand.heroUrl,
     },
     moduleId,
     copy: head ? { head } : {},

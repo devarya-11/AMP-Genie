@@ -278,6 +278,11 @@ function sanitizeBrand(brand) {
   if (hex) out.primaryHex = hex;
   const logo = validImgUrl(brand.logoUrl);
   if (logo) out.logoUrl = logo;
+  // The brand's real hero photo travels on the doc brand too, so an interactive
+  // module (and any future doc-level consumer) can paint it — dropped here before
+  // and thus invisible to the render context.
+  const hero = validImgUrl(brand.heroUrl);
+  if (hero) out.heroUrl = hero;
   const site = safeHttpUrl(brand.site);
   if (site) out.site = site;
   return Object.keys(out).length ? out : undefined;
@@ -658,11 +663,22 @@ function renderFooter(props, ctx, warnings, id) {
 // which renderDoc skips with a warning.
 function renderInteractive(block, ctx, warnings) {
   const p = ctx.palette;
+  // The brand's real logo / hero / site live on the DOC (→ ctx), not in the
+  // interactive block's copy fields (those are head/teaser/cta/items/…). Forward
+  // them so the module's own header renders the REAL logo + hero band instead of
+  // the palette placeholder — exactly what the static header block already does
+  // (renderHeader: `props.logoUrl || ctx.logoUrl`). Only defined assets are
+  // added, and block.props still wins, so a brand with no logo/hero renders
+  // byte-identically to before this forwarding existed.
+  const inherited = {};
+  if (ctx.logoUrl) inherited.logoUrl = ctx.logoUrl;
+  if (ctx.heroUrl) inherited.heroUrl = ctx.heroUrl;
+  if (ctx.site) inherited.site = ctx.site;
   const fragment = buildModuleFragment(block.type, {
     brand: ctx.brandName || undefined,
     color: ctx.primaryHex || undefined,
     currency: ctx.currency,
-    copy: block.props || {},
+    copy: { ...inherited, ...(block.props || {}) },
   });
   if (!fragment) {
     warnings.push(`interactive: unknown module id "${block.type}" — skipped`);
@@ -789,6 +805,7 @@ function renderDoc(doc, opts = {}) {
     currency: d.currency || 'INR',
     brandName,
     logoUrl: (d.brand && d.brand.logoUrl) || undefined,
+    heroUrl: (d.brand && d.brand.heroUrl) || undefined,
     site: (d.brand && d.brand.site) || undefined,
   };
 
@@ -891,15 +908,17 @@ function exampleDocForBrand(brand = {}) {
   const name = cleanStr(brand.name, 80) || 'Acme';
   const primaryHex = coerceHex(brand.primaryHex) || DEFAULT_PRIMARY;
   const logoUrl = validImgUrl(brand.logoUrl) || undefined;
+  const heroUrl = validImgUrl(brand.heroUrl) || undefined;
   const docBrand = { name, primaryHex };
   if (logoUrl) docBrand.logoUrl = logoUrl;
+  if (heroUrl) docBrand.heroUrl = heroUrl;
   return {
     version: DOC_VERSION,
     brand: docBrand,
     currency: 'INR',
     blocks: [
       { id: 'b_header', type: 'header', props: { brandName: name, logoUrl } },
-      { id: 'b_hero', type: 'hero', props: { alt: `${name} hero`, height: 240 } },
+      { id: 'b_hero', type: 'hero', props: { imageUrl: heroUrl, alt: `${name} hero`, height: 240 } },
       {
         id: 'b_text', type: 'text',
         props: {
@@ -927,8 +946,10 @@ function interactiveDocForModule({ brand = {}, moduleId, copy = {}, currency } =
   const name = cleanStr(brand.name, 80) || 'Acme';
   const primaryHex = coerceHex(brand.primaryHex) || DEFAULT_PRIMARY;
   const logoUrl = validImgUrl(brand.logoUrl) || undefined;
+  const heroUrl = validImgUrl(brand.heroUrl) || undefined;
   const docBrand = { name, primaryHex };
   if (logoUrl) docBrand.logoUrl = logoUrl;
+  if (heroUrl) docBrand.heroUrl = heroUrl;
   const cur = coerceCurrency(currency);
   const doc = {
     version: DOC_VERSION,
