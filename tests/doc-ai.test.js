@@ -144,6 +144,41 @@ test('the generated doc carries the catalogue onto the doc brand AND the module 
   assert.ok(count >= 1, `the real product renders inside the module (found ${count}x, expected >= 1)`);
 });
 
+// Regression ("Take 2" copy quality): a brief is usually an instruction to the
+// tool ("introduce … to subscribers", "help subscribers …"). The keyless floor
+// must not echo that instruction voice into the subscriber-facing h1 — it
+// de-imperativises to a reader-facing headline, while a brief already written as
+// a headline passes through untouched. Brand-agnostic: the transform keys off
+// generic instruction/audience words, never a brand or vertical literal.
+test('the fallback headline de-imperativises the brief (no instruction voice in the h1)', (t) => {
+  if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
+  const h1Of = (brief) => {
+    const doc = buildFallbackDoc({ brand: BRAND, brief, moduleId: 'reveal' });
+    const amp = renderDoc(doc).ampHtml;
+    const m = amp.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    return (m ? m[1].replace(/<[^>]+>/g, '') : '').trim();
+  };
+
+  const a = h1Of('introduce our brand new autumn collection to subscribers');
+  assert.strictEqual(a, 'Brand new autumn collection',
+    'a leading instruction verb and a trailing audience phrase are both stripped');
+
+  const b = h1Of('help subscribers discover which of our picks suits them best');
+  assert.strictEqual(b, 'Discover which of our picks suits them best',
+    'the "help <audience> …" instruction frame is removed, keeping the reader-facing clause');
+
+  // A brief already phrased as a headline is left alone (only first-letter cased).
+  const c = h1Of('New spring styles just landed');
+  assert.strictEqual(c, 'New spring styles just landed',
+    'a headline-shaped brief passes through untouched');
+
+  for (const h of [a, b, c]) {
+    assert.ok(!/^\s*(introduce|announce|help|tell|remind|promote|showcase)\b/i.test(h),
+      `no leading instruction verb survives: "${h}"`);
+    assert.ok(!/\bto subscribers\b/i.test(h), `no trailing audience phrase survives: "${h}"`);
+  }
+});
+
 test('buildFallbackDoc never throws on junk input and still returns a valid interactive doc', (t) => {
   if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
   for (const junk of [undefined, null, {}, { brand: 42 }, { brand: { name: '<script>' } }]) {

@@ -545,19 +545,63 @@ function coerceCurrencyLike(c) {
 }
 
 // A headline seeded from the brief/use-case so the fallback is never generic
-// "Welcome to X" when the brief actually said something. The brief's first
-// meaningful clause becomes the headline; absent a brief, a use-case or the
-// brand-name welcome is the floor.
+// "Welcome to X". Briefs are usually phrased as an instruction to the tool
+// ("introduce our new line to subscribers", "help subscribers pick a plan") —
+// echoing that verbatim leaks the instruction voice into the subscriber-facing
+// h1. So we de-imperativise: drop a leading tool-directed verb (plus the
+// audience noun it targets and small filler) and a trailing "…to/for our
+// subscribers" phrase, leaving the reader-facing remainder. Conservative — only
+// a tight set of almost-always instructional verbs is stripped, so a brief
+// already written as a headline passes through untouched. Absent a usable brief,
+// a use-case or the brand welcome is the floor. Brand-agnostic: no literal
+// depends on any particular brand or vertical.
+const HEADLINE_LEAD_VERBS = new Set([
+  'introduce', 'announce', 'promote', 'showcase', 'tell', 'remind', 'invite',
+  'encourage', 'highlight', 'feature', 'advertise', 'market', 'describe',
+  'explain', 'help', 'notify', 'inform', 'convince', 'persuade', 'reengage',
+  'nudge', 'publicise', 'publicize', 'communicate', 'mention', 'outline',
+  'summarise', 'summarize', 'recap', 'educate', 'remarket',
+]);
+const HEADLINE_AUDIENCE = new Set([
+  'subscribers', 'subscriber', 'customers', 'customer', 'readers', 'reader',
+  'users', 'user', 'members', 'member', 'shoppers', 'shopper', 'people',
+  'everyone', 'audience', 'list', 'them', 'clients', 'client', 'fans',
+  'followers', 'recipients', 'recipient', 'contacts', 'contact', 'buyers',
+  'buyer', 'guests', 'guest', 'visitors', 'visitor', 'prospects', 'leads',
+]);
+const HEADLINE_FILLER = new Set([
+  'about', 'that', 'how', 'why', 'on', 'our', 'the', 'a', 'an', 'to', 'of',
+  'with', 'for', 'into', 'regarding', 'around', 'my', 'your', 'this', 'these',
+]);
+const HEADLINE_TRAIL_AUDIENCE = /\s+(?:to|for|with|among|across)\s+(?:all\s+|our\s+|the\s+|my\s+|your\s+|new\s+|existing\s+|current\s+|potential\s+|loyal\s+|lapsed\s+)*(?:subscribers|customers|readers|users|members|shoppers|people|everyone|audience|list|clients|fans|followers|recipients|contacts|buyers|guests|visitors|prospects|leads|community|inboxes|inbox|mailing list)\b.*$/i;
+
+function headlineBare(w) { return String(w || '').toLowerCase().replace(/[^a-z]/g, ''); }
+function headlineCap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
 function headlineFrom({ brief, useCase, brandName }) {
   const uc = cleanStr(useCase, CAPS.heading);
   const briefText = cleanStr(brief, 400);
   if (briefText) {
-    // First sentence/clause, title-trimmed to the heading cap.
-    const first = briefText.split(/[.!?\n]/)[0].trim();
-    const h = first || briefText;
-    if (h) return h.slice(0, CAPS.heading);
+    // First sentence/clause, up to the heading cap.
+    let h = (briefText.split(/[.!?\n]/)[0] || '').trim() || briefText;
+    // Drop a trailing "…to/for our subscribers" audience phrase.
+    h = h.replace(HEADLINE_TRAIL_AUDIENCE, '').trim();
+    // Drop a leading tool-directed verb, the audience noun it targets, and any
+    // small filler, so the reader-facing remainder becomes the headline.
+    const words = h.split(/\s+/).filter(Boolean);
+    if (words.length > 1 && HEADLINE_LEAD_VERBS.has(headlineBare(words[0]))) {
+      words.shift();
+      if (words.length && HEADLINE_AUDIENCE.has(headlineBare(words[0]))) words.shift();
+      while (words.length && HEADLINE_FILLER.has(headlineBare(words[0]))) words.shift();
+      h = words.join(' ').trim();
+    }
+    // Use it unless stripping left nothing or just a lone leftover verb.
+    const finalWords = h.split(/\s+/).filter(Boolean);
+    if (finalWords.length && !(finalWords.length === 1 && HEADLINE_LEAD_VERBS.has(headlineBare(finalWords[0])))) {
+      return headlineCap(h).slice(0, CAPS.heading);
+    }
   }
-  if (uc) return uc;
+  if (uc) return headlineCap(uc);
   return `Welcome to ${brandName}`;
 }
 
