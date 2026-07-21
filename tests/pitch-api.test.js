@@ -490,7 +490,7 @@ test('createExample: the curated library wins the hero + tiles over the kit hero
     'tile #3, with no curated photo, keeps its stored image — the ladder falls through');
 });
 
-test('aiDoc: the curated product library reaches the drafted doc\'s products grid', async () => {
+test('aiDoc: the curated product library reaches the drafted doc (the module catalogue)', async () => {
   const { api } = await freshApi();
   const brandId = (await api.createBrandH({ name: 'Zentara' })).json.brand.id;
   await api.updateBrandKitH({
@@ -507,12 +507,14 @@ test('aiDoc: the curated product library reaches the drafted doc\'s products gri
   const pitch = (await api.createPitchH({ brandId, title: 'Launch', brief: 'meet the arms' })).json.pitch;
   const res = await api.aiDocH({ pitchId: pitch.id, useCase: 'Launch', author: 'dev' });
   assert.strictEqual(res.status, 200);
-  const grid = (res.json.doc.blocks || []).find((bl) => bl.type === 'products');
-  assert.ok(grid, 'the drafted doc carries a products grid for the brand catalogue');
-  const imgs = grid.props.items.map((it) => it.imageUrl);
-  assert.strictEqual(imgs[0], 'https://cdn.zentara.example/curated-arm.jpg',
+  // The module is the whole email: the catalogue rides doc.brand.items (the
+  // render-time channel into the module's OWN product grid), not a separate
+  // static products block below the footer. The curated-photo ladder still wins.
+  const items = res.json.doc.brand.items;
+  assert.ok(Array.isArray(items) && items.length === 2, 'the catalogue reaches the drafted doc brand');
+  assert.strictEqual(items[0].imageUrl, 'https://cdn.zentara.example/curated-arm.jpg',
     'the curated product photo wins tile #1 in the AI-drafted doc');
-  assert.strictEqual(imgs[1], 'https://cdn.zentara.example/stock-grip.png',
+  assert.strictEqual(items[1].imageUrl, 'https://cdn.zentara.example/stock-grip.png',
     'tile #2, with no curated photo, keeps its stored image');
 });
 

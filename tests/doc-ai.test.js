@@ -112,23 +112,28 @@ test('buildFallbackDoc without a brief still yields a valid interactive doc (a s
   await assertOneInteractiveValid(doc, 'no-brief fallback');
 });
 
-test('buildFallbackDoc frames the module with the brand catalogue when items exist', (t) => {
+test('buildFallbackDoc lets the module stand alone: no sibling grid/intro, catalogue rides the doc brand', (t) => {
   if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
   const doc = buildFallbackDoc({ brand: BRAND, brief: 'weekend offer', moduleId: 'reveal' });
-  const products = doc.blocks.find((b) => b.type === 'products');
-  assert.ok(products, 'a brand carrying items frames the module with a products grid');
-  assert.strictEqual(products.props.items.length, 2, 'the brand items land in the grid');
-  assert.strictEqual(products.props.items[0].name, 'Index Fund Starter');
-  // and the interactive block is still the only interactive block
+  // The module is the WHOLE email: interactiveBase renders its own header,
+  // teaser, interactive content + CTA, real product cards and footer in order.
+  // A separate text intro used to sit ABOVE the header and a products grid
+  // BELOW the module's footer — the "footer missing / nothing formatted" bug.
+  assert.ok(!doc.blocks.some((b) => b.type === 'products'), 'no separate products grid dangles below the module footer');
+  assert.ok(!doc.blocks.some((b) => b.type === 'text'), 'no separate text intro sits above the module header');
+  assert.strictEqual(doc.blocks.length, 1, 'the interactive module is the only block');
   assert.strictEqual(interactiveBlocks(doc).length, 1, 'still exactly one interactive block');
+  // the catalogue still reaches the MODULE via the render-time channel (doc brand)
+  assert.ok(Array.isArray(doc.brand.items) && doc.brand.items.length === 2, 'the catalogue rides on the doc brand');
+  assert.strictEqual(doc.brand.items[0].name, 'Index Fund Starter', 'the real product name rides through');
 });
 
 // Regression ("Take 2"): the catalogue must reach the interactive MODULE's own
-// product grid, not only the static products block below it. assembleDoc now
-// carries brand.items onto the doc brand, and email-doc's renderInteractive
-// forwards it into the module's copy.items — so a real product renders BOTH in
-// the static grid AND inside the module (>= 2 occurrences). Before the fix the
-// module showed the vertical's synthetics and the name appeared only once.
+// product grid. assembleDoc carries brand.items onto the doc brand, and
+// email-doc's renderInteractive forwards it into the module's copy.items — so
+// the real product renders INSIDE the module. The module is the whole email now
+// (no separate static grid below the footer), so the name appears in the module
+// itself. Before the fix the module showed the vertical's synthetics.
 test('the generated doc carries the catalogue onto the doc brand AND the module paints it', (t) => {
   if (!HAS_INTERACTIVE) return t.skip('no interactive exports');
   const doc = buildFallbackDoc({ brand: BRAND, brief: 'weekend offer', moduleId: 'reveal', currency: 'INR' });
@@ -136,7 +141,7 @@ test('the generated doc carries the catalogue onto the doc brand AND the module 
   assert.strictEqual(doc.brand.items[0].name, 'Index Fund Starter', 'the real product name survives the trust boundary');
   const amp = renderDoc(doc).ampHtml;
   const count = amp.split('Index Fund Starter').length - 1;
-  assert.ok(count >= 2, `the real product renders in the module too, not only the static grid (found ${count}x, expected >= 2)`);
+  assert.ok(count >= 1, `the real product renders inside the module (found ${count}x, expected >= 1)`);
 });
 
 test('buildFallbackDoc never throws on junk input and still returns a valid interactive doc', (t) => {

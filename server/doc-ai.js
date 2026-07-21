@@ -517,17 +517,15 @@ function buildFallbackDoc(input) {
   // return it (an empty valid doc) rather than fabricating an unrenderable one.
   if (!interactiveBlock) return base;
 
-  const body = bodyFrom({ brief, brandName: b.name, hasItems: b.items.length > 0 });
-  const framing = [];
-  // A short text intro above the module when the brief gave us real body copy.
-  if (body) framing.push({ type: 'text', props: { heading: '', body } });
-  // The brand's real catalogue, when it has one, rides a products grid below.
-  const after = [];
-  if (b.items.length) {
-    after.push({ type: 'products', props: { columns: b.items.length === 1 ? 1 : 2, items: b.items } });
-  }
-
-  const blocks = [...framing, interactiveBlock, ...after];
+  // The interactive module is the WHOLE email: interactiveBase already renders
+  // its own brand header, teaser/intro, interactive content + CTA, the brand's
+  // real product cards (forwarded via ctx.items at render time) and the footer,
+  // in that order -- already the Figma structure (Header -> intro -> interactive
+  // + CTA -> products -> Footer). Wrapping it in a separate text intro put copy
+  // ABOVE the header, and the brand's items in a products grid rendered a second
+  // grid BELOW the module's own footer (the "footer looks missing / nothing is
+  // formatted properly" report). So the module now stands alone.
+  const blocks = [interactiveBlock];
   const v = validateDoc(assembleDoc({ brand: b, currency: cur, blocks }));
   // validateDoc only fails on a fundamentally unusable envelope, which the
   // assembled shape above never is — but honour the never-throw contract, and
@@ -561,15 +559,6 @@ function headlineFrom({ brief, useCase, brandName }) {
   }
   if (uc) return uc;
   return `Welcome to ${brandName}`;
-}
-
-function bodyFrom({ brief, brandName, hasItems }) {
-  const briefText = cleanStr(brief, CAPS.body);
-  if (briefText && briefText.length > 40) return briefText;
-  if (hasItems) {
-    return `Discover what is new at ${brandName}. Handpicked for you, ready when you are — tap through to explore the full range.`;
-  }
-  return `Thanks for being part of ${brandName}. We have something new to share — take a look and let us know what you think.`;
 }
 
 /* ------------------------------------------------------------------ *
