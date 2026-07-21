@@ -94,7 +94,7 @@ test('createBrand: a library brand freezes its real colour; junk names 400; re-a
     'a name with no letter or digit cannot slug');
 });
 
-test('createBrand: an LLM catalog lands real priced, pictured products and a keyword hero', async () => {
+test('createBrand: an LLM catalog lands real priced products (no random photo) and a keyword hero', async () => {
   // A brand whose homepage is unreachable offline, so no scraped og:image and
   // no scraped products — exactly the "comorin" case. The injected provider
   // supplies the priced catalog + heroPrompt the real Groq/Gemini call would.
@@ -134,8 +134,11 @@ test('createBrand: an LLM catalog lands real priced, pictured products and a key
   assert.strictEqual(byName['Butter Chicken'].price, 420);
   assert.strictEqual(byName['Garlic Naan'].price, 80);
   assert.strictEqual(byName['House Cocktail'].price, null, 'a price-less item lands unpriced, never dropped');
+  // Offline there is no real product photo, so tiles persist WITHOUT an image
+  // and fall to a clean branded placeholder at render — never a random keyword
+  // shot of the wrong subject.
   for (const p of products) {
-    assert.match(p.image_url, /^https:\/\/loremflickr\.com\/300\/200\/[a-z,]+\?lock=\d+$/, 'each tile gets a keyword photo');
+    assert.strictEqual(p.image_url, null, 'no real photo -> no image, tile falls to a clean placeholder');
   }
 
   // Re-adding the brand replaces the list wholesale — no duplication.

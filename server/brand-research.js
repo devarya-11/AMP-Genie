@@ -614,12 +614,15 @@ async function buildDossier(args = {}, opts = {}) {
       }
     }
 
-    // Resolve the keyless Openverse relevance floor onto the merged dossier
-    // (hero + each catalog item) before it is cached, so it is paid once per
-    // brand and served from KV thereafter. Same fetchImpl seam as the scrape;
-    // offline/rate-limited leaves the fields unset (the loremflickr floor
-    // downstream takes over). Never throws.
-    await resolveDossierImagery(merged, fetchImpl || fetch);
+    // NOTE: we intentionally do NOT paint the keyless Openverse relevance floor
+    // onto the dossier here. A CC photo keyed off a product name / heroPrompt
+    // came back as an unrelated (often repeated, sometimes logo-like) image —
+    // the "random images that aren't the product / a random logo" the team
+    // reported. The hero now resolves to the site's own og:image (or a
+    // deterministic vertical floor) and product tiles to a real curated photo or
+    // a clean branded placeholder — see heroFromDossier / productsFromDossier in
+    // pitch-api.js. resolveDossierImagery stays exported for callers that opt in
+    // explicitly, but the default research path leaves imagery to those floors.
 
     const dossier = {
       ...merged,

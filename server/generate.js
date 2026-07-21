@@ -450,7 +450,7 @@ function buildSearch(ctx) {
 ${ampState('s', { q: '', cat: 'all' })}
 ${headerBlock({ brand, palette: p, head, copy })}
 <div class="pad search">
-  <input type="text" placeholder="Search products" on="input-throttle:AMP.setState({s:{q:event.value.toLowerCase()}})">
+  <input type="text" placeholder="Search products" on="input-throttled:AMP.setState({s:{q:event.value.toLowerCase()}});change:AMP.setState({s:{q:event.value.toLowerCase()}})">
   <div class="pills">${pills}</div>
   <div class="grid row">${cards}</div>
 </div>

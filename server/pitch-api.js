@@ -97,13 +97,12 @@ function nowIso() {
 // vertical's generic placeholders ("Pro Plan", "Annual Saver"). The LLM's
 // priced `catalog` wins; a keyless/offline heuristic dossier falls back to its
 // name-only `products` (still the brand's real headings, just unpriced). Each
-// item gets a keyword-relevant stock photo derived from its own name + the
-// brand vertical, so tiles show real photography, not a coloured placeholder.
-// repo.replaceProducts' cleanProductRow re-validates every row, so a junk
-// price/image drops that field, never the row.
+// item keeps a real product image only when the catalog row already carries one
+// (curated/scraped); otherwise the tile falls to a clean branded placeholder,
+// never a random keyword photo. repo.replaceProducts' cleanProductRow
+// re-validates every row, so a junk price/image drops that field, never the row.
 function productsFromDossier(dossier) {
   const d = dossier || {};
-  const vertical = (typeof d.vertical === 'string' && d.vertical !== 'Generic') ? d.vertical : '';
   const source = (Array.isArray(d.catalog) && d.catalog.length)
     ? d.catalog
     : (Array.isArray(d.products) ? d.products.map((name) => ({ name })) : []);
@@ -114,38 +113,39 @@ function productsFromDossier(dossier) {
     const row = { name };
     const price = Math.round(Number(it && it.price));
     if (Number.isFinite(price) && price > 0) row.price = price;
-    // A pre-resolved Openverse photo (real, relevance-ranked, no-attribution
-    // CC0) wins — that is the keyless relevance floor buildDossier painted onto
-    // this item. Failing that, key a loremflickr tile off the product NAME
-    // alone: loremflickr matches tags with AND semantics, so appending the
-    // vertical ("Butter Chicken" + "Food" -> three required tags) usually
-    // matches nothing and returns a grey default. The name alone keeps per-tile
-    // variety and hits far more real photos; a name that still matches nothing
-    // falls to the vertical noun floor. (repo.replaceProducts re-validates.)
+    // Keep a REAL product image only if the catalog item already carries one.
+    // Nothing paints keyword stock here any more: a loremflickr/Openverse photo
+    // keyed off a product name returned an unrelated (and often repeated)
+    // picture — the "random images that aren't the product" the team reported.
+    // With no real image we leave `image` unset so the AMP/preview render falls
+    // to its own clean ph() placeholder; a curated brand_images 'product' row
+    // still overrides the tile by position downstream. Honest branded
+    // placeholder over a wrong photo, identically for every brand, vertical and
+    // use case. (repo.replaceProducts re-validates.)
     const preResolved = (it && typeof it.image === 'string' && it.image) ? it.image : null;
-    const image = preResolved || stockImageUrl(name, 300, 200) || verticalStockImageUrl(vertical, 300, 200);
-    if (image) row.image = image;
+    if (preResolved) row.image = preResolved;
     rows.push(row);
   }
   return rows;
 }
 
 // The hero image the email header paints, best source first:
-//   1. a REAL scraped og:image (the brand's OWN homepage hero) — brand truth;
-//   2. dossier.heroImage — a real, relevance-ranked, no-attribution Openverse
-//      photo resolved at research time (the keyless relevance floor), so a
-//      brand whose homepage carried no og:image still opens on a genuinely
-//      on-topic hero, not a random one;
-//   3. the LLM's heroPrompt — or, failing that, the brand vertical — as a
-//      loremflickr keyword photograph;
-// so the header is never a bare placeholder. Returns undefined (not null) so it
-// slots straight into the upsertBrand args the way the other optional fields do.
+//   1. a REAL scraped og:image (the brand's OWN homepage hero) — the website's
+//      own main image, which is the hero we want for every brand;
+//   2. the LLM's heroPrompt — or, failing that, the brand vertical — as a
+//      loremflickr keyword photograph, so a brand whose homepage carried no
+//      og:image still opens on a relevant stock hero rather than a bare box.
+// A curated brand_images hero (uploaded by the team) still overrides this from
+// curatedImagePicks upstream. We deliberately do NOT fall back to a random
+// Openverse/CC photo: a keyword-matched picture of an unrelated subject is the
+// "random logo" the team saw, so the hero is the site's own image or a
+// deterministic vertical floor, never a lookalike. Structural and brand-
+// agnostic — identical for every brand, vertical and use case. Returns undefined
+// (not null) so it slots straight into the upsertBrand args the way the other
+// optional fields do.
 function heroFromDossier(dossier, liveHeroUrl) {
   if (typeof liveHeroUrl === 'string' && liveHeroUrl) return liveHeroUrl;
   const d = dossier || {};
-  // A real Openverse photo (CC0/PDM, no attribution) beats any loremflickr
-  // keyword match, so it wins over the heroPrompt/vertical stock URLs below.
-  if (typeof d.heroImage === 'string' && d.heroImage) return d.heroImage;
   // With a descriptive heroPrompt (from the LLM) key the photo off that; with
   // no prompt key off the VERTICAL noun, NEVER the brand name. "Beauty Nykaa"
   // matches no Flickr photo, so loremflickr serves a grey default — the exact

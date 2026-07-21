@@ -482,9 +482,9 @@ test('buildDossier threads the LLM catalog and heroPrompt through to the merged 
   assert.ok(d.categories.includes('Skincare'), 'heuristic still fills the fields the LLM left');
 });
 
-// ---- buildDossier: the Openverse relevance floor ----------------------------
+// ---- buildDossier: imagery is left to the downstream floors -----------------
 
-test('buildDossier paints a real Openverse hero + per-item catalog images onto the dossier', async () => {
+test('buildDossier no longer paints Openverse imagery onto the dossier (hero/tiles resolve downstream)', async () => {
   const kv = fakeKv();
   const REAL = 'https://live.staticflickr.com/65535/real-serum.jpg';
   const f = imageryFetch(FIXTURE_HTML, REAL);
@@ -493,42 +493,45 @@ test('buildDossier paints a real Openverse hero + per-item catalog images onto t
     heroPrompt: 'clean beauty serums on marble',
   })];
   const d = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers });
-  assert.strictEqual(d.heroImage, REAL, 'hero resolves to the real Openverse photo');
-  assert.deepStrictEqual(d.catalog.map((c) => c.image), [REAL, REAL], 'each catalog item gets a real photo');
-  // Brand-agnostic by construction: Openverse is asked about the model's OWN
-  // scene prose and each item's OWN name — never the brand name. A query that
-  // carried "Glowly" is exactly the brand-poisoning that greys these out.
-  const decoded = f.openverseQueries.map((u) => decodeURIComponent(u));
-  assert.ok(decoded.some((u) => /clean beauty serums/.test(u)), 'the hero lookup keys off the heroPrompt');
-  assert.ok(decoded.some((u) => /Radiance Serum/.test(u)), 'a tile lookup keys off the item name');
-  assert.ok(!decoded.some((u) => /glowly/i.test(u)), 'no Openverse query carries the brand name');
+  // Even with an Openverse that WOULD serve a real photo, the default research
+  // path paints nothing: a CC photo keyed off a heroPrompt / product name came
+  // back as the wrong (often repeated, logo-like) subject — the "random images"
+  // the team reported. The hero now resolves to the site's own og:image (or a
+  // deterministic vertical floor) and each tile to a curated photo or a clean
+  // placeholder (see pitch-api heroFromDossier / productsFromDossier), so the
+  // dossier carries NO imagery of its own and never calls Openverse.
+  assert.strictEqual(d.heroImage, undefined, 'buildDossier leaves heroImage unset');
+  assert.deepStrictEqual(d.catalog.map((c) => c.image), [undefined, undefined], 'and leaves each catalog image unset');
+  assert.strictEqual(f.openverseQueries.length, 0, 'the default research path makes no Openverse image call at all');
+  // Imagery removal is orthogonal to the research itself — the rest still built.
+  assert.deepStrictEqual(d.catalog.map((c) => c.name), ['Radiance Serum', 'Velvet Lipstick']);
+  assert.strictEqual(d.heroPrompt, 'clean beauty serums on marble');
+  assert.strictEqual(d.confidence, 'llm');
 });
 
-test('buildDossier (keyless heuristic) still resolves a hero, keyed off the vertical noun not the brand', async () => {
+test('buildDossier (keyless heuristic) still classifies the vertical and carries no imagery', async () => {
   const kv = fakeKv();
   const REAL = 'https://live.staticflickr.com/65535/real-cosmetics.jpg';
   const f = imageryFetch(FIXTURE_HTML, REAL);
-  // No provider -> heuristic dossier (no heroPrompt). Glowly's beauty-wordy
-  // homepage classifies Beauty, so the hero query is the vertical noun.
+  // No provider -> heuristic dossier. Glowly's beauty-wordy homepage still
+  // classifies Beauty; classification is unaffected by the imagery change.
   const d = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: f.impl }, { providers: [] });
   assert.strictEqual(d.confidence, 'heuristic');
   assert.strictEqual(d.vertical, 'Beauty');
-  assert.strictEqual(d.heroImage, REAL, 'even keyless, the hero gets a real Openverse photo');
-  const decoded = f.openverseQueries.map((u) => decodeURIComponent(u)).join(' ');
-  assert.ok(/cosmetics/.test(decoded), 'the hero lookup keys off the vertical noun (cosmetics for Beauty)');
-  assert.ok(!/glowly/i.test(decoded), 'never the brand name');
+  assert.strictEqual(d.heroImage, undefined, 'the keyless path paints no hero either');
+  assert.strictEqual(f.openverseQueries.length, 0, 'never calls Openverse');
 });
 
-test('buildDossier offline resolves no imagery (fields unset -> the loremflickr floor takes over downstream)', async () => {
+test('buildDossier offline still builds the full dossier, imagery left unset', async () => {
   const kv = fakeKv();
   const providers = [async () => ({
     catalog: [{ name: 'Radiance Serum', price: 1299 }],
     heroPrompt: 'clean beauty serums on marble',
   })];
   const d = await buildDossier({ brandName: 'Glowly', kv, fetchImpl: refusingFetch }, { providers });
-  assert.strictEqual(d.heroImage, undefined, 'a dead/rate-limited Openverse leaves heroImage unset');
-  assert.strictEqual(d.catalog[0].image, undefined, 'and leaves each catalog image unset');
-  // imagery is best-effort — the dossier itself still built, never blocked.
+  assert.strictEqual(d.heroImage, undefined, 'no imagery is resolved onto the dossier');
+  assert.strictEqual(d.catalog[0].image, undefined, 'and each catalog image stays unset');
+  // imagery aside, the dossier itself still built, never blocked.
   assert.strictEqual(d.confidence, 'llm');
   assert.strictEqual(d.heroPrompt, 'clean beauty serums on marble');
 });
