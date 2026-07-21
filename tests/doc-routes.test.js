@@ -330,6 +330,28 @@ test('aiDocH: bad pitch id -> 400, unknown pitch -> 404', async () => {
   assert.strictEqual((await api.aiDocH({ pitchId: 'aaaaaa-bbbbbb' })).status, 404);
 });
 
+test('aiDocH: a curated library logo wins the mailer header over the resolved favicon', async () => {
+  const { api } = await freshApi();
+  const { brandId, pitchId } = await seedPitch(api);
+  // The brand carries a small resolved favicon AND a curated wordmark in the
+  // library. Library-first: the real wordmark must win the header, the same
+  // priority the hero + product tiles already follow. Generalises to any brand.
+  const FAVICON = 'https://cdn.groww.example/favicon.png';
+  const WORDMARK = 'https://cdn.groww.example/wordmark.png';
+  const kit = await api.updateBrandKitH({
+    id: brandId,
+    patch: { logoUrl: FAVICON },
+    images: [{ url: WORDMARK, kind: 'logo' }],
+  });
+  assert.strictEqual(kit.status, 200);
+  assert.strictEqual(kit.json.brand.logo_url, FAVICON, 'the favicon is the resolved brand logo');
+  assert.deepStrictEqual(kit.json.images.map((r) => r.kind), ['logo'], "the wordmark is filed as 'logo', not downgraded");
+  const res = await api.aiDocH({ pitchId });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.doc.brand.logoUrl, WORDMARK,
+    'the curated wordmark wins the header over the resolved favicon');
+});
+
 // ---- the render endpoint end-to-end feeds the save endpoint ------------------
 
 test('a doc rendered by renderDocH can be saved by createDocExampleH (editor round-trip)', async () => {

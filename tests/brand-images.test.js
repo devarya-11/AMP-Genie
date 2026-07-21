@@ -40,6 +40,11 @@ test('cleanBrandImageRow requires an http(s) url and files unknown kind/source u
   assert.deepStrictEqual(
     cleanBrandImageRow({ image: PROD, kind: 'product', source: 'upload' }),
     { url: PROD, kind: 'product', source: 'upload', alt: null });
+  // 'logo' is on the allowlist — a curated wordmark keeps its kind (it wins the
+  // mailer header over the resolved favicon), it is NOT downgraded to 'other'
+  assert.deepStrictEqual(
+    cleanBrandImageRow({ url: HERO, kind: 'logo' }),
+    { url: HERO, kind: 'logo', source: 'manual', alt: null });
   // rejections: no url, non-http url, non-object
   assert.strictEqual(cleanBrandImageRow({ kind: 'hero' }), null);
   assert.strictEqual(cleanBrandImageRow({ url: 'ftp://x/y.jpg' }), null);

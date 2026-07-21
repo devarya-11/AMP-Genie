@@ -696,6 +696,14 @@
   //      kind='product' pictures take the tiles by position. Managed whole-list
   //      through POST /kit { images }, exactly the way products are.
   function brandImages() { return (S.brand && Array.isArray(S.brand.images)) ? S.brand.images : []; }
+  // A curated 'logo' picture (the brand's real wordmark) beats the small favicon
+  // research resolves into S.brand.logo_url. Mirrors the server's library-first
+  // curatedImagePicks so the editor header matches what /generate + ai-doc paint.
+  // Generalises to any brand: it's a structural kind match, never brand-keyed.
+  function curatedLogo() {
+    const row = brandImages().find((im) => im && im.kind === 'logo' && (im.url || im.image));
+    return row ? (row.url || row.image) : null;
+  }
   // Project the current library back to the wire shape the whole-list save
   // expects; the server re-sanitises every row (cleanBrandImageRow).
   function brandImagesWire(list) {
@@ -898,7 +906,7 @@
   // backend v1 static set exactly.
   const BLOCK_TYPES = [
     { type: 'header',   label: 'Header',   glyph: 'H',
-      make: () => ({ brandName: (S.brand && S.brand.name) || 'Brand', logoUrl: (S.brand && S.brand.logo_url) || '', link: '' }),
+      make: () => ({ brandName: (S.brand && S.brand.name) || 'Brand', logoUrl: curatedLogo() || (S.brand && S.brand.logo_url) || '', link: '' }),
       summary: (p) => p.brandName || 'Header' },
     { type: 'hero',     label: 'Hero image', glyph: '▦',
       make: () => ({ imageUrl: (S.brand && S.brand.hero_url) || '', alt: '', height: 240 }),
@@ -982,7 +990,7 @@
     const brand = S.brand ? {
       name: S.brand.name,
       primaryHex: S.brand.primary_hex || undefined,
-      logoUrl: S.brand.logo_url || undefined,
+      logoUrl: curatedLogo() || S.brand.logo_url || undefined,
       // Carry the brand's real hero photo and site so an interactive module
       // paints the hero band (not a placeholder) and links its logo to the real
       // domain. Dropped before, which is why blank-canvas modules rendered

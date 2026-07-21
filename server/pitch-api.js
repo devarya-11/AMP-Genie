@@ -172,10 +172,14 @@ function heroFromDossier(dossier, liveHeroUrl) {
 function curatedImagePicks(images) {
   const rows = Array.isArray(images) ? images : [];
   const hero = rows.find((r) => r && r.kind === 'hero' && typeof r.url === 'string' && r.url);
+  // A curated 'logo' is the brand's real wordmark — it wins the mailer header
+  // over the small favicon research resolves (brand.logo_url). Same structural,
+  // never brand-keyed selection as hero/product, so it generalises to any brand.
+  const logo = rows.find((r) => r && r.kind === 'logo' && typeof r.url === 'string' && r.url);
   const products = rows
     .filter((r) => r && r.kind === 'product' && typeof r.url === 'string' && r.url)
     .map((r) => r.url);
-  return { hero: hero ? hero.url : null, products };
+  return { hero: hero ? hero.url : null, logo: logo ? logo.url : null, products };
 }
 
 // The serving path for a byte-stored (R2/KV) upload, absolutised against the
@@ -585,8 +589,9 @@ function createPitchApi(ctx = {}) {
       slug: brand.slug,
       name: brand.name,
       ...(brand.primary_hex ? { primary: brand.primary_hex } : {}),
-      logoUrl: brand.logo_url || undefined,
-      heroUrl: brand.hero_url || undefined,
+      // Library-first: a curated logo (real wordmark) beats the resolved favicon.
+      logoUrl: picks.logo || brand.logo_url || undefined,
+      heroUrl: picks.hero || brand.hero_url || undefined,
       site: brand.site || undefined,
       voiceSample: brand.voice_sample || undefined,
       source: 'genie2',
@@ -979,7 +984,10 @@ function createPitchApi(ctx = {}) {
       brand: {
         name: brand.name,
         primaryHex: brand.primary_hex || undefined,
-        logoUrl: brand.logo_url || undefined,
+        // A curated library logo (a real wordmark) wins the mailer header over
+        // the small favicon research resolved into brand.logo_url — same
+        // library-first priority the hero + product tiles already follow.
+        logoUrl: picks.logo || brand.logo_url || undefined,
         // The brand's real hero + vertical: doc-ai paints them into any hero/
         // image block instead of a placeholder tile. Omitted before, which is
         // why AI-drafted docs opened on a bland coloured rectangle.

@@ -392,23 +392,26 @@ test('createExample defaults: no title names the example after its module; an ex
 
 // ---- the curated library: the TOP rung of the image ladder ------------------------
 
-test('curatedImagePicks: a kind=hero row wins the header, kind=product rows win tiles by position', () => {
+test('curatedImagePicks: a kind=hero row wins the header, a kind=logo row wins the wordmark, kind=product rows win tiles by position', () => {
   // empty / junk -> nothing picked, so every rung below is left untouched
-  assert.deepStrictEqual(curatedImagePicks(null), { hero: null, products: [] });
-  assert.deepStrictEqual(curatedImagePicks([]), { hero: null, products: [] });
+  assert.deepStrictEqual(curatedImagePicks(null), { hero: null, logo: null, products: [] });
+  assert.deepStrictEqual(curatedImagePicks([]), { hero: null, logo: null, products: [] });
   assert.deepStrictEqual(
     curatedImagePicks([{ kind: 'other', url: 'https://cdn/misc.jpg' }]),
-    { hero: null, products: [] }, "an 'other' picture steers neither slot");
-  // the FIRST hero by list order wins; product urls come out in list order
+    { hero: null, logo: null, products: [] }, "an 'other' picture steers no slot");
+  // the FIRST hero/logo by list order wins; product urls come out in list order
   const picks = curatedImagePicks([
     { kind: 'product', url: 'https://cdn/p1.jpg' },
     { kind: 'hero', url: 'https://cdn/hero-a.jpg' },
     { kind: 'hero', url: 'https://cdn/hero-b.jpg' },  // a second hero never displaces the first
+    { kind: 'logo', url: 'https://cdn/logo-a.png' },
+    { kind: 'logo', url: 'https://cdn/logo-b.png' },  // a second logo never displaces the first
     { kind: 'product', url: 'https://cdn/p2.jpg' },
     { kind: 'other', url: 'https://cdn/misc.jpg' },   // 'other' is library-only, not a tile
     { kind: 'product' },                               // a url-less row is skipped, not a hole
   ]);
-  assert.strictEqual(picks.hero, 'https://cdn/hero-a.jpg', 'the first hero row wins the header');
+  assert.strictEqual(picks.hero, 'https://cdn/hero-a.jpg', 'the first hero row wins the header band');
+  assert.strictEqual(picks.logo, 'https://cdn/logo-a.png', 'the first logo row wins the wordmark');
   assert.deepStrictEqual(picks.products, ['https://cdn/p1.jpg', 'https://cdn/p2.jpg'],
     'product urls come out in order, url-less rows skipped');
 });

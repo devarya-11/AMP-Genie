@@ -246,8 +246,9 @@ async function listProducts(db, brandId) {
 // A brand's OWN pictures — pasted URLs today, R2-uploaded file URLs once that
 // lands — in ONE table so consumers never care which. These sit ABOVE the
 // scraped og:image and the Openverse/loremflickr floors: a curated 'hero'
-// wins the hero slot, curated 'product' rows win the tiles.
-const IMAGE_KINDS = ['hero', 'product', 'other'];
+// wins the hero slot, curated 'product' rows win the tiles, and a curated
+// 'logo' wins the mailer header over the small resolved favicon.
+const IMAGE_KINDS = ['hero', 'product', 'logo', 'other'];
 const IMAGE_SOURCES = ['manual', 'upload'];
 const BRAND_IMAGES_MAX = 24;
 const ALT_MAX = 200;
